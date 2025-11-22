@@ -1,0 +1,20 @@
+# Virtual environments
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Jupyter notebook checkpoints
+.ipynb_checkpoints/
+
+# PyTorch / build / dist
+*.egg-info/
+dist/
+build/
+
+# VS Code settings
+.vscode/
