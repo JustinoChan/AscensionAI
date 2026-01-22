@@ -16,3 +16,9 @@ This project trains a reinforcement learning agent capable of playing **Slay the
 
 ### Status
 Early prototype, environment exploration under development.
+
+### Utilizes
+- Mod the Spire (https://github.com/kiooeht/ModTheSpire)
+- Base Mod (https://github.com/daviscook477/BaseMod)
+- Communication Mod (https://github.com/ForgottenArbiter/CommunicationMod)
+- SpireComm (https://github.com/ForgottenArbiter/spirecomm)
