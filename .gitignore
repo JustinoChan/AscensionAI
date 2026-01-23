@@ -1,24 +1,109 @@
-# Virtual environments
-venv/
-env/
-
-# Python cache
+# =========================
+# Python
+# =========================
 __pycache__/
-*.pyc
+*.py[cod]
 *.pyo
 *.pyd
-
-# Jupyter notebook checkpoints
-.ipynb_checkpoints/
-
-# PyTorch / build / dist
+*.so
 *.egg-info/
+.eggs/
+*.egg
 dist/
 build/
+pip-wheel-metadata/
+*.whl
 
-# VS Code settings
+# =========================
+# Virtual Environments
+# =========================
+.venv/
+venv/
+ENV/
+env/
+
+# =========================
+# Python tooling
+# =========================
+.pytest_cache/
+.mypy_cache/
+.pytype/
+.coverage
+htmlcov/
+.cache/
+.ipynb_checkpoints/
+
+# =========================
+# Jupyter
+# =========================
+.ipynb_checkpoints/
+notebooks/.ipynb_checkpoints/
+
+# =========================
+# Logs / outputs
+# =========================
+logs/
+runs/
+wandb/
+tensorboard/
+*.log
+
+# =========================
+# Model artifacts
+# =========================
+checkpoints/
+models/
+weights/
+*.pt
+*.pth
+*.onnx
+
+# =========================
+# Data
+# =========================
+data/
+datasets/
+replays/
+trajectories/
+*.npz
+*.npy
+*.pkl
+
+# =========================
+# OS / Editor
+# =========================
+.DS_Store
+Thumbs.db
+desktop.ini
 .vscode/
+.idea/
+*.swp
+*.swo
 
-# Spirecomm
-Spirecomm/
+# =========================
+# Local config / secrets
+# =========================
+.env
+.env.*
+config.local.yaml
+config.local.json
 
+# =========================
+# External deps (optional)
+# =========================
+external/spirecomm/
+# (comment this out if you WANT spirecomm tracked)
+
+# =========================
+# Slay the Spire local stuff
+# =========================
+SlayTheSpire/
+mods/
+preferences/
+
+# =========================
+# Temporary files
+# =========================
+tmp/
+temp/
+*.tmp
