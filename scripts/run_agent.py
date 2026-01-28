@@ -2,7 +2,7 @@ from datetime import datetime
 import time
 
 from spirecomm.communication.coordinator import Coordinator
-from spirecomm.communication.action import Action
+from spirecomm.communication.action import Action, PlayCardAction, EventOptionAction
 
 LOG_PATH = r"C:\AscensionAI\agent_debug.log"
 
@@ -43,6 +43,33 @@ def on_out_of_game():
 
 def on_state_change(game_state):
     log("STATE RECEIVED")
+    try:
+        if game_state.in_combat and game_state.play_available and game_state.hand:
+            # pick first playable card in hand
+            for card in game_state.hand:
+                if getattr(card, "is_playable", False):
+                    if getattr(card, "has_target", False):
+                        # pick first living monster
+                        living = [m for m in game_state.monsters if not getattr(m, "is_gone", False)]
+                        if living:
+                            target = living[0]
+                            log(f"PLAY {card.name} -> {target.name} (idx={target.monster_index})")
+                            return PlayCardAction(card=card, target_monster=target)
+                        else:
+                            log(f"Wanted to target with {card.name}, but no monsters found")
+                            break
+                    else:
+                        log(f"PLAY {card.name} (no target)")
+                        return PlayCardAction(card=card)
+
+        # nothing to play -> end turn if possible
+        if game_state.in_combat and game_state.end_available:
+            log("END TURN")
+            return Action("end")
+
+    except Exception as e:
+        log(f"PLAY_ACTION_ERROR: {e}")
+
     return send_state_throttled(1.0)
 
 def on_error(err: str):
