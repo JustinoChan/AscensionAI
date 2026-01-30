@@ -2,8 +2,7 @@ from datetime import datetime
 import time
 
 from spirecomm.communication.coordinator import Coordinator
-from spirecomm.communication.action import Action, PlayCardAction, EventOptionAction
-
+from spirecomm.communication.action import Action, PlayCardAction, EventOptionAction, ChooseAction
 LOG_PATH = r"C:\AscensionAI\agent_debug.log"
 
 def log(msg: str):
@@ -42,8 +41,24 @@ def on_out_of_game():
     return send_state_throttled(1.5)
 
 def on_state_change(game_state):
-    log("STATE RECEIVED")
+    log(f"STATE RECEIVED - Screen: {getattr(game_state, 'screen_type', 'None')}")
     try:
+        
+        # game gets stuck in shop so auto leave for now [SCREEN_TYPE: SHOP]
+        if game_state.screen_type.name == "SHOP_SCREEN":
+            if game_state.cancel_available:
+                return Action("leave")
+        
+        # when available, advances the screen 
+        if game_state.proceed_available:
+            return Action("proceed")
+        
+        # picks first available choice list
+        if game_state.choice_list:
+            log(f"PICKED ({game_state.choice_list[0]})")
+            return ChooseAction(choice_index=0)
+        
+
         if game_state.in_combat and game_state.play_available and game_state.hand:
             # pick first playable card in hand
             for card in game_state.hand:
