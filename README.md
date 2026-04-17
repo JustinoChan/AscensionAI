@@ -81,6 +81,7 @@ The control panel detects your hardware, recommends how many STS instances to ru
 | Mode | What it does |
 |------|-------------|
 | **Parallel Workers** | Multiple STS instances collecting rollouts + offline trainer |
+| **Collect Rollouts (No Training)** | Multiple STS instances that only write `.npz` rollouts — no local training. For collaborators contributing data to someone else's trainer. |
 | **Single-Instance Training** | One STS instance running PPO training |
 | **BC → PPO (End-to-End)** | Behavior cloning warm-start then PPO fine-tuning in one session |
 | **Behavior Cloning** | Heuristic plays 50 games, network learns to imitate |
@@ -92,6 +93,16 @@ The control panel detects your hardware, recommends how many STS instances to ru
 1. **BC → PPO** — select "BC → PPO (End-to-End)" mode and click Start. The heuristic plays 50 games, the network imitates, then PPO fine-tunes for 200 games with entropy annealing.
 2. **Parallel Workers** — once you have a baseline model, switch to "Parallel Workers" for faster training. Multiple STS instances collect experience while an offline trainer updates the model.
 3. **Evaluation** — select "Evaluation (Greedy)" to benchmark your model without exploration noise.
+
+### Collaborating — pooling data across multiple machines
+
+Multiple people can contribute rollouts to a single shared model:
+
+1. The **main trainer** sends their current `models/ppo_sts.pt` to each collaborator so everyone plays with the same policy.
+2. **Collaborators** open the Control Panel, select **"Collect Rollouts (No Training)"**, and run some sessions. Rollouts accumulate in `rollouts_shared/` and are never consumed locally.
+3. When done, collaborators zip their `rollouts_shared/` folder and send it to the main trainer.
+4. The **main trainer** extracts the zip into their own `rollouts_shared/` (files merge cleanly — filenames embed a Unix timestamp so no collisions) and runs any training mode. The offline trainer consumes every `.npz` regardless of origin.
+5. The updated `.pt` is shared back for the next round.
 
 ## Command-Line Alternative
 

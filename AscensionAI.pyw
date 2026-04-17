@@ -47,6 +47,7 @@ CONFIG_FILE = CONFIG_DIR / "config.properties"
 
 MODES = {
     "Parallel Workers": "worker",
+    "Collect Rollouts (No Training)": "collect",
     "Single-Instance Training": "train",
     "BC \u2192 PPO (End-to-End)": "bc_ppo",
     "Behavior Cloning": "bc",
@@ -57,6 +58,7 @@ MODES = {
 # (label_text, min, max, default) — None label = spinner hidden for that mode
 SPINNER_CONFIG = {
     "worker":  ("Workers:", 1, 8, None),
+    "collect": ("Workers:", 1, 8, None),
     "train":   (None, 0, 0, 0),
     "bc_ppo":  ("BC Games:", 10, 200, 50),
     "bc":      (None, 0, 0, 0),
@@ -355,7 +357,7 @@ class AscensionApp:
             self.spin_plus.configure(state="normal")
             if default is not None:
                 self.workers_var.set(default)
-            elif mode == "worker":
+            elif mode in ("worker", "collect"):
                 self.workers_var.set(self.hw["recommended_workers"])
         else:
             self.spinner_label_var.set("")
@@ -520,6 +522,12 @@ class AscensionApp:
             (ROOT / "rollouts_shared").mkdir(exist_ok=True)
             self.status_var.set(f"Launching {n} workers + trainer...")
             threading.Thread(target=self._launch_parallel, args=(n,), daemon=True).start()
+        elif mode == "collect":
+            (ROOT / "rollouts_shared").mkdir(exist_ok=True)
+            self.status_var.set(f"Launching {n} collectors (no trainer)...")
+            threading.Thread(target=self._launch_parallel,
+                             args=(n,), kwargs={"with_trainer": False},
+                             daemon=True).start()
         elif mode == "train":
             self.status_var.set("Launching single-instance training...")
             threading.Thread(target=self._launch_single, args=("train",), daemon=True).start()
@@ -582,7 +590,7 @@ class AscensionApp:
         self._append_log(tab_name, "Timed out waiting for worker to be ready.")
         return False
 
-    def _launch_parallel(self, n_workers: int):
+    def _launch_parallel(self, n_workers: int, with_trainer: bool = True):
         # Clear stale worker logs so we don't match old "Signaling ready" lines
         for i in range(1, n_workers + 1):
             log_file = ROOT / f"worker_{i}_debug.log"
@@ -592,27 +600,33 @@ class AscensionApp:
             except OSError:
                 pass
 
-        # Start offline trainer first
-        self._append_log("All", "Starting offline trainer...")
-        self.root.after(0, lambda: self._add_log_tab("Trainer"))
-        time.sleep(0.1)
+        if with_trainer:
+            # Start offline trainer first
+            self._append_log("All", "Starting offline trainer...")
+            self.root.after(0, lambda: self._add_log_tab("Trainer"))
+            time.sleep(0.1)
 
-        trainer_cmd = [
-            str(VENV_PYTHON), str(SCRIPTS / "train_offline.py"),
-            "--model", str(ROOT / "models" / "ppo_sts.pt"),
-            "--data", str(ROOT / "rollouts_shared"),
-            "--delete-consumed",
-        ]
-        self.trainer_proc = subprocess.Popen(
-            trainer_cmd, cwd=str(ROOT),
-            creationflags=subprocess.CREATE_NO_WINDOW,
-        )
-        self._append_log("Trainer", f"Offline trainer started (PID {self.trainer_proc.pid})")
+            trainer_cmd = [
+                str(VENV_PYTHON), str(SCRIPTS / "train_offline.py"),
+                "--model", str(ROOT / "models" / "ppo_sts.pt"),
+                "--data", str(ROOT / "rollouts_shared"),
+                "--delete-consumed",
+            ]
+            self.trainer_proc = subprocess.Popen(
+                trainer_cmd, cwd=str(ROOT),
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            self._append_log("Trainer", f"Offline trainer started (PID {self.trainer_proc.pid})")
 
-        tailer = LogTailer(ROOT / "train_offline_debug.log",
-                           lambda line: self._append_log("Trainer", line))
-        tailer.start()
-        self.tailers.append(tailer)
+            tailer = LogTailer(ROOT / "train_offline_debug.log",
+                               lambda line: self._append_log("Trainer", line))
+            tailer.start()
+            self.tailers.append(tailer)
+        else:
+            self._append_log("All",
+                "Collect-only mode: no local trainer. "
+                "Rollouts will accumulate in rollouts_shared/ — "
+                "zip and send to the trainer when done.")
 
         # Launch workers one at a time, waiting for each to be ready
         # before writing the next config
@@ -647,8 +661,9 @@ class AscensionApp:
                 self._wait_for_ready(log_file, tab_name, timeout=120)
 
         if self.running:
+            suffix = "workers + trainer" if with_trainer else "collectors (no trainer)"
             self.root.after(0, lambda: self.status_var.set(
-                f"Running ({n_workers} workers + trainer)"))
+                f"Running ({n_workers} {suffix})"))
 
     def _graceful_stop(self):
         """Wait for all current games to finish, save transitions, then stop."""
