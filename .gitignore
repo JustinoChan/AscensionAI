@@ -1,6 +1,4 @@
-# =========================
 # Python
-# =========================
 __pycache__/
 *.py[cod]
 *.pyo
@@ -11,67 +9,40 @@ __pycache__/
 *.egg
 dist/
 build/
-pip-wheel-metadata/
 *.whl
 
-# =========================
-# Virtual Environments
-# =========================
+# Virtual environments
 .venv/
 venv/
-ENV/
 env/
 
-# =========================
 # Python tooling
-# =========================
 .pytest_cache/
 .mypy_cache/
 .pytype/
 .coverage
 htmlcov/
-.cache/
-.ipynb_checkpoints/
 
-# =========================
-# Jupyter
-# =========================
-.ipynb_checkpoints/
-notebooks/.ipynb_checkpoints/
-
-# =========================
-# Logs / outputs
-# =========================
+# Logs
 logs/
 runs/
 wandb/
-tensorboard/
 *.log
 
-# =========================
-# Model artifacts
-# =========================
-checkpoints/
+# Model checkpoints
 models/
-weights/
 *.pt
 *.pth
 *.onnx
 
-# =========================
-# Data
-# =========================
-data/
-datasets/
-replays/
-trajectories/
+# Training data & rollouts
+rollouts_shared/
+*.jsonl
 *.npz
 *.npy
 *.pkl
 
-# =========================
 # OS / Editor
-# =========================
 .DS_Store
 Thumbs.db
 desktop.ini
@@ -80,35 +51,12 @@ desktop.ini
 *.swp
 *.swo
 
-# =========================
-# Local config / secrets
-# =========================
+# Local config
 .env
 .env.*
-config.local.yaml
-config.local.json
 
-# =========================
-# External deps (optional)
-# =========================
-external/spirecomm/
-# (comment this out if you WANT spirecomm tracked)
 
-# =========================
-# Slay the Spire local stuff
-# =========================
-SlayTheSpire/
-mods/
-preferences/
-
-# =========================
-# Temporary files
-# =========================
+# Temporary
 tmp/
 temp/
 *.tmp
-
-# =========================
-# Rollouts
-# =========================
-*.jsonl

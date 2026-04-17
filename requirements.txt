@@ -1,7 +1,4 @@
-numpy
-torch
-gymnasium
-tqdm
-rich
-tensorboard
-pyyaml
+numpy>=2.0
+torch>=2.0
+gymnasium>=1.0
+psutil>=5.9
