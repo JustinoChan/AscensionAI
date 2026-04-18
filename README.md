@@ -41,9 +41,10 @@ This means the agent doesn't need thousands of games to rediscover that Gremlin 
 2. **Mod the Spire** — [GitHub](https://github.com/kiooeht/ModTheSpire)
 3. **BaseMod** — [GitHub](https://github.com/daviscook477/BaseMod)
 4. **Communication Mod** — [GitHub](https://github.com/ForgottenArbiter/CommunicationMod)
-5. **Python 3.10+**
+5. **Super Fast Mode** (recommended) — [GitHub](https://github.com/Skrelpoid/SuperFastMode) — raises the in-game speed cap well beyond vanilla Fast Mode
+6. **Python 3.10+**
 
-Enable **Fast Mode** in STS game settings for faster training (Settings → Fast Mode ON).
+Enable **Fast Mode** in STS game settings (Settings → Fast Mode ON). If you install Super Fast Mode, push the speed slider to 200%+ in its mod config — this alone can 2-3× training throughput on top of Fast Mode.
 
 ## Installation
 
@@ -103,6 +104,32 @@ Multiple people can contribute rollouts to a single shared model:
 3. When done, collaborators zip their `rollouts_shared/` folder and send it to the main trainer.
 4. The **main trainer** extracts the zip into their own `rollouts_shared/` (files merge cleanly — filenames embed a Unix timestamp so no collisions) and runs any training mode. The offline trainer consumes every `.npz` regardless of origin.
 5. The updated `.pt` is shared back for the next round.
+
+## Optimizing Training Speed
+
+Training an RL agent on Slay the Spire is compute-bound by real-time game simulation — each game takes minutes, and PPO typically needs thousands of games to converge. The project ships with several optimizations; here's how to get the most out of your setup:
+
+### In-game speedups (biggest wins)
+
+- **Fast Mode** (Settings → Fast Mode ON) — skips most combat animations.
+- **Super Fast Mode** mod — [github.com/Skrelpoid/SuperFastMode](https://github.com/Skrelpoid/SuperFastMode) — adds a game-speed slider. Running at 200–250% stacks on top of Fast Mode for a 2-3× throughput gain.
+- **Minimize the STS windows** during training — the engine often runs faster when it doesn't have to render.
+
+### Training hyperparameters (already applied by default)
+
+- **Batched PPO updates** — the trainer accumulates 4 games of transitions per gradient update (`--games-per-update 4`). Larger batches mean less noisy gradients and less time spent blocked on updates. Raise to `8` if you have plenty of memory; drop to `2` for faster feedback during debugging.
+- **4 PPO epochs per update** — down from a conservative 10. Each update trains ~2.5× faster with minimal quality loss.
+- **Entropy annealing** (0.05 → 0.01) shifts the policy from exploration to exploitation automatically over training.
+
+### Scaling with hardware
+
+- **Parallel Workers** — the Control Panel auto-detects RAM/CPU and recommends a worker count. If CPU usage stays under 70% during training, bump workers manually for roughly linear throughput.
+- **Multiple machines** — see the Collaborating section. A secondary machine running "Collect Rollouts (No Training)" adds rollout data at zero cost to the main trainer's responsiveness.
+
+### What's NOT worth optimizing
+
+- **A GPU is unnecessary** — the policy/value network is a tiny 256×256 MLP; CPU inference is fast. The code explicitly disables CUDA.
+- **STS graphics settings** — animations are the bottleneck, not rendering quality. Leave graphics on whatever is stable.
 
 ## Command-Line Alternative
 

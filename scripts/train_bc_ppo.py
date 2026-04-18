@@ -152,6 +152,7 @@ class BCPPOAgent:
         ent_end: float = 0.01,
         clip_range: float = 0.15,
         resume_path: Optional[str] = None,
+        games_per_update: int = 4,
     ):
         self.bc_games = bc_games
         self.ppo_games = ppo_games
@@ -163,6 +164,9 @@ class BCPPOAgent:
         self.ent_start = ent_start
         self.ent_end = ent_end
         self.clip_range = clip_range
+        self.games_per_update = games_per_update
+        self.games_since_update = 0
+        self._game_start_buf_len = 0
 
         # --- Phase control ---
         self.phase = self.PHASE_PPO if resume_path else self.PHASE_BC
@@ -181,7 +185,7 @@ class BCPPOAgent:
                 obs_size=OBS_SIZE, n_actions=NUM_ACTIONS, device="cpu",
                 lr=ppo_lr, gamma=0.995, gae_lambda=0.95,
                 clip_range=clip_range, ent_coef=ent_start, vf_coef=0.5,
-                n_epochs=10, batch_size=64, net_arch=(256, 256),
+                n_epochs=4, batch_size=64, net_arch=(256, 256),
             )
             self.trainer.load(resume_path)
             log(f"Resumed from {resume_path} (updates={self.trainer.total_updates})")
@@ -318,7 +322,7 @@ class BCPPOAgent:
             obs_size=OBS_SIZE, n_actions=NUM_ACTIONS, device="cpu",
             lr=self.bc_lr, gamma=0.995, gae_lambda=0.95,
             clip_range=self.clip_range, ent_coef=self.ent_start, vf_coef=0.5,
-            n_epochs=10, batch_size=64, net_arch=(256, 256),
+            n_epochs=4, batch_size=64, net_arch=(256, 256),
         )
 
         if n >= 50:
@@ -432,6 +436,7 @@ class BCPPOAgent:
             self.ppo_initialized = True
             self.prev_obs = obs
             self.prev_mask = mask
+            self._game_start_buf_len = len(self.buffer)
             log(f"PPO game #{self.ppo_games_done + 1} started, "
                 f"floor={getattr(gs, 'floor', '?')} "
                 f"ent_coef={self.trainer.ent_coef:.4f}")
@@ -568,21 +573,28 @@ class BCPPOAgent:
         return None  # choices available — RL decides
 
     def _end_ppo_game(self, gs, victory: bool):
-        """PPO update, entropy annealing, stats logging, model save."""
+        """PPO update (every N games), entropy annealing, stats, model save."""
         self.ppo_games_done += 1
         self.total_games += 1
-        n_transitions = len(self.buffer)
-        log(f"PPO game #{self.ppo_games_done} ended: {n_transitions} transitions, "
+        self.games_since_update += 1
+        n_this_game = len(self.buffer) - self._game_start_buf_len
+        n_buffered = len(self.buffer)
+        log(f"PPO game #{self.ppo_games_done} ended: {n_this_game} this game "
+            f"({n_buffered} buffered, {self.games_since_update}/{self.games_per_update}), "
             f"reward={self.episode_reward:.2f}, victory={victory}")
 
-        # PPO update
+        # PPO update only when we've accumulated enough games
         stats: dict = {}
-        if n_transitions >= 10:
+        do_update = (self.games_since_update >= self.games_per_update
+                     and n_buffered >= 10)
+        if do_update:
             stats = self.trainer.update(self.buffer) or {}
             if stats:
                 log(f"  PPO update #{self.trainer.total_updates}: "
                     f"pg={stats['pg_loss']:.4f} vf={stats['vf_loss']:.4f} "
-                    f"ent={stats['entropy']:.4f}")
+                    f"ent={stats['entropy']:.4f} transitions={n_buffered}")
+            self.buffer.clear()
+            self.games_since_update = 0
 
         # Entropy annealing: linear decay from ent_start to ent_end
         if self.ppo_games > 0:
@@ -599,7 +611,7 @@ class BCPPOAgent:
             "game": self.total_games,
             "total_updates": self.trainer.total_updates,
             "steps": self.ppo_steps,
-            "transitions": n_transitions,
+            "transitions": n_this_game,
             "total_reward": round(self.episode_reward, 4),
             "final_hp": int(getattr(gs, "current_hp", 0) or 0),
             "final_max_hp": int(getattr(gs, "max_hp", 0) or 0),
@@ -619,8 +631,8 @@ class BCPPOAgent:
             log(f"  Model saved to {self.save_path} "
                 f"(ent_coef={new_ent:.4f})")
 
-        # Reset per-game state
-        self.buffer.clear()
+        # Reset per-game state (buffer persists across games until the update
+        # threshold is hit above, then cleared there)
         self.episode_reward = 0.0
         self.pending_reward = 0.0
         self.prev_obs = None
@@ -676,6 +688,8 @@ def main():
                      help="Save every N PPO games (default: 5)")
     gen.add_argument("--resume", type=str, default=None,
                      help="Resume from checkpoint (skips BC phase)")
+    gen.add_argument("--games-per-update", type=int, default=4,
+                     help="Accumulate N games of PPO transitions per update (default: 4)")
 
     args = parser.parse_args()
 
@@ -701,6 +715,7 @@ def main():
         ent_end=args.ent_end,
         clip_range=args.clip,
         resume_path=resume_path,
+        games_per_update=args.games_per_update,
     )
 
     log("Setting up Coordinator...")

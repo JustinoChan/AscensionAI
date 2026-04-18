@@ -733,6 +733,23 @@ class AscensionApp:
 
         self.root.after(0, self._stop)
 
+    def _kill_process_tree(self, pid: int) -> bool:
+        """Forcefully close a Windows process and all its descendants.
+
+        Java GUI apps like STS often ignore proc.terminate(), and
+        mts-launcher.jar spawns child Java processes that the parent
+        handle doesn't cover. taskkill /F /T walks the whole tree.
+        """
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/T", "/PID", str(pid)],
+                timeout=10, capture_output=True,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            return True
+        except Exception:
+            return False
+
     def _stop(self):
         self.running = False
         self._graceful_stopping = False
@@ -752,12 +769,13 @@ class AscensionApp:
                 self.trainer_proc.kill()
         self.trainer_proc = None
 
+        closed = 0
         for proc in self.processes:
             if proc.poll() is None:
-                try:
-                    proc.terminate()
-                except Exception:
-                    pass
+                if self._kill_process_tree(proc.pid):
+                    closed += 1
+        if closed:
+            self._append_log("All", f"Closed {closed} Slay the Spire instance(s).")
         self.processes.clear()
 
         self.start_btn.configure(state="normal")

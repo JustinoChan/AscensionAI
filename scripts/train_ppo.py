@@ -108,16 +108,20 @@ log("Imports done")
 class PPOAgent:
     """Plays STS using PPO policy, collects transitions, trains between games."""
 
-    def __init__(self, trainer: PPOTrainer, save_path: str, save_every: int = 5):
+    def __init__(self, trainer: PPOTrainer, save_path: str, save_every: int = 5,
+                 games_per_update: int = 4):
         self.trainer = trainer
         self.save_path = save_path
         self.save_every = save_every
+        self.games_per_update = games_per_update
 
         self.buffer = GameBuffer()
         self.reward_tracker = RewardTracker()
 
         self.total_games = 0
         self.total_steps = 0
+        self.games_since_update = 0
+        self._game_start_buf_len = 0
         self.prev_obs: Optional[np.ndarray] = None
         self.prev_action: Optional[int] = None
         self.prev_log_prob: Optional[float] = None
@@ -162,6 +166,7 @@ class PPOAgent:
             self.initialized = True
             self.prev_obs = obs
             self.prev_mask = mask
+            self._game_start_buf_len = len(self.buffer)
             log(f"Game #{self.total_games + 1} started, floor={getattr(gs, 'floor', '?')}")
 
         # Compute reward for the previous action
@@ -314,22 +319,31 @@ class PPOAgent:
 
     def _end_game(self, final_gs=None, victory: bool = False):
         self.total_games += 1
-        n_transitions = len(self.buffer)
-        log(f"Game #{self.total_games} ended: {n_transitions} steps, reward={self.episode_reward:.2f}")
+        self.games_since_update += 1
+        n_this_game = len(self.buffer) - self._game_start_buf_len
+        n_buffered = len(self.buffer)
+        log(f"Game #{self.total_games} ended: {n_this_game} transitions this game "
+            f"({n_buffered} buffered, {self.games_since_update}/{self.games_per_update}), "
+            f"reward={self.episode_reward:.2f}")
 
         stats: dict = {}
-        if n_transitions >= 10:
+        do_update = (self.games_since_update >= self.games_per_update
+                     and n_buffered >= 10)
+        if do_update:
             stats = self.trainer.update(self.buffer) or {}
             if stats:
                 log(f"  PPO update #{self.trainer.total_updates}: "
-                    f"pg={stats['pg_loss']:.4f} vf={stats['vf_loss']:.4f} ent={stats['entropy']:.4f}")
+                    f"pg={stats['pg_loss']:.4f} vf={stats['vf_loss']:.4f} "
+                    f"ent={stats['entropy']:.4f} transitions={n_buffered}")
+            self.buffer.clear()
+            self.games_since_update = 0
 
         row = {
             "timestamp": datetime.now().isoformat(),
             "game": self.total_games,
             "total_updates": self.trainer.total_updates,
             "steps": self.total_steps,
-            "transitions": n_transitions,
+            "transitions": n_this_game,
             "total_reward": round(self.episode_reward, 4),
             "final_hp": int(getattr(final_gs, "current_hp", 0) or 0) if final_gs is not None else "",
             "final_max_hp": int(getattr(final_gs, "max_hp", 0) or 0) if final_gs is not None else "",
@@ -346,8 +360,8 @@ class PPOAgent:
         if self.total_games % self.save_every == 0:
             self.trainer.save(self.save_path)
 
-        # Reset for next game
-        self.buffer.clear()
+        # Reset for next game (buffer persists across games until the update
+        # threshold is hit above, then cleared there)
         self.episode_reward = 0.0
         self.pending_reward = 0.0
         self.prev_obs = None
@@ -378,6 +392,8 @@ def main():
     parser.add_argument("--resume", type=str, default=None)
     parser.add_argument("--save-every", type=int, default=5,
                         help="Save model every N games")
+    parser.add_argument("--games-per-update", type=int, default=4,
+                        help="Accumulate N games of transitions per PPO update (default: 4)")
     args = parser.parse_args()
 
     save_path = os.path.join(_root, args.save)
@@ -394,7 +410,7 @@ def main():
         clip_range=0.2,
         ent_coef=0.05,
         vf_coef=0.5,
-        n_epochs=10,
+        n_epochs=4,
         batch_size=64,
         net_arch=(256, 256),
     )
@@ -404,7 +420,8 @@ def main():
         trainer.load(resume_path)
 
     log("Creating agent...")
-    agent = PPOAgent(trainer, save_path, save_every=args.save_every)
+    agent = PPOAgent(trainer, save_path, save_every=args.save_every,
+                     games_per_update=args.games_per_update)
 
     log("Setting up Coordinator...")
     coord = Coordinator()

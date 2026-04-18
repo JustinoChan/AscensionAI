@@ -49,7 +49,7 @@ class PPOTrainer:
     def __init__(self, obs_size: int, n_actions: int, device: str = "cpu",
                  lr: float = 3e-4, gamma: float = 0.995, gae_lambda: float = 0.95,
                  clip_range: float = 0.2, ent_coef: float = 0.05, vf_coef: float = 0.5,
-                 max_grad_norm: float = 0.5, n_epochs: int = 10, batch_size: int = 64,
+                 max_grad_norm: float = 0.5, n_epochs: int = 4, batch_size: int = 64,
                  net_arch: tuple = (256, 256)):
         self.device = torch.device(device)
         self.gamma = gamma

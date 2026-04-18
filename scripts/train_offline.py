@@ -98,7 +98,7 @@ def main():
     parser.add_argument("--delete-consumed", action="store_true",
                         help="Delete .npz files after training on them")
     parser.add_argument("--lr", type=float, default=3e-4)
-    parser.add_argument("--epochs", type=int, default=10)
+    parser.add_argument("--epochs", type=int, default=4)
     parser.add_argument("--batch-size", type=int, default=64)
     args = parser.parse_args()
 
