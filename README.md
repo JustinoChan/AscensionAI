@@ -254,5 +254,6 @@ AscensionAI/
 - [Mod the Spire](https://github.com/kiooeht/ModTheSpire)
 - [BaseMod](https://github.com/daviscook477/BaseMod)
 - [Communication Mod](https://github.com/ForgottenArbiter/CommunicationMod)
+- [Super Fast Mode](https://github.com/Skrelpoid/SuperFastMode)
 - [SpireComm](https://github.com/ForgottenArbiter/spirecomm)
 - Monster data sourced from [Spire Archive](https://www.spire-archive.com)
