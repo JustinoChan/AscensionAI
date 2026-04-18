@@ -736,19 +736,58 @@ class AscensionApp:
     def _kill_process_tree(self, pid: int) -> bool:
         """Forcefully close a Windows process and all its descendants.
 
-        Java GUI apps like STS often ignore proc.terminate(), and
-        mts-launcher.jar spawns child Java processes that the parent
-        handle doesn't cover. taskkill /F /T walks the whole tree.
+        taskkill /F /T walks the whole tree, but only works while the
+        target PID is still alive — see _kill_orphan_sts_instances for
+        the case where the launcher has already exited.
         """
         try:
-            subprocess.run(
+            result = subprocess.run(
                 ["taskkill", "/F", "/T", "/PID", str(pid)],
                 timeout=10, capture_output=True,
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
-            return True
+            return result.returncode == 0
         except Exception:
             return False
+
+    def _kill_orphan_sts_instances(self) -> int:
+        """Sweep for STS java.exe processes our Popen handles no longer cover.
+
+        mts-launcher.jar is a small mod-selector GUI: when the user clicks
+        'Play' it spawns the real STS JVM and exits. So our launcher PID
+        dies before STS does, and taskkill on the dead launcher PID kills
+        nothing. This finds any java.exe whose cwd is the STS install dir
+        or whose cmdline references STS / ModTheSpire jars and kills them.
+        """
+        try:
+            import psutil
+        except ImportError:
+            return 0
+
+        killed = 0
+        sts_dir_lower = str(STS_DIR).lower()
+        sts_keywords = ("slaythespire", "desktop-1.0.jar",
+                        "mts-launcher", "modthespire")
+
+        for p in psutil.process_iter(["pid", "name", "cwd", "cmdline"]):
+            try:
+                name = (p.info.get("name") or "").lower()
+                if name not in ("java.exe", "javaw.exe"):
+                    continue
+
+                cwd = (p.info.get("cwd") or "").lower()
+                cmdline = " ".join(p.info.get("cmdline") or []).lower()
+
+                if (sts_dir_lower in cwd
+                        or any(kw in cmdline for kw in sts_keywords)):
+                    p.kill()
+                    killed += 1
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                pass
+            except Exception:
+                pass
+
+        return killed
 
     def _stop(self):
         self.running = False
@@ -774,9 +813,13 @@ class AscensionApp:
             if proc.poll() is None:
                 if self._kill_process_tree(proc.pid):
                     closed += 1
+        self.processes.clear()
+
+        # mts-launcher exits after spawning STS, so the launcher PID is
+        # often dead by now. Sweep for any orphan STS java processes.
+        closed += self._kill_orphan_sts_instances()
         if closed:
             self._append_log("All", f"Closed {closed} Slay the Spire instance(s).")
-        self.processes.clear()
 
         self.start_btn.configure(state="normal")
         self.stop_btn.configure(state="disabled")
