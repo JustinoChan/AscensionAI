@@ -95,6 +95,15 @@ The control panel detects your hardware, recommends how many STS instances to ru
 2. **Parallel Workers** — once you have a baseline model, switch to "Parallel Workers" for faster training. Multiple STS instances collect experience while an offline trainer updates the model.
 3. **Evaluation** — select "Evaluation (Greedy)" to benchmark your model without exploration noise.
 
+### Stopping a run
+
+The Control Panel offers two ways to stop:
+
+- **Stop Now** — immediately kills the trainer and every STS instance. Use this if something is wrong or you need the machine back fast. In-flight games are discarded.
+- **Finish && Stop** — graceful shutdown. Each worker is closed individually the moment its current game ends, so the first finisher doesn't sit idle waiting for the slowest one. The trainer keeps running until the last worker is done so its data still gets used.
+
+Both buttons also sweep for orphaned `java.exe` processes belonging to STS — the ModTheSpire launcher detaches the real JVM, so a naive `taskkill` on the launcher PID would otherwise leave game windows behind.
+
 ### Collaborating — pooling data across multiple machines
 
 Multiple people can contribute rollouts to a single shared model:

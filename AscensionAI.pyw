@@ -209,6 +209,12 @@ class AscensionApp:
         self.trainer_proc: subprocess.Popen | None = None
         self.tailers: list[LogTailer] = []
         self.running = False
+        # Per-worker process tracking for individual graceful kill.
+        # mts-launcher exits seconds after spawning the real STS JVM, so
+        # we snapshot the spawned java PIDs while the parent link is still
+        # alive — otherwise we can't tell which orphan java belongs to whom.
+        self.worker_launcher_pids: dict[int, int] = {}
+        self.worker_sts_pids: dict[int, set[int]] = {}
 
         self.hw = detect_hardware()
 
@@ -591,6 +597,9 @@ class AscensionApp:
         return False
 
     def _launch_parallel(self, n_workers: int, with_trainer: bool = True):
+        self.worker_launcher_pids.clear()
+        self.worker_sts_pids.clear()
+
         # Clear stale worker logs so we don't match old "Signaling ready" lines
         for i in range(1, n_workers + 1):
             log_file = ROOT / f"worker_{i}_debug.log"
@@ -645,7 +654,15 @@ class AscensionApp:
 
             proc = launch_sts()
             self.processes.append(proc)
+            self.worker_launcher_pids[i] = proc.pid
+            self.worker_sts_pids[i] = set()
             self._append_log(tab_name, f"STS instance launched (PID {proc.pid})")
+
+            threading.Thread(
+                target=self._capture_sts_pids_for_worker,
+                args=(proc.pid, i),
+                daemon=True,
+            ).start()
 
             log_file = ROOT / f"worker_{i}_debug.log"
             tailer = LogTailer(log_file, lambda line, n=tab_name: self._append_log(n, line))
@@ -716,7 +733,16 @@ class AscensionApp:
                         current_ended = text.count(" ended:")
                         if current_ended > baseline_ended:
                             workers_done.add(worker_id)
-                            self._append_log("All", f"Worker {worker_id} finished its game.")
+                            n_killed = self._stop_single_worker(worker_id)
+                            if n_killed:
+                                self._append_log(
+                                    "All",
+                                    f"Worker {worker_id} finished — closed "
+                                    f"{n_killed} process(es).")
+                            else:
+                                self._append_log(
+                                    "All",
+                                    f"Worker {worker_id} finished (no processes to close).")
                             continue
                 except OSError:
                     pass
@@ -727,11 +753,114 @@ class AscensionApp:
             time.sleep(2.0)
 
         if not all_done:
-            self._append_log("All", "Timed out waiting for some games — stopping anyway.")
+            still_running = [w for w in game_counts if w not in workers_done]
+            self._append_log(
+                "All",
+                f"Timed out waiting for workers {still_running} — stopping anyway.")
         else:
             self._append_log("All", "All workers finished their current games.")
 
         self.root.after(0, self._stop)
+
+    def _find_pids_for_worker(self, worker_id: int) -> tuple[set[int], set[int]]:
+        """Return (java_pids, python_pids) belonging to a specific worker.
+
+        Communication Mod spawns the bot script (rollout_worker.py --id N)
+        as a child of the STS JVM. So we find python with --id N in its
+        cmdline and walk up to the parent for that worker's java.exe. This
+        beats trying to track parentage from mts-launcher, which detaches
+        STS and breaks the link.
+        """
+        java_pids: set[int] = set()
+        py_pids: set[int] = set()
+
+        try:
+            import psutil
+        except ImportError:
+            return java_pids, py_pids
+
+        id_token = f"--id {worker_id}"
+        worker_script = "rollout_worker.py"
+
+        for p in psutil.process_iter(["pid", "name", "cmdline", "ppid"]):
+            try:
+                name = (p.info.get("name") or "").lower()
+                if not name.startswith("python"):
+                    continue
+                cmdline = " ".join(p.info.get("cmdline") or [])
+                if worker_script not in cmdline:
+                    continue
+                # cmdline must contain the exact "--id N" so worker 1
+                # doesn't match worker 10/11/etc.
+                tokens = (p.info.get("cmdline") or [])
+                if "--id" not in tokens:
+                    continue
+                try:
+                    if str(tokens[tokens.index("--id") + 1]) != str(worker_id):
+                        continue
+                except (IndexError, ValueError):
+                    continue
+
+                py_pids.add(p.info["pid"])
+                ppid = p.info.get("ppid")
+                if ppid:
+                    try:
+                        parent = psutil.Process(ppid)
+                        if parent.name().lower() in ("java.exe", "javaw.exe"):
+                            java_pids.add(ppid)
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+
+        return java_pids, py_pids
+
+    def _capture_sts_pids_for_worker(self, launcher_pid: int, worker_id: int):
+        """Best-effort snapshot of worker N's STS java PID once it's running.
+
+        We poll until --id N's python child shows up under a java parent,
+        then record that java PID so a later kill is fast and exact.
+        """
+        deadline = time.time() + 180.0
+        while time.time() < deadline and self.running:
+            java_pids, _ = self._find_pids_for_worker(worker_id)
+            if java_pids:
+                self.worker_sts_pids.setdefault(worker_id, set()).update(java_pids)
+                return
+            time.sleep(2.0)
+
+    def _stop_single_worker(self, worker_id: int) -> int:
+        """Kill one worker's STS instance(s) + launcher. Returns count killed."""
+        killed = 0
+
+        # Re-scan at kill time too — handles the case where the capture
+        # thread missed the window (e.g. user took >3min to click Play).
+        java_pids, py_pids = self._find_pids_for_worker(worker_id)
+        java_pids |= self.worker_sts_pids.pop(worker_id, set())
+
+        try:
+            import psutil
+        except ImportError:
+            psutil = None
+
+        if psutil is not None:
+            for pid in java_pids:
+                try:
+                    psutil.Process(pid).kill()
+                    killed += 1
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+            for pid in py_pids:
+                try:
+                    psutil.Process(pid).kill()
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    pass
+
+        launcher_pid = self.worker_launcher_pids.pop(worker_id, None)
+        if launcher_pid and self._kill_process_tree(launcher_pid):
+            killed += 1
+
+        return killed
 
     def _kill_process_tree(self, pid: int) -> bool:
         """Forcefully close a Windows process and all its descendants.
