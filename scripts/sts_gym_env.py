@@ -127,8 +127,25 @@ def compute_action_mask(gs: Any) -> np.ndarray:
             else:
                 mask[_POTION_UNTARGETED_START + k] = True
 
-    for idx in range(min(len(choice_list), MAX_CHOICES)):
-        mask[_CHOOSE_START + idx] = True
+    scr = getattr(gs, "screen", None)
+    screen_type = getattr(gs, "screen_type", None)
+    st_name = getattr(screen_type, "name", "") if screen_type else ""
+
+    # GRID with confirm_up: the card is already selected — only
+    # proceed/cancel are valid, choosing another card would error.
+    grid_confirmed = (st_name == "GRID"
+                      and scr is not None
+                      and getattr(scr, "confirm_up", False))
+
+    if not grid_confirmed:
+        # Combat reward with full potions: skip potion choices — picking
+        # one when slots are full triggers a CommunicationMod error.
+        potions_full = bool(getattr(gs, "are_potions_full", lambda: False)())
+        for idx in range(min(len(choice_list), MAX_CHOICES)):
+            if (st_name == "COMBAT_REWARD" and potions_full
+                    and "potion" in str(choice_list[idx]).lower()):
+                continue
+            mask[_CHOOSE_START + idx] = True
 
     if proceed_avail:
         mask[_PROCEED] = True
@@ -340,9 +357,23 @@ class STSEnv(gym.Env):
         self._current_mask[_NOOP] = True
 
         self.coordinator.register_state_change_callback(self._on_state_change)
+        self.coordinator.register_command_error_callback(self._on_error)
 
     def action_masks(self) -> np.ndarray:
         return self._current_mask
+
+    def _on_error(self, error: str) -> Action:
+        """Called by Coordinator when CommunicationMod returns an error.
+
+        Without this, the coordinator thread would crash on NoneType callback
+        and the env would hang forever.  We just log and re-poll state so the
+        agent can try a different action.
+        """
+        _log(f"COMM ERROR: {error}")
+        if self._action_pending:
+            self._action_pending = False
+            self._step_event.set()
+        return Action("state")
 
     def _on_state_change(self, game_state: Any) -> Action:
         """Called by Coordinator thread on every state update."""
