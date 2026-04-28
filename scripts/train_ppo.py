@@ -48,8 +48,9 @@ import torch
 import gymnasium as gym
 from gymnasium import spaces
 
-DEBUG_LOG = os.path.join(_root, "train_debug.log")
-BUG_DEBUG_LOG = os.path.join(_root, "bug_debug.log")
+os.makedirs(os.path.join(_root, "logs"), exist_ok=True)
+DEBUG_LOG = os.path.join(_root, "logs", "train_debug.log")
+BUG_DEBUG_LOG = os.path.join(_root, "logs", "bug_debug.log")
 STATS_CSV = os.path.join(_root, "logs", "training_stats.csv")
 VERBOSE = os.environ.get("ASCENSION_VERBOSE", "0") == "1"
 

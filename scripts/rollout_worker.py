@@ -58,7 +58,8 @@ VERBOSE = os.environ.get("ASCENSION_VERBOSE", "0") == "1"
 def _init_log(worker_id: str):
     global DEBUG_LOG, _worker_id
     _worker_id = worker_id
-    DEBUG_LOG = os.path.join(_root, f"worker_{worker_id}_debug.log")
+    os.makedirs(os.path.join(_root, "logs"), exist_ok=True)
+    DEBUG_LOG = os.path.join(_root, "logs", f"worker_{worker_id}_debug.log")
 
 def log(msg: str):
     if DEBUG_LOG is None:
@@ -83,7 +84,7 @@ from sts_gym_env import (
 )
 from ppo_model import PPOTrainer
 
-BUG_DEBUG_LOG = os.path.join(_root, "bug_debug.log")
+BUG_DEBUG_LOG = os.path.join(_root, "logs", "bug_debug.log")
 
 def _dump_stuck_state(gs, screen_name: str, worker_id: str, stuck_count: int,
                       recent_actions: list):

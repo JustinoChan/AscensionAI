@@ -51,7 +51,8 @@ from typing import Any, List, Optional, Tuple
 import numpy as np
 import torch
 
-DEBUG_LOG = os.path.join(_root, "bc_debug.log")
+os.makedirs(os.path.join(_root, "logs"), exist_ok=True)
+DEBUG_LOG = os.path.join(_root, "logs", "bc_debug.log")
 
 def log(msg: str):
     try:

@@ -35,7 +35,8 @@ import torch
 from obs_encoder import OBS_SIZE
 from sts_gym_env import NUM_ACTIONS
 
-DEBUG_LOG = os.path.join(_root, "train_offline_debug.log")
+os.makedirs(os.path.join(_root, "logs"), exist_ok=True)
+DEBUG_LOG = os.path.join(_root, "logs", "train_offline_debug.log")
 
 def log(msg: str):
     ts = datetime.now().isoformat()

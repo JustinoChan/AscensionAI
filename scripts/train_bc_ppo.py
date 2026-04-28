@@ -57,7 +57,8 @@ os.environ["CUDA_VISIBLE_DEVICES"] = ""
 import numpy as np
 import torch
 
-DEBUG_LOG = os.path.join(_root, "train_bc_ppo_debug.log")
+os.makedirs(os.path.join(_root, "logs"), exist_ok=True)
+DEBUG_LOG = os.path.join(_root, "logs", "train_bc_ppo_debug.log")
 STATS_CSV = os.path.join(_root, "logs", "training_stats.csv")
 
 # Same columns as train_ppo.py for plot_training.py compatibility

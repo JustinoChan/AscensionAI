@@ -529,6 +529,7 @@ class AscensionApp:
         n = self.workers_var.get()
 
         (ROOT / "models").mkdir(exist_ok=True)
+        (ROOT / "logs").mkdir(exist_ok=True)
 
         if mode == "worker":
             (ROOT / "rollouts_shared").mkdir(exist_ok=True)
@@ -561,13 +562,13 @@ class AscensionApp:
         write_config(cmd)
 
         _mode_info = {
-            "train":   ("Training",   "train_debug.log"),
-            "bc_ppo":  ("BC\u2192PPO",     "train_bc_ppo_debug.log"),
-            "bc":      ("BC",          "bc_debug.log"),
-            "eval":    ("Evaluation",  "eval_debug.log"),
-            "logger":  ("Logger",      "game_logger_debug.log"),
+            "train":   ("Training",   "logs/train_debug.log"),
+            "bc_ppo":  ("BC\u2192PPO",     "logs/train_bc_ppo_debug.log"),
+            "bc":      ("BC",          "logs/bc_debug.log"),
+            "eval":    ("Evaluation",  "logs/eval_debug.log"),
+            "logger":  ("Logger",      "logs/game_logger_debug.log"),
         }
-        log_name, log_file = _mode_info.get(mode, ("Training", "train_debug.log"))
+        log_name, log_file = _mode_info.get(mode, ("Training", "logs/train_debug.log"))
 
         self.root.after(0, lambda: self._add_log_tab(log_name))
         time.sleep(0.1)
@@ -608,7 +609,7 @@ class AscensionApp:
 
         # Clear stale worker logs so we don't match old "Signaling ready" lines
         for i in range(1, n_workers + 1):
-            log_file = ROOT / f"worker_{i}_debug.log"
+            log_file = ROOT / "logs" / f"worker_{i}_debug.log"
             try:
                 if log_file.exists():
                     log_file.unlink()
@@ -633,7 +634,7 @@ class AscensionApp:
             )
             self._append_log("Trainer", f"Offline trainer started (PID {self.trainer_proc.pid})")
 
-            tailer = LogTailer(ROOT / "train_offline_debug.log",
+            tailer = LogTailer(ROOT / "logs" / "train_offline_debug.log",
                                lambda line: self._append_log("Trainer", line))
             tailer.start()
             self.tailers.append(tailer)
@@ -670,7 +671,7 @@ class AscensionApp:
                 daemon=True,
             ).start()
 
-            log_file = ROOT / f"worker_{i}_debug.log"
+            log_file = ROOT / "logs" / f"worker_{i}_debug.log"
             tailer = LogTailer(log_file, lambda line, n=tab_name: self._append_log(n, line))
             tailer.start()
             self.tailers.append(tailer)
@@ -711,13 +712,13 @@ class AscensionApp:
     def _wait_single_then_stop(self, mode: str):
         """Wait for single-instance mode to finish its current game."""
         log_map = {
-            "train":   "train_debug.log",
-            "bc_ppo":  "train_bc_ppo_debug.log",
-            "bc":      "bc_debug.log",
-            "eval":    "eval_debug.log",
-            "logger":  "game_logger_debug.log",
+            "train":   "logs/train_debug.log",
+            "bc_ppo":  "logs/train_bc_ppo_debug.log",
+            "bc":      "logs/bc_debug.log",
+            "eval":    "logs/eval_debug.log",
+            "logger":  "logs/game_logger_debug.log",
         }
-        log_file = ROOT / log_map.get(mode, "train_debug.log")
+        log_file = ROOT / log_map.get(mode, "logs/train_debug.log")
 
         baseline_ended = 0
         if log_file.exists():
@@ -754,7 +755,7 @@ class AscensionApp:
     def _wait_workers_then_stop(self):
         """Wait for parallel workers to finish their current games."""
         game_counts: dict[int, int] = {}
-        log_dir = ROOT
+        log_dir = ROOT / "logs"
 
         for i in range(1, 9):
             log_file = log_dir / f"worker_{i}_debug.log"

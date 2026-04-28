@@ -66,7 +66,8 @@ from sts_gym_env import (
 from ppo_model import PPOTrainer
 
 
-DEBUG_LOG = os.path.join(_root, "eval_debug.log")
+os.makedirs(os.path.join(_root, "logs"), exist_ok=True)
+DEBUG_LOG = os.path.join(_root, "logs", "eval_debug.log")
 EVAL_CSV = os.path.join(_root, "logs", "eval_stats.csv")
 
 _EVAL_COLUMNS = [

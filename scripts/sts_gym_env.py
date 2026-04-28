@@ -44,7 +44,7 @@ from obs_encoder import (
 # Debug logging (to file, never stdout)
 # ---------------------------------------------------------------------------
 import os as _os
-_ENV_LOG = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "env_debug.log")
+_ENV_LOG = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), "logs", "env_debug.log")
 
 def _log(msg: str):
     try:

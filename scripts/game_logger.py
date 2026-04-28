@@ -56,7 +56,7 @@ os.makedirs(LOG_DIR, exist_ok=True)
 TRACE_PATH = os.path.join(
     LOG_DIR, f"game_trace_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
 )
-DEBUG_LOG = os.path.join(_root, "game_logger_debug.log")
+DEBUG_LOG = os.path.join(_root, "logs", "game_logger_debug.log")
 
 POLL_THROTTLE_SEC = 0.1  # cap the passive poll loop at ~10 Hz
 
