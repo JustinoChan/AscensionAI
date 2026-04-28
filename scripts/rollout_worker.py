@@ -53,6 +53,7 @@ import torch
 
 _worker_id = "?"
 DEBUG_LOG = None
+VERBOSE = os.environ.get("ASCENSION_VERBOSE", "0") == "1"
 
 def _init_log(worker_id: str):
     global DEBUG_LOG, _worker_id
@@ -182,6 +183,20 @@ class WorkerAgent:
         screen_name = str(getattr(screen_type, "name", screen_type) or "NONE")
         terminal = screen_name in {"GAME_OVER", "VICTORY", "COMPLETE", "CREDITS"}
 
+        if VERBOSE:
+            choice_list = list(getattr(gs, "choice_list", []) or [])
+            scr = getattr(gs, "screen", None)
+            confirm_up = getattr(scr, "confirm_up", None)
+            potions = list(getattr(gs, "potions", []) or [])
+            pot_ids = [getattr(p, "potion_id", "?") for p in potions]
+            pot_full = bool(getattr(gs, "are_potions_full", lambda: False)())
+            log(f"STEP screen={screen_name} floor={getattr(gs, 'floor', '?')} "
+                f"hp={getattr(gs, 'current_hp', '?')}/{getattr(gs, 'max_hp', '?')} "
+                f"choices={choice_list} proceed={getattr(gs, 'proceed_available', False)} "
+                f"cancel={getattr(gs, 'cancel_available', False)} "
+                f"confirm_up={confirm_up} potions={pot_ids} pot_full={pot_full} "
+                f"mask_sum={int(mask.sum())}")
+
         victory = False
         if terminal:
             scr_obj = getattr(gs, "screen", None)
@@ -218,6 +233,8 @@ class WorkerAgent:
 
         auto = self._auto_handle_screen(gs, screen_name)
         if auto is not None:
+            if VERBOSE:
+                log(f"  -> HEURISTIC: {auto.command}")
             self._stuck_count = 0
             self.total_steps += 1
             return auto
@@ -241,6 +258,10 @@ class WorkerAgent:
 
         action, log_prob, value = self.trainer.predict(obs, mask)
         spire_action = flat_action_to_spire_action(action, gs)
+
+        if VERBOSE:
+            log(f"  -> RL: action={action} ({spire_action.command}) "
+                f"lp={log_prob:.3f} v={value:.3f}")
 
         self.prev_obs = obs
         self.prev_action = action
@@ -321,7 +342,10 @@ class WorkerAgent:
 
         if screen_name == "COMBAT_REWARD":
             if choice_list:
+                potions_full = bool(getattr(gs, "are_potions_full", lambda: False)())
                 for p in ["relic", "gold", "potion", "card"]:
+                    if p == "potion" and potions_full:
+                        continue
                     for i, c in enumerate(choice_list):
                         if p in str(c).lower():
                             return ChooseAction(choice_index=i)
@@ -391,7 +415,7 @@ class WorkerAgent:
         return StartGameAction(player_class=PlayerClass.IRONCLAD, ascension_level=0)
 
     def on_error(self, err: str) -> Action:
-        log(f"COMMAND ERROR: {err}")
+        log(f"COMMAND ERROR: {err} (screen was probably in an unexpected state)")
         return Action("state")
 
 

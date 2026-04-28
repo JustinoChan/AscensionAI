@@ -178,9 +178,11 @@ def _pick_card_reward_idx(choice_list: list) -> int:
     return 0
 
 
-def _pick_combat_reward_idx(choice_list: list) -> int:
+def _pick_combat_reward_idx(choice_list: list, potions_full: bool = False) -> int:
     """Pick reward in priority: relic > gold > potion > card."""
     for priority in ("relic", "gold", "potion", "card"):
+        if priority == "potion" and potions_full:
+            continue
         for i, c in enumerate(choice_list):
             if priority in str(c).lower():
                 return i
@@ -400,7 +402,8 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
     # --- COMBAT_REWARD ---
     if screen == "COMBAT_REWARD":
         if choice_list:
-            idx = _pick_combat_reward_idx(choice_list)
+            potions_full = bool(getattr(gs, "are_potions_full", lambda: False)())
+            idx = _pick_combat_reward_idx(choice_list, potions_full=potions_full)
             return ChooseAction(choice_index=idx), _CHOOSE_START + idx
         if proceed_avail:
             return Action("proceed"), _PROCEED

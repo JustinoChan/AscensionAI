@@ -50,6 +50,7 @@ from gymnasium import spaces
 
 DEBUG_LOG = os.path.join(_root, "train_debug.log")
 STATS_CSV = os.path.join(_root, "logs", "training_stats.csv")
+VERBOSE = os.environ.get("ASCENSION_VERBOSE", "0") == "1"
 
 _STATS_COLUMNS = [
     "timestamp", "game", "total_updates", "steps", "transitions",
@@ -148,11 +149,24 @@ class PPOAgent:
         obs = encode_game_state(gs)
         mask = compute_action_mask(gs)
 
-        # Check if game ended
         screen_type = getattr(gs, "screen_type", None)
         screen_name = str(getattr(screen_type, "name", screen_type) or "NONE")
         terminal_screens = {"GAME_OVER", "VICTORY", "COMPLETE", "CREDITS"}
         terminated = screen_name in terminal_screens
+
+        if VERBOSE:
+            choice_list_v = list(getattr(gs, "choice_list", []) or [])
+            scr_v = getattr(gs, "screen", None)
+            confirm_up_v = getattr(scr_v, "confirm_up", None)
+            potions_v = list(getattr(gs, "potions", []) or [])
+            pot_ids_v = [getattr(p, "potion_id", "?") for p in potions_v]
+            pot_full_v = bool(getattr(gs, "are_potions_full", lambda: False)())
+            log(f"VERBOSE screen={screen_name} floor={getattr(gs, 'floor', '?')} "
+                f"hp={getattr(gs, 'current_hp', '?')}/{getattr(gs, 'max_hp', '?')} "
+                f"choices={choice_list_v} proceed={getattr(gs, 'proceed_available', False)} "
+                f"cancel={getattr(gs, 'cancel_available', False)} "
+                f"confirm_up={confirm_up_v} potions={pot_ids_v} pot_full={pot_full_v} "
+                f"mask_sum={int(mask.sum())}")
 
         victory = False
         if terminated:

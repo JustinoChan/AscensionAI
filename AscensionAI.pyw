@@ -277,7 +277,10 @@ class AscensionApp:
         self.graceful_btn = ttk.Button(row2, text="Finish && Stop", command=self._graceful_stop, state="disabled")
         self.graceful_btn.pack(side="left", padx=(0, 5))
         self.stop_btn = ttk.Button(row2, text="Stop Now", command=self._stop, state="disabled")
-        self.stop_btn.pack(side="left", padx=(0, 20))
+        self.stop_btn.pack(side="left", padx=(0, 10))
+
+        self.verbose_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(row2, text="Verbose Logs", variable=self.verbose_var).pack(side="left", padx=(0, 10))
 
         self.status_var = tk.StringVar(value="Idle")
         ttk.Label(row2, textvariable=self.status_var, font=("Segoe UI", 10, "italic")).pack(side="left")
@@ -518,6 +521,8 @@ class AscensionApp:
         self.graceful_btn.configure(state="normal")
         self._remove_extra_tabs()
         self._clear_logs()
+
+        os.environ["ASCENSION_VERBOSE"] = "1" if self.verbose_var.get() else "0"
 
         mode = MODES.get(self.mode_var.get(), "worker")
         n = self.workers_var.get()
