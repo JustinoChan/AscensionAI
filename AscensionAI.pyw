@@ -516,6 +516,7 @@ class AscensionApp:
 
         self.running = True
         self._graceful_stopping = False
+        self._current_mode = MODES.get(self.mode_var.get(), "worker")
         self.start_btn.configure(state="disabled")
         self.stop_btn.configure(state="normal")
         self.graceful_btn.configure(state="normal")
@@ -700,16 +701,66 @@ class AscensionApp:
 
     def _wait_games_then_stop(self):
         """Background thread: monitor logs for game-end, then call _stop."""
+        mode = getattr(self, "_current_mode", "worker")
+
+        if mode in ("worker", "collect"):
+            self._wait_workers_then_stop()
+        else:
+            self._wait_single_then_stop(mode)
+
+    def _wait_single_then_stop(self, mode: str):
+        """Wait for single-instance mode to finish its current game."""
+        log_map = {
+            "train":   "train_debug.log",
+            "bc_ppo":  "train_bc_ppo_debug.log",
+            "bc":      "bc_debug.log",
+            "eval":    "eval_debug.log",
+            "logger":  "game_logger_debug.log",
+        }
+        log_file = ROOT / log_map.get(mode, "train_debug.log")
+
+        baseline_ended = 0
+        if log_file.exists():
+            try:
+                text = log_file.read_text(encoding="utf-8", errors="replace")
+                baseline_ended = text.count(" ended")
+            except OSError:
+                pass
+
+        self._append_log("All", "Waiting for current game to finish...")
+
+        timeout = 300
+        start = time.time()
+        finished = False
+        while time.time() - start < timeout:
+            if log_file.exists():
+                try:
+                    text = log_file.read_text(encoding="utf-8", errors="replace")
+                    current_ended = text.count(" ended")
+                    if current_ended > baseline_ended:
+                        finished = True
+                        break
+                except OSError:
+                    pass
+            time.sleep(2.0)
+
+        if finished:
+            self._append_log("All", "Game finished — stopping.")
+        else:
+            self._append_log("All", "Timed out waiting — stopping anyway.")
+
+        self.root.after(0, self._stop)
+
+    def _wait_workers_then_stop(self):
+        """Wait for parallel workers to finish their current games."""
         game_counts: dict[int, int] = {}
         log_dir = ROOT
 
-        # Snapshot current game counts from logs
         for i in range(1, 9):
             log_file = log_dir / f"worker_{i}_debug.log"
             if log_file.exists():
                 try:
                     text = log_file.read_text(encoding="utf-8", errors="replace")
-                    count = text.count("Game #") // 2  # "started" + "ended" pairs
                     ended = text.count(" ended:")
                     game_counts[i] = ended
                 except OSError:
@@ -721,8 +772,7 @@ class AscensionApp:
 
         self._append_log("All", f"Monitoring {len(game_counts)} workers for game completion...")
 
-        # Wait for each worker to finish one more game (new "ended:" line appears)
-        timeout = 300  # 5 min max wait per game
+        timeout = 300
         start = time.time()
         workers_done = set()
 

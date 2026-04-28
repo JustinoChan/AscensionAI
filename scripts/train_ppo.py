@@ -49,13 +49,14 @@ import gymnasium as gym
 from gymnasium import spaces
 
 DEBUG_LOG = os.path.join(_root, "train_debug.log")
+BUG_DEBUG_LOG = os.path.join(_root, "bug_debug.log")
 STATS_CSV = os.path.join(_root, "logs", "training_stats.csv")
 VERBOSE = os.environ.get("ASCENSION_VERBOSE", "0") == "1"
 
 _STATS_COLUMNS = [
     "timestamp", "game", "total_updates", "steps", "transitions",
     "total_reward", "final_hp", "final_max_hp", "final_floor", "final_act",
-    "victory", "terminated", "pg_loss", "vf_loss", "entropy",
+    "victory", "terminated", "pg_loss", "vf_loss", "entropy", "worker",
 ]
 
 
@@ -84,6 +85,60 @@ def _append_stats_csv(row: dict) -> None:
             f.write(",".join(str(row.get(c, "")) for c in _STATS_COLUMNS) + "\n")
     except Exception as e:
         log(f"stats csv append failed: {e}")
+
+
+def _dump_stuck_state(gs, screen_name: str, stuck_count: int,
+                      recent_actions: list):
+    """Write a detailed game state snapshot to bug_debug.log."""
+    try:
+        scr = getattr(gs, "screen", None)
+        rewards = list(getattr(scr, "rewards", []) or []) if scr else []
+        hand = list(getattr(gs, "hand", []) or [])
+        monsters = list(getattr(gs, "monsters", []) or [])
+        potions = list(getattr(gs, "potions", []) or [])
+        choice_list = list(getattr(gs, "choice_list", []) or [])
+
+        lines = [
+            f"\n{'='*70}",
+            f"STUCK DETECTED — {datetime.now().isoformat()}",
+            f"  Worker: single-instance",
+            f"  Screen: {screen_name}  Floor: {getattr(gs, 'floor', '?')}  "
+            f"Act: {getattr(gs, 'act', '?')}",
+            f"  HP: {getattr(gs, 'current_hp', '?')}/{getattr(gs, 'max_hp', '?')}  "
+            f"Gold: {getattr(gs, 'gold', '?')}  "
+            f"Energy: {getattr(gs, 'player', None) and getattr(gs.player, 'energy', '?')}",
+            f"  In Combat: {getattr(gs, 'in_combat', False)}  "
+            f"Stuck Count: {stuck_count}",
+            f"  proceed_available: {getattr(gs, 'proceed_available', False)}  "
+            f"cancel_available: {getattr(gs, 'cancel_available', False)}",
+            f"  choice_list ({len(choice_list)}): "
+            f"{[str(c) for c in choice_list[:10]]}",
+        ]
+        if rewards:
+            reward_strs = [getattr(r, "reward_type", r) for r in rewards]
+            lines.append(f"  screen.rewards ({len(rewards)}): {reward_strs}")
+        if scr:
+            lines.append(f"  screen attrs: confirm_up={getattr(scr, 'confirm_up', None)} "
+                         f"can_pick_zero={getattr(scr, 'can_pick_zero', None)}")
+        if hand:
+            card_info = [(getattr(c, "name", "?"), getattr(c, "is_playable", "?"),
+                          getattr(c, "cost", "?")) for c in hand[:10]]
+            lines.append(f"  Hand ({len(hand)}): {card_info}")
+        if monsters:
+            m_info = [(getattr(m, "name", "?"), getattr(m, "current_hp", "?"),
+                        getattr(m, "is_gone", False)) for m in monsters]
+            lines.append(f"  Monsters: {m_info}")
+        pot_info = [(getattr(p, "potion_id", "?")) for p in potions]
+        lines.append(f"  Potions: {pot_info}  "
+                     f"Full: {bool(getattr(gs, 'are_potions_full', lambda: False)())}")
+        if recent_actions:
+            lines.append(f"  Recent actions: {recent_actions[-10:]}")
+        lines.append(f"{'='*70}\n")
+
+        with open(BUG_DEBUG_LOG, "a", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+    except Exception as e:
+        log(f"bug_debug dump failed: {e}")
 
 
 log("=== SCRIPT STARTING ===")
@@ -135,6 +190,7 @@ class PPOAgent:
         self._stuck_screen: Optional[str] = None
         self._stuck_floor: int = -1
         self._stuck_count: int = 0
+        self._recent_actions: list[str] = []
 
 
     def on_state_change(self, game_state) -> Action:
@@ -237,12 +293,13 @@ class PPOAgent:
         self._stuck_screen = screen_name
 
         if self._stuck_count >= 30:
+            _dump_stuck_state(gs, screen_name, self._stuck_count,
+                              self._recent_actions)
+            log(f"  STUCK on {screen_name} floor={cur_floor} — dumped to bug_debug.log")
             self._stuck_count = 0
             proceed_avail = bool(getattr(gs, "proceed_available", False))
             cancel_avail = bool(getattr(gs, "cancel_available", False))
             choice_list = list(getattr(gs, "choice_list", []) or [])
-            log(f"  STUCK on {screen_name} floor={cur_floor}, forcing action "
-                f"(proceed={proceed_avail} cancel={cancel_avail} choices={len(choice_list)})")
             if proceed_avail:
                 return Action("proceed")
             if cancel_avail:
@@ -254,6 +311,10 @@ class PPOAgent:
         # Pick next action via RL
         action, log_prob, value = self.trainer.predict(obs, mask)
         spire_action = flat_action_to_spire_action(action, gs)
+
+        self._recent_actions.append(f"{screen_name}:{spire_action.command}")
+        if len(self._recent_actions) > 20:
+            self._recent_actions = self._recent_actions[-20:]
 
         self.prev_obs = obs
         self.prev_action = action
@@ -300,13 +361,22 @@ class PPOAgent:
         if screen_name == "HAND_SELECT":
             if scr and getattr(scr, "can_pick_zero", False) and proceed_avail:
                 return Action("proceed")
+            if not choice_list:
+                if proceed_avail:
+                    return Action("proceed")
+                if cancel_avail:
+                    return Action("leave")
             return None  # forced selection (discard etc.) → RL decides
 
         # --- Mechanical: GRID confirmation — just confirm ---
         if screen_name == "GRID":
             if scr and getattr(scr, "confirm_up", False):
                 return Action("proceed")
-            if proceed_avail and not choice_list:
+            if not choice_list:
+                if proceed_avail:
+                    return Action("proceed")
+                if cancel_avail:
+                    return Action("leave")
                 return Action("proceed")
             return None  # card selection (upgrade/transform/purge) → RL decides
 
@@ -317,9 +387,39 @@ class PPOAgent:
                 return ChooseAction(name="boss")
             return None  # path selection → RL decides
 
+        # --- Mechanical: COMBAT_REWARD — always pick all rewards ---
+        if screen_name == "COMBAT_REWARD":
+            potions_full = bool(getattr(gs, "are_potions_full", lambda: False)())
+            rewards = list(getattr(scr, "rewards", []) or []) if scr else []
+            if rewards:
+                for p in ("RELIC", "SAPPHIRE_KEY", "EMERALD_KEY",
+                          "GOLD", "STOLEN_GOLD", "POTION", "CARD"):
+                    if p == "POTION" and potions_full:
+                        continue
+                    for i, r in enumerate(rewards):
+                        rt = getattr(r, "reward_type", None)
+                        if rt is not None and rt.name == p:
+                            return ChooseAction(choice_index=i)
+                return ChooseAction(choice_index=0)
+            if choice_list:
+                for p in ["relic", "gold", "potion", "card"]:
+                    if p == "potion" and potions_full:
+                        continue
+                    for i, c in enumerate(choice_list):
+                        if p in str(c).lower():
+                            return ChooseAction(choice_index=i)
+                return ChooseAction(choice_index=0)
+            return Action("proceed") if proceed_avail else Action("state")
+
+        # --- Mechanical: SHOP — skip shops for now ---
+        if screen_name in ("SHOP_ROOM", "SHOP_SCREEN"):
+            if screen_name == "SHOP_SCREEN":
+                return Action("leave")
+            return Action("proceed") if proceed_avail else (
+                Action("leave") if cancel_avail else Action("proceed"))
+
         # --- Decision screens → RL handles ---
-        # CARD_REWARD, COMBAT_REWARD, REST, EVENT, SHOP_ROOM,
-        # SHOP_SCREEN, BOSS_REWARD, and any others with choices
+        # CARD_REWARD, REST, EVENT, BOSS_REWARD, and any others with choices
 
         # Trivial: no choices and only one possible navigation action
         if not choice_list and not cancel_avail:
@@ -385,6 +485,7 @@ class PPOAgent:
         self._stuck_screen = None
         self._stuck_floor = -1
         self._stuck_count = 0
+        self._recent_actions.clear()
         self.prev_mask = None
         self.initialized = False
 

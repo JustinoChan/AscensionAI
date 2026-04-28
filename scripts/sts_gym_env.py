@@ -102,17 +102,19 @@ def compute_action_mask(gs: Any) -> np.ndarray:
     alive = living_monsters(monsters)
     n_alive = len(alive)
 
+    has_playable = False
     if in_combat and play_avail:
         for i, card in enumerate(hand[:MAX_HAND]):
             if not getattr(card, "is_playable", False):
                 continue
+            has_playable = True
             if getattr(card, "has_target", False):
                 for j in range(min(n_alive, MAX_MONSTERS)):
                     mask[_PLAY_TARGETED_START + i * MAX_MONSTERS + j] = True
             else:
                 mask[_PLAY_UNTARGETED_START + i] = True
 
-    if in_combat and end_avail:
+    if in_combat and end_avail and not has_playable:
         mask[_END_TURN] = True
 
     if in_combat and potion_avail:
@@ -138,13 +140,26 @@ def compute_action_mask(gs: Any) -> np.ndarray:
                       and getattr(scr, "confirm_up", False))
 
     if not grid_confirmed:
-        # Combat reward with full potions: skip potion choices — picking
-        # one when slots are full triggers a CommunicationMod error.
         potions_full = bool(getattr(gs, "are_potions_full", lambda: False)())
-        for idx in range(min(len(choice_list), MAX_CHOICES)):
-            if (st_name == "COMBAT_REWARD" and potions_full
-                    and "potion" in str(choice_list[idx]).lower()):
-                continue
+
+        # For COMBAT_REWARD, screen.rewards is authoritative — choice_list
+        # may be empty even when rewards are available.
+        combat_rewards = (list(getattr(scr, "rewards", []) or [])
+                          if st_name == "COMBAT_REWARD" and scr else [])
+        n_choices = len(choice_list)
+        if st_name == "COMBAT_REWARD" and not n_choices and combat_rewards:
+            n_choices = len(combat_rewards)
+
+        for idx in range(min(n_choices, MAX_CHOICES)):
+            if st_name == "COMBAT_REWARD" and potions_full:
+                is_potion = False
+                if idx < len(combat_rewards):
+                    rt = getattr(combat_rewards[idx], "reward_type", None)
+                    is_potion = rt is not None and rt.name == "POTION"
+                elif idx < len(choice_list):
+                    is_potion = "potion" in str(choice_list[idx]).lower()
+                if is_potion:
+                    continue
             mask[_CHOOSE_START + idx] = True
 
     if proceed_avail:

@@ -50,6 +50,31 @@ def log(msg: str):
 
 from ppo_model import PPOTrainer, GameBuffer
 
+# Shared training stats CSV (same file the GUI reads for progress display)
+_STATS_CSV = os.path.join(_root, "logs", "training_stats.csv")
+_STATS_COLUMNS = [
+    "timestamp", "game", "total_updates", "steps", "transitions",
+    "total_reward", "final_hp", "final_max_hp", "final_floor", "final_act",
+    "victory", "terminated", "pg_loss", "vf_loss", "entropy", "worker",
+]
+
+def _init_stats_csv():
+    try:
+        os.makedirs(os.path.dirname(_STATS_CSV), exist_ok=True)
+        if not os.path.exists(_STATS_CSV):
+            with open(_STATS_CSV, "w", encoding="utf-8") as f:
+                f.write(",".join(_STATS_COLUMNS) + "\n")
+    except Exception:
+        pass
+
+def _append_training_stats(row: dict):
+    try:
+        _init_stats_csv()
+        with open(_STATS_CSV, "a", encoding="utf-8") as f:
+            f.write(",".join(str(row.get(c, "")) for c in _STATS_COLUMNS) + "\n")
+    except Exception as e:
+        log(f"stats csv append failed: {e}")
+
 
 # ---------------------------------------------------------------------------
 # Transition loading
@@ -158,6 +183,15 @@ def main():
                 log(f"Update #{total_updates}: pg={stats['pg_loss']:.4f} "
                     f"vf={stats['vf_loss']:.4f} ent={stats['entropy']:.4f} "
                     f"transitions={n} total={total_transitions}")
+                _append_training_stats({
+                    "timestamp": datetime.now().isoformat(),
+                    "total_updates": total_updates,
+                    "transitions": n,
+                    "pg_loss": round(stats["pg_loss"], 6),
+                    "vf_loss": round(stats["vf_loss"], 6),
+                    "entropy": round(stats["entropy"], 6),
+                    "worker": "trainer",
+                })
 
             trainer.save(model_path)
 

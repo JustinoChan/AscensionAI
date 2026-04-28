@@ -178,6 +178,19 @@ def _pick_card_reward_idx(choice_list: list) -> int:
     return 0
 
 
+def _pick_combat_reward_from_objects(rewards: list, potions_full: bool = False) -> int:
+    """Pick reward from CombatReward objects in priority order."""
+    for p in ("RELIC", "SAPPHIRE_KEY", "EMERALD_KEY",
+              "GOLD", "STOLEN_GOLD", "POTION", "CARD"):
+        if p == "POTION" and potions_full:
+            continue
+        for i, r in enumerate(rewards):
+            rt = getattr(r, "reward_type", None)
+            if rt is not None and rt.name == p:
+                return i
+    return 0
+
+
 def _pick_combat_reward_idx(choice_list: list, potions_full: bool = False) -> int:
     """Pick reward in priority: relic > gold > potion > card."""
     for priority in ("relic", "gold", "potion", "card"):
@@ -190,10 +203,14 @@ def _pick_combat_reward_idx(choice_list: list, potions_full: bool = False) -> in
 
 
 def _pick_rest_idx(choice_list: list, gs) -> int:
-    """Campfire: rest if low HP, else smith."""
+    """Campfire: rest if low HP, else smith. Heal more aggressively before bosses."""
     lower = [str(c).lower() for c in choice_list]
     hp_pct = int(getattr(gs, "current_hp", 0) or 0) / max(1, int(getattr(gs, "max_hp", 1) or 1))
-    if hp_pct < 0.55 and "rest" in lower:
+    act = int(getattr(gs, "act", 0) or 0)
+    floor = int(getattr(gs, "floor", 0) or 0)
+    pre_boss = floor >= {1: 15, 2: 32, 3: 49}.get(act, 999)
+    heal_threshold = 0.7 if pre_boss else 0.55
+    if hp_pct < heal_threshold and "rest" in lower:
         return lower.index("rest")
     if "smith" in lower:
         return lower.index("smith")
@@ -349,23 +366,27 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
     if screen == "HAND_SELECT":
         if scr and getattr(scr, "can_pick_zero", False) and proceed_avail:
             return Action("proceed"), _PROCEED
-        # Forced selection — pick worst card
         if choice_list:
             idx = _pick_hand_select_idx(choice_list)
             return ChooseAction(choice_index=idx), _CHOOSE_START + idx
-        return ChooseAction(choice_index=0), _CHOOSE_START
+        if proceed_avail:
+            return Action("proceed"), _PROCEED
+        if cancel_avail:
+            return Action("leave"), _LEAVE
+        return Action("proceed"), _PROCEED
 
     # --- Mechanical: GRID confirmation ---
     if screen == "GRID":
         if scr and getattr(scr, "confirm_up", False):
             return Action("proceed"), _PROCEED
-        if proceed_avail and not choice_list:
-            return Action("proceed"), _PROCEED
-        # Card selection (purge/upgrade/transform)
         if choice_list:
             idx = _pick_grid_card_idx(choice_list)
             return ChooseAction(choice_index=idx), _CHOOSE_START + idx
-        return ChooseAction(choice_index=0), _CHOOSE_START
+        if proceed_avail:
+            return Action("proceed"), _PROCEED
+        if cancel_avail:
+            return Action("leave"), _LEAVE
+        return Action("proceed"), _PROCEED
 
     # --- Mechanical: MAP boss-only ---
     if screen == "MAP":
@@ -401,8 +422,13 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
 
     # --- COMBAT_REWARD ---
     if screen == "COMBAT_REWARD":
+        potions_full = bool(getattr(gs, "are_potions_full", lambda: False)())
+        scr_obj = getattr(gs, "screen", None)
+        rewards = list(getattr(scr_obj, "rewards", []) or []) if scr_obj else []
+        if rewards:
+            idx = _pick_combat_reward_from_objects(rewards, potions_full)
+            return ChooseAction(choice_index=idx), _CHOOSE_START + idx
         if choice_list:
-            potions_full = bool(getattr(gs, "are_potions_full", lambda: False)())
             idx = _pick_combat_reward_idx(choice_list, potions_full=potions_full)
             return ChooseAction(choice_index=idx), _CHOOSE_START + idx
         if proceed_avail:

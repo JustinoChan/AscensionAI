@@ -83,6 +83,86 @@ from sts_gym_env import (
 )
 from ppo_model import PPOTrainer
 
+BUG_DEBUG_LOG = os.path.join(_root, "bug_debug.log")
+
+def _dump_stuck_state(gs, screen_name: str, worker_id: str, stuck_count: int,
+                      recent_actions: list):
+    """Write a detailed game state snapshot to bug_debug.log for debugging."""
+    try:
+        scr = getattr(gs, "screen", None)
+        rewards = list(getattr(scr, "rewards", []) or []) if scr else []
+        hand = list(getattr(gs, "hand", []) or [])
+        monsters = list(getattr(gs, "monsters", []) or [])
+        potions = list(getattr(gs, "potions", []) or [])
+        choice_list = list(getattr(gs, "choice_list", []) or [])
+
+        lines = [
+            f"\n{'='*70}",
+            f"STUCK DETECTED — {datetime.now().isoformat()}",
+            f"  Worker: {worker_id}",
+            f"  Screen: {screen_name}  Floor: {getattr(gs, 'floor', '?')}  "
+            f"Act: {getattr(gs, 'act', '?')}",
+            f"  HP: {getattr(gs, 'current_hp', '?')}/{getattr(gs, 'max_hp', '?')}  "
+            f"Gold: {getattr(gs, 'gold', '?')}  "
+            f"Energy: {getattr(gs, 'player', None) and getattr(gs.player, 'energy', '?')}",
+            f"  In Combat: {getattr(gs, 'in_combat', False)}  "
+            f"Stuck Count: {stuck_count}",
+            f"  proceed_available: {getattr(gs, 'proceed_available', False)}  "
+            f"cancel_available: {getattr(gs, 'cancel_available', False)}",
+            f"  choice_list ({len(choice_list)}): "
+            f"{[str(c) for c in choice_list[:10]]}",
+        ]
+        if rewards:
+            reward_strs = [getattr(r, "reward_type", r) for r in rewards]
+            lines.append(f"  screen.rewards ({len(rewards)}): {reward_strs}")
+        if scr:
+            lines.append(f"  screen attrs: confirm_up={getattr(scr, 'confirm_up', None)} "
+                         f"can_pick_zero={getattr(scr, 'can_pick_zero', None)}")
+        if hand:
+            card_info = [(getattr(c, "name", "?"), getattr(c, "is_playable", "?"),
+                          getattr(c, "cost", "?")) for c in hand[:10]]
+            lines.append(f"  Hand ({len(hand)}): {card_info}")
+        if monsters:
+            m_info = [(getattr(m, "name", "?"), getattr(m, "current_hp", "?"),
+                        getattr(m, "is_gone", False)) for m in monsters]
+            lines.append(f"  Monsters: {m_info}")
+        pot_info = [(getattr(p, "potion_id", "?")) for p in potions]
+        lines.append(f"  Potions: {pot_info}  "
+                     f"Full: {bool(getattr(gs, 'are_potions_full', lambda: False)())}")
+        if recent_actions:
+            lines.append(f"  Recent actions: {recent_actions[-10:]}")
+        lines.append(f"{'='*70}\n")
+
+        with open(BUG_DEBUG_LOG, "a", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+    except Exception as e:
+        log(f"bug_debug dump failed: {e}")
+
+# Shared training stats CSV (same format the GUI reads for progress display)
+_STATS_CSV = os.path.join(_root, "logs", "training_stats.csv")
+_STATS_COLUMNS = [
+    "timestamp", "game", "total_updates", "steps", "transitions",
+    "total_reward", "final_hp", "final_max_hp", "final_floor", "final_act",
+    "victory", "terminated", "pg_loss", "vf_loss", "entropy", "worker",
+]
+
+def _init_stats_csv():
+    try:
+        os.makedirs(os.path.dirname(_STATS_CSV), exist_ok=True)
+        if not os.path.exists(_STATS_CSV):
+            with open(_STATS_CSV, "w", encoding="utf-8") as f:
+                f.write(",".join(_STATS_COLUMNS) + "\n")
+    except Exception:
+        pass
+
+def _append_training_stats(row: dict):
+    try:
+        _init_stats_csv()
+        with open(_STATS_CSV, "a", encoding="utf-8") as f:
+            f.write(",".join(str(row.get(c, "")) for c in _STATS_COLUMNS) + "\n")
+    except Exception as e:
+        log(f"stats csv append failed: {e}")
+
 
 # ---------------------------------------------------------------------------
 # Per-game transition buffer (mirrors GameBuffer from train_ppo.py)
@@ -153,6 +233,7 @@ class WorkerAgent:
 
         self._stuck_floor = -1
         self._stuck_count = 0
+        self._recent_actions: list[str] = []
         self._model_mtime = 0.0
 
     def _maybe_reload_model(self):
@@ -227,7 +308,7 @@ class WorkerAgent:
             self.pending_reward += reward
 
         if terminal:
-            self._end_game()
+            self._end_game(final_gs=gs, victory=victory)
             proceed_avail = bool(getattr(gs, "proceed_available", False))
             return Action("proceed") if proceed_avail else Action("state")
 
@@ -247,6 +328,9 @@ class WorkerAgent:
             self._stuck_count = 0
 
         if self._stuck_count >= 30:
+            _dump_stuck_state(gs, screen_name, self.worker_id,
+                              self._stuck_count, self._recent_actions)
+            log(f"STUCK on {screen_name} floor={cur_floor} — dumped to bug_debug.log")
             self._stuck_count = 0
             proceed_avail = bool(getattr(gs, "proceed_available", False))
             choice_list = list(getattr(gs, "choice_list", []) or [])
@@ -258,6 +342,10 @@ class WorkerAgent:
 
         action, log_prob, value = self.trainer.predict(obs, mask)
         spire_action = flat_action_to_spire_action(action, gs)
+
+        self._recent_actions.append(f"{screen_name}:{spire_action.command}")
+        if len(self._recent_actions) > 20:
+            self._recent_actions = self._recent_actions[-20:]
 
         if VERBOSE:
             log(f"  -> RL: action={action} ({spire_action.command}) "
@@ -287,14 +375,24 @@ class WorkerAgent:
             can_pick_zero = scr and getattr(scr, "can_pick_zero", False)
             if can_pick_zero and proceed_avail:
                 return Action("proceed")
-            return ChooseAction(choice_index=0)
+            if choice_list:
+                return ChooseAction(choice_index=0)
+            if proceed_avail:
+                return Action("proceed")
+            if cancel_avail:
+                return Action("leave")
+            return Action("proceed")
 
         if screen_name == "GRID":
             if scr and getattr(scr, "confirm_up", False):
                 return Action("proceed")
+            if choice_list:
+                return ChooseAction(choice_index=0)
             if proceed_avail:
                 return Action("proceed")
-            return ChooseAction(choice_index=0)
+            if cancel_avail:
+                return Action("leave")
+            return Action("proceed")
 
         if screen_name == "CHEST":
             if scr and getattr(scr, "chest_open", False):
@@ -341,8 +439,19 @@ class WorkerAgent:
             return Action("proceed") if proceed_avail else Action("state")
 
         if screen_name == "COMBAT_REWARD":
+            potions_full = bool(getattr(gs, "are_potions_full", lambda: False)())
+            rewards = list(getattr(scr, "rewards", []) or []) if scr else []
+            if rewards:
+                for p in ("RELIC", "SAPPHIRE_KEY", "EMERALD_KEY",
+                          "GOLD", "STOLEN_GOLD", "POTION", "CARD"):
+                    if p == "POTION" and potions_full:
+                        continue
+                    for i, r in enumerate(rewards):
+                        rt = getattr(r, "reward_type", None)
+                        if rt is not None and rt.name == p:
+                            return ChooseAction(choice_index=i)
+                return ChooseAction(choice_index=0)
             if choice_list:
-                potions_full = bool(getattr(gs, "are_potions_full", lambda: False)())
                 for p in ["relic", "gold", "potion", "card"]:
                     if p == "potion" and potions_full:
                         continue
@@ -356,7 +465,11 @@ class WorkerAgent:
             if choice_list:
                 lower = [str(c).lower() for c in choice_list]
                 hp_pct = int(getattr(gs, "current_hp", 0) or 0) / max(1, int(getattr(gs, "max_hp", 1) or 1))
-                if hp_pct < 0.6 and "rest" in lower:
+                act = int(getattr(gs, "act", 0) or 0)
+                floor = int(getattr(gs, "floor", 0) or 0)
+                pre_boss = floor >= {1: 15, 2: 32, 3: 49}.get(act, 999)
+                heal_threshold = 0.7 if pre_boss else 0.6
+                if hp_pct < heal_threshold and "rest" in lower:
                     return ChooseAction(choice_index=lower.index("rest"))
                 if "smith" in lower:
                     return ChooseAction(choice_index=lower.index("smith"))
@@ -384,7 +497,7 @@ class WorkerAgent:
 
         return None
 
-    def _end_game(self):
+    def _end_game(self, final_gs=None, victory: bool = False):
         self.total_games += 1
         n = len(self.buffer)
         log(f"Game #{self.total_games} ended: {n} transitions, reward={self.episode_reward:.2f}")
@@ -394,6 +507,21 @@ class WorkerAgent:
             path = os.path.join(self.out_dir, fname)
             self.buffer.save_npz(path)
             log(f"  Saved {n} transitions to {fname}")
+
+        _append_training_stats({
+            "timestamp": datetime.now().isoformat(),
+            "game": self.total_games,
+            "worker": self.worker_id,
+            "steps": self.total_steps,
+            "transitions": n,
+            "total_reward": round(self.episode_reward, 4),
+            "final_hp": int(getattr(final_gs, "current_hp", 0) or 0) if final_gs else "",
+            "final_max_hp": int(getattr(final_gs, "max_hp", 0) or 0) if final_gs else "",
+            "final_floor": int(getattr(final_gs, "floor", 0) or 0) if final_gs else "",
+            "final_act": int(getattr(final_gs, "act", 0) or 0) if final_gs else "",
+            "victory": int(bool(victory)),
+            "terminated": 1,
+        })
 
         if self.total_games % self.reload_every == 0:
             self._maybe_reload_model()
@@ -408,6 +536,7 @@ class WorkerAgent:
         self.prev_mask = None
         self._stuck_floor = -1
         self._stuck_count = 0
+        self._recent_actions.clear()
         self.initialized = False
 
     def on_out_of_game(self) -> Action:
