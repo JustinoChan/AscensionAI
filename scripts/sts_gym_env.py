@@ -308,7 +308,7 @@ class RewardTracker:
             reward += (self.last_deck_size - deck_size) * 0.2
 
         if floor_num > self.last_floor:
-            reward += 0.1
+            reward += 0.5
 
         if in_combat:
             reward -= max(0, self.last_hp - hp) * 0.05
@@ -330,7 +330,8 @@ class RewardTracker:
             if victory:
                 reward += 50.0
             else:
-                reward -= 5.0
+                reward -= 15.0
+                reward += floor_num * 0.3
 
         act = int(getattr(gs, "act", 0) or 0)
         if act > self._last_act and act > 1:
