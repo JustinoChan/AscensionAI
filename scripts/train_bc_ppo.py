@@ -109,6 +109,7 @@ from sts_gym_env import (
     RewardTracker, _NOOP,
 )
 from ppo_model import PPOTrainer, GameBuffer
+from screen_handler import auto_handle_screen
 from behavior_clone import heuristic_action
 
 # Re-patch after behavior_clone import (its module-level code overwrites
@@ -525,53 +526,7 @@ class BCPPOAgent:
         return spire_action
 
     def _auto_handle_screen(self, gs, screen_name: str) -> Optional[Action]:
-        """Handle mechanical screens that don't need RL; return None for decisions."""
-        in_combat = bool(getattr(gs, "in_combat", False))
-        choice_list = list(getattr(gs, "choice_list", []) or [])
-        proceed_avail = bool(getattr(gs, "proceed_available", False))
-        cancel_avail = bool(getattr(gs, "cancel_available", False))
-        scr = getattr(gs, "screen", None)
-
-        # Combat normal state — RL handles
-        if in_combat and screen_name == "NONE":
-            return None
-
-        # CHEST — always open
-        if screen_name == "CHEST":
-            if scr and getattr(scr, "chest_open", False):
-                return Action("proceed") if proceed_avail else Action("state")
-            return ChooseAction(name="open")
-
-        # HAND_SELECT with can_pick_zero — skip
-        if screen_name == "HAND_SELECT":
-            if scr and getattr(scr, "can_pick_zero", False) and proceed_avail:
-                return Action("proceed")
-            return None  # forced selection — RL decides
-
-        # GRID confirmation
-        if screen_name == "GRID":
-            if scr and getattr(scr, "confirm_up", False):
-                return Action("proceed")
-            if proceed_avail and not choice_list:
-                return Action("proceed")
-            return None  # card selection — RL decides
-
-        # MAP boss-only (no path choices)
-        if screen_name == "MAP":
-            boss_avail = scr and getattr(scr, "boss_available", False)
-            if boss_avail and not choice_list:
-                return ChooseAction(name="boss")
-            return None  # path selection — RL decides
-
-        # Trivial navigation: no choices, only one possible action
-        if not choice_list and not cancel_avail:
-            if proceed_avail:
-                return Action("proceed")
-            return Action("state")
-        if not choice_list and cancel_avail and not proceed_avail:
-            return Action("leave")
-
-        return None  # choices available — RL decides
+        return auto_handle_screen(gs, screen_name, heuristic_all=False)
 
     def _end_ppo_game(self, gs, victory: bool):
         """PPO update (every N games), entropy annealing, stats, model save."""

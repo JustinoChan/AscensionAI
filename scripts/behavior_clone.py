@@ -79,6 +79,13 @@ from sts_gym_env import (
     MAX_HAND, MAX_MONSTERS, MAX_POTIONS,
 )
 
+from screen_handler import (
+    GOOD_CARDS, OK_CARDS, JUNK_CARDS,
+    pick_card_reward, pick_combat_reward_obj, pick_combat_reward_str,
+    pick_rest, pick_event, pick_boss_relic, pick_hand_select,
+    pick_grid_card, pick_map, pick_shop_item,
+)
+
 log("Imports done")
 
 
@@ -144,191 +151,6 @@ def pick_target(monsters, prefer_low_hp=True):
 
 
 # ---------------------------------------------------------------------------
-# Decision-screen heuristic helpers
-# ---------------------------------------------------------------------------
-_GOOD_CARDS = {
-    "inflame", "shrug it off", "anger", "uppercut", "offering",
-    "battle trance", "headbutt", "feed", "impervious", "demon form",
-    "metallicize", "reaper", "limit break", "barricade", "corruption",
-}
-_OK_CARDS = {
-    "cleave", "thunderclap", "iron wave", "body slam", "carnage",
-    "pummel", "flame barrier", "feel no pain", "dark embrace",
-    "second wind", "ghostly armor", "disarm", "clothesline",
-    "power through", "true grit", "fire breathing",
-}
-_JUNK_CARDS = {
-    "wound", "burn", "dazed", "slimed", "void",          # status
-    "regret", "shame", "doubt", "pain", "decay", "parasite",  # curse
-}
-
-
-def _pick_card_reward_idx(choice_list: list) -> int:
-    """Pick the best card from a reward screen."""
-    lower = [str(c).lower() for c in choice_list]
-    for i, c in enumerate(lower):
-        if c in _GOOD_CARDS:
-            return i
-    for i, c in enumerate(lower):
-        if c in _OK_CARDS:
-            return i
-    # Nothing exciting — skip if available, else take first
-    for i, c in enumerate(lower):
-        if "skip" in c:
-            return i
-    return 0
-
-
-def _pick_combat_reward_from_objects(rewards: list, potions_full: bool = False) -> int:
-    """Pick reward from CombatReward objects in priority order. Returns -1 if nothing pickable."""
-    for p in ("RELIC", "SAPPHIRE_KEY", "EMERALD_KEY",
-              "GOLD", "STOLEN_GOLD", "POTION", "CARD"):
-        if p == "POTION" and potions_full:
-            continue
-        for i, r in enumerate(rewards):
-            rt = getattr(r, "reward_type", None)
-            if rt is not None and rt.name == p:
-                return i
-    return -1
-
-
-def _pick_combat_reward_idx(choice_list: list, potions_full: bool = False) -> int:
-    """Pick reward in priority: relic > gold > potion > card."""
-    for priority in ("relic", "gold", "potion", "card"):
-        if priority == "potion" and potions_full:
-            continue
-        for i, c in enumerate(choice_list):
-            if priority in str(c).lower():
-                return i
-    return 0
-
-
-def _pick_rest_idx(choice_list: list, gs) -> int:
-    """Campfire: rest if low HP, else smith. Heal more aggressively before bosses."""
-    lower = [str(c).lower() for c in choice_list]
-    hp_pct = int(getattr(gs, "current_hp", 0) or 0) / max(1, int(getattr(gs, "max_hp", 1) or 1))
-    act = int(getattr(gs, "act", 0) or 0)
-    floor = int(getattr(gs, "floor", 0) or 0)
-    pre_boss = floor >= {1: 15, 2: 32, 3: 49}.get(act, 999)
-    heal_threshold = 0.7 if pre_boss else 0.55
-    if hp_pct < heal_threshold and "rest" in lower:
-        return lower.index("rest")
-    if "smith" in lower:
-        return lower.index("smith")
-    if "rest" in lower:
-        return lower.index("rest")
-    return 0
-
-
-def _pick_event_idx(choice_list: list, gs) -> int:
-    """Event: avoid risky options when low HP, else pick first non-leave."""
-    lower = [str(c).lower() for c in choice_list]
-    hp_pct = int(getattr(gs, "current_hp", 0) or 0) / max(1, int(getattr(gs, "max_hp", 1) or 1))
-    if hp_pct < 0.35:
-        for i, c in enumerate(lower):
-            if "leave" in c:
-                return i
-    for i, c in enumerate(lower):
-        if "leave" not in c:
-            return i
-    return 0
-
-
-def _pick_boss_relic_idx(choice_list: list) -> int:
-    """Boss relic: prefer energy relics, avoid Busted Crown/Coffee Dripper."""
-    lower = [str(c).lower() for c in choice_list]
-    _avoid = {"busted crown", "coffee dripper", "sozu", "runic dome"}
-    # Prefer relics NOT in _avoid
-    non_avoid = [i for i, c in enumerate(lower) if c not in _avoid]
-    if non_avoid:
-        return non_avoid[0]
-    return 0
-
-
-def _pick_hand_select_idx(choice_list: list) -> int:
-    """Pick worst card from HAND_SELECT (forced discard)."""
-    for i, c in enumerate(choice_list):
-        name = str(c).lower().rstrip("+")
-        if name in _JUNK_CARDS:
-            return i
-    for i, c in enumerate(choice_list):
-        name = str(c).lower().rstrip("+")
-        if "strike" in name or "defend" in name:
-            return i
-    return 0
-
-
-def _pick_grid_card_idx(choice_list: list) -> int:
-    """Pick a card for GRID (purge = pick worst, upgrade = pick best).
-
-    Without knowing the operation type, prioritise removing junk/basics.
-    If nothing junk-like, pick the first card (reasonable for upgrades too).
-    """
-    _PURGE_PRIORITY = {
-        "wound": 10, "burn": 10, "dazed": 10, "slimed": 10, "void": 10,
-        "regret": 9, "shame": 9, "doubt": 9, "pain": 9, "decay": 9,
-        "strike": 5, "defend": 4,
-    }
-    best_idx, best_score = 0, -1
-    for i, c in enumerate(choice_list):
-        name = str(c).lower().rstrip("+")
-        for key, score in _PURGE_PRIORITY.items():
-            if key in name and score > best_score:
-                best_score = score
-                best_idx = i
-    return best_idx
-
-
-def _pick_shop_item_idx(choice_list: list, gs, scr) -> Optional[int]:
-    """Pick an item to buy in the shop, or None to leave."""
-    gold = int(getattr(gs, "gold", 0) or 0)
-    if scr is None or gold < 50:
-        return None
-
-    prices: dict = {}
-    for attr in ("cards", "potions", "relics"):
-        for it in (getattr(scr, attr, None) or []):
-            nm = getattr(it, "name", None)
-            pr = getattr(it, "price", None)
-            if nm is not None and pr is not None:
-                prices[str(nm)] = int(pr)
-
-    # First pass: buy a good card/relic we can afford
-    for i, item in enumerate(choice_list):
-        item_str = str(item)
-        name_lower = item_str.lower()
-        if name_lower in ("purge",):
-            continue
-        price = prices.get(item_str)
-        if price is None or price <= 0 or gold < price:
-            continue
-        if name_lower in _GOOD_CARDS:
-            return i
-
-    # Second pass: relics (any relic is usually worth buying)
-    for it in (getattr(scr, "relics", None) or []):
-        relic_name = str(getattr(it, "name", ""))
-        price = prices.get(relic_name)
-        if price is not None and gold >= price:
-            for i, c in enumerate(choice_list):
-                if str(c) == relic_name:
-                    return i
-
-    return None
-
-
-def _pick_map_idx(choice_list: list, gs) -> int:
-    """MAP path selection: avoid elites when low, prefer middle when healthy."""
-    hp = int(getattr(gs, "current_hp", 0) or 0)
-    mhp = max(1, int(getattr(gs, "max_hp", 1) or 1))
-    n = len(choice_list)
-    # Low HP → safest path (first), healthy → middle path
-    if hp / mhp < 0.45:
-        return 0
-    return min(n // 2, n - 1)
-
-
-# ---------------------------------------------------------------------------
 # Main heuristic dispatcher
 # ---------------------------------------------------------------------------
 def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
@@ -368,7 +190,7 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
         if scr and getattr(scr, "can_pick_zero", False) and proceed_avail:
             return Action("proceed"), _PROCEED
         if choice_list:
-            idx = _pick_hand_select_idx(choice_list)
+            idx = pick_hand_select(choice_list)
             return ChooseAction(choice_index=idx), _CHOOSE_START + idx
         if proceed_avail:
             return Action("proceed"), _PROCEED
@@ -386,7 +208,7 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
             if proceed_avail:
                 return Action("proceed"), _PROCEED
         if choice_list:
-            idx = _pick_grid_card_idx(choice_list)
+            idx = pick_grid_card(choice_list)
             return ChooseAction(choice_index=idx), _CHOOSE_START + idx
         if proceed_avail:
             return Action("proceed"), _PROCEED
@@ -402,7 +224,7 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
         next_nodes = list(getattr(scr, "next_nodes", []) or []) if scr else []
         n = len(choice_list) or len(next_nodes)
         if n > 0:
-            idx = _pick_map_idx(choice_list, gs) if choice_list else 0
+            idx = pick_map(choice_list, gs) if choice_list else 0
             return ChooseAction(choice_index=idx), _CHOOSE_START + idx
         if boss_avail:
             return ChooseAction(name="boss"), _CHOOSE_START
@@ -413,7 +235,7 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
     # --- BOSS_REWARD ---
     if screen == "BOSS_REWARD":
         if choice_list:
-            idx = _pick_boss_relic_idx(choice_list)
+            idx = pick_boss_relic(choice_list)
             return ChooseAction(choice_index=idx), _CHOOSE_START + idx
         if proceed_avail:
             return Action("proceed"), _PROCEED
@@ -422,7 +244,7 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
     # --- CARD_REWARD ---
     if screen == "CARD_REWARD":
         if choice_list:
-            idx = _pick_card_reward_idx(choice_list)
+            idx = pick_card_reward(choice_list)
             return ChooseAction(choice_index=idx), _CHOOSE_START + idx
         if proceed_avail:
             return Action("proceed"), _PROCEED
@@ -436,14 +258,17 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
         scr_obj = getattr(gs, "screen", None)
         rewards = list(getattr(scr_obj, "rewards", []) or []) if scr_obj else []
         if rewards:
-            idx = _pick_combat_reward_from_objects(rewards, potions_full)
+            idx = pick_combat_reward_obj(rewards, potions_full)
             if idx >= 0:
                 return ChooseAction(choice_index=idx), _CHOOSE_START + idx
             if proceed_avail:
                 return Action("proceed"), _PROCEED
         if choice_list:
-            idx = _pick_combat_reward_idx(choice_list, potions_full=potions_full)
-            return ChooseAction(choice_index=idx), _CHOOSE_START + idx
+            idx = pick_combat_reward_str(choice_list, potions_full=potions_full)
+            if idx >= 0:
+                return ChooseAction(choice_index=idx), _CHOOSE_START + idx
+            if proceed_avail:
+                return Action("proceed"), _PROCEED
         if proceed_avail:
             return Action("proceed"), _PROCEED
         return None, None
@@ -451,7 +276,7 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
     # --- REST ---
     if screen == "REST":
         if choice_list:
-            idx = _pick_rest_idx(choice_list, gs)
+            idx = pick_rest(choice_list, gs)
             return ChooseAction(choice_index=idx), _CHOOSE_START + idx
         if proceed_avail:
             return Action("proceed"), _PROCEED
@@ -460,7 +285,7 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
     # --- EVENT ---
     if screen == "EVENT":
         if choice_list:
-            idx = _pick_event_idx(choice_list, gs)
+            idx = pick_event(choice_list, gs)
             return ChooseAction(choice_index=idx), _CHOOSE_START + idx
         options = list(getattr(scr, "options", []) or []) if scr else []
         if options:
@@ -486,7 +311,7 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
     # --- SHOP_SCREEN ---
     if screen == "SHOP_SCREEN":
         if choice_list:
-            idx = _pick_shop_item_idx(choice_list, gs, scr)
+            idx = pick_shop_item(choice_list, gs, scr)
             if idx is not None:
                 return ChooseAction(choice_index=idx), _CHOOSE_START + idx
         return Action("leave"), _LEAVE

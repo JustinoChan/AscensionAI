@@ -155,6 +155,7 @@ from sts_gym_env import (
     RewardTracker, _NOOP,
 )
 from ppo_model import PPOTrainer, GameBuffer
+from screen_handler import auto_handle_screen
 
 log("Imports done")
 
@@ -333,128 +334,7 @@ class PPOAgent:
         return spire_action
 
     def _auto_handle_screen(self, gs, screen_name: str) -> Optional[Action]:
-        """Handle only mechanical screens; decision screens fall through to RL.
-
-        Mechanical = no meaningful choice (the optimal action is always the same).
-        Decision = multiple options where the choice affects game outcome.
-        Returns an Action for mechanical screens, or None so RL decides.
-        """
-        in_combat = bool(getattr(gs, "in_combat", False))
-        choice_list = list(getattr(gs, "choice_list", []) or [])
-        proceed_avail = bool(getattr(gs, "proceed_available", False))
-        cancel_avail = bool(getattr(gs, "cancel_available", False))
-        scr = getattr(gs, "screen", None)
-
-        # In combat with normal action state → RL handles it
-        if in_combat and screen_name == "NONE":
-            return None
-
-        # --- Mechanical: CHEST — always open, then proceed ---
-        if screen_name == "CHEST":
-            if scr and getattr(scr, "chest_open", False):
-                return Action("proceed") if proceed_avail else Action("state")
-            return ChooseAction(name="open")
-
-        # --- Mechanical: HAND_SELECT with can_pick_zero — just skip ---
-        if screen_name == "HAND_SELECT":
-            if scr and getattr(scr, "can_pick_zero", False) and proceed_avail:
-                return Action("proceed")
-            if not choice_list:
-                if proceed_avail:
-                    return Action("proceed")
-                if cancel_avail:
-                    return Action("leave")
-            return None  # forced selection (discard etc.) → RL decides
-
-        # --- Mechanical: GRID — handle multi-select and confirmation ---
-        if screen_name == "GRID":
-            if scr and getattr(scr, "confirm_up", False):
-                return Action("proceed")
-            num_needed = int(getattr(scr, "num_cards", 1) or 1) if scr else 1
-            already = len(getattr(scr, "selected_cards", []) or []) if scr else 0
-            if already >= num_needed:
-                if proceed_avail:
-                    return Action("proceed")
-            if choice_list:
-                return ChooseAction(choice_index=0)
-            if proceed_avail:
-                return Action("proceed")
-            if cancel_avail:
-                return Action("leave")
-            return Action("proceed")
-
-        # --- Mechanical: MAP — boss fight or path selection ---
-        if screen_name == "MAP":
-            boss_avail = scr and getattr(scr, "boss_available", False)
-            if boss_avail and not choice_list:
-                return ChooseAction(name="boss")
-            next_nodes = list(getattr(scr, "next_nodes", []) or []) if scr else []
-            n = len(choice_list) or len(next_nodes)
-            if n > 0:
-                hp = int(getattr(gs, "current_hp", 0) or 0)
-                mhp = max(1, int(getattr(gs, "max_hp", 1) or 1))
-                idx = 0 if hp / mhp < 0.45 else min(n // 2, n - 1)
-                return ChooseAction(choice_index=idx)
-            if boss_avail:
-                return ChooseAction(name="boss")
-            if proceed_avail:
-                return Action("proceed")
-            return Action("state")
-
-        # --- Mechanical: COMBAT_REWARD — always pick all rewards ---
-        if screen_name == "COMBAT_REWARD":
-            potions_full = bool(getattr(gs, "are_potions_full", lambda: False)())
-            rewards = list(getattr(scr, "rewards", []) or []) if scr else []
-            if rewards:
-                for p in ("RELIC", "SAPPHIRE_KEY", "EMERALD_KEY",
-                          "GOLD", "STOLEN_GOLD", "POTION", "CARD"):
-                    if p == "POTION" and potions_full:
-                        continue
-                    for i, r in enumerate(rewards):
-                        rt = getattr(r, "reward_type", None)
-                        if rt is not None and rt.name == p:
-                            return ChooseAction(choice_index=i)
-                return Action("proceed") if proceed_avail else Action("state")
-            if choice_list:
-                for p in ["relic", "gold", "potion", "card"]:
-                    if p == "potion" and potions_full:
-                        continue
-                    for i, c in enumerate(choice_list):
-                        if p in str(c).lower():
-                            return ChooseAction(choice_index=i)
-                return Action("proceed") if proceed_avail else Action("state")
-            return Action("proceed") if proceed_avail else Action("state")
-
-        # --- Mechanical: SHOP — skip shops for now ---
-        if screen_name in ("SHOP_ROOM", "SHOP_SCREEN"):
-            if screen_name == "SHOP_SCREEN":
-                return Action("leave")
-            return Action("proceed") if proceed_avail else (
-                Action("leave") if cancel_avail else Action("proceed"))
-
-        # --- Mechanical: EVENT — pick first option if choices exist ---
-        if screen_name == "EVENT":
-            if choice_list:
-                return ChooseAction(choice_index=0)
-            options = list(getattr(scr, "options", []) or []) if scr else []
-            if options:
-                return ChooseAction(choice_index=0)
-            if proceed_avail:
-                return Action("proceed")
-            return Action("state")
-
-        # --- Decision screens → RL handles ---
-        # CARD_REWARD, REST, BOSS_REWARD, and any others with choices
-
-        # Trivial: no choices and only one possible navigation action
-        if not choice_list and not cancel_avail:
-            if proceed_avail:
-                return Action("proceed")
-            return Action("state")  # nothing available, poll
-        if not choice_list and cancel_avail and not proceed_avail:
-            return Action("leave")
-
-        return None  # choices available → RL decides
+        return auto_handle_screen(gs, screen_name, heuristic_all=False)
 
     def _end_game(self, final_gs=None, victory: bool = False):
         self.total_games += 1
