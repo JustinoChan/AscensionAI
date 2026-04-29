@@ -286,11 +286,31 @@ def auto_handle_screen(
         return Action("proceed") if proceed_avail else Action("state")
 
     # ---- SHOP ----
-    if screen_name in ("SHOP_ROOM", "SHOP_SCREEN"):
-        if screen_name == "SHOP_SCREEN":
-            return Action("leave")
-        return Action("proceed") if proceed_avail else (
-            Action("leave") if cancel_avail else Action("proceed"))
+    if screen_name == "SHOP_ROOM":
+        if proceed_avail:
+            return Action("proceed")
+        if cancel_avail:
+            return Action("cancel")
+        return Action("proceed")
+
+    if screen_name == "SHOP_SCREEN":
+        gold = int(getattr(gs, "gold", 0) or 0)
+        if scr is not None and gold >= 75:
+            for card in (getattr(scr, "cards", None) or []):
+                name = str(getattr(card, "name", "") or "")
+                price = int(getattr(card, "price", 999) or 999)
+                if name.lower() in GOOD_CARDS and gold >= price:
+                    return ChooseAction(name=name)
+            for relic in (getattr(scr, "relics", None) or []):
+                name = str(getattr(relic, "name", "") or "")
+                price = int(getattr(relic, "price", 999) or 999)
+                if gold >= price:
+                    return ChooseAction(name=name)
+            if getattr(scr, "purge_available", False):
+                purge_cost = int(getattr(scr, "purge_cost", 999) or 999)
+                if gold >= purge_cost:
+                    return ChooseAction(name="purge")
+        return Action("cancel")
 
     # ---- EVENT ----
     if screen_name == "EVENT":

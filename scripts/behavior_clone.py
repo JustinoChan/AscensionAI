@@ -79,6 +79,7 @@ from sts_gym_env import (
     MAX_HAND, MAX_MONSTERS, MAX_POTIONS,
 )
 
+from game_data import POTION_EFFECTS
 from screen_handler import (
     GOOD_CARDS, OK_CARDS, JUNK_CARDS,
     pick_card_reward, pick_combat_reward_obj, pick_combat_reward_str,
@@ -310,15 +311,59 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
 
     # --- SHOP_SCREEN ---
     if screen == "SHOP_SCREEN":
-        if choice_list:
-            idx = pick_shop_item(choice_list, gs, scr)
-            if idx is not None:
-                return ChooseAction(choice_index=idx), _CHOOSE_START + idx
-        return Action("leave"), _LEAVE
+        gold = int(getattr(gs, "gold", 0) or 0)
+        if scr is not None and gold >= 75:
+            for card in (getattr(scr, "cards", None) or []):
+                name = str(getattr(card, "name", "") or "")
+                price = int(getattr(card, "price", 999) or 999)
+                if name.lower() in GOOD_CARDS and gold >= price:
+                    return ChooseAction(name=name), _CHOOSE_START
+            for relic in (getattr(scr, "relics", None) or []):
+                name = str(getattr(relic, "name", "") or "")
+                price = int(getattr(relic, "price", 999) or 999)
+                if gold >= price:
+                    return ChooseAction(name=name), _CHOOSE_START
+            if getattr(scr, "purge_available", False):
+                purge_cost = int(getattr(scr, "purge_cost", 999) or 999)
+                if gold >= purge_cost:
+                    return ChooseAction(name="purge"), _CHOOSE_START
+        return Action("cancel"), _LEAVE
 
     # --- COMBAT ---
     if in_combat:
         incoming = estimate_incoming(monsters)
+
+        # -- Use potions when conditions warrant --
+        hp = int(getattr(gs, "current_hp", 0) or 0)
+        max_hp = max(1, int(getattr(gs, "max_hp", 1) or 1))
+        hp_pct = hp / max_hp
+        for k, pot in enumerate(potions[:MAX_POTIONS]):
+            pot_name = str(getattr(pot, "name", "") or "")
+            if pot_name in ("Potion Slot", "") or not getattr(pot, "can_use", False):
+                continue
+            effects = POTION_EFFECTS.get(pot_name, (0, 0, 0, 0, 0))
+            deals_damage, gives_block, gives_str, gives_dex, heals = effects
+            use = False
+            if heals and hp_pct < 0.35:
+                use = True
+            elif gives_block and hp_pct < 0.5 and incoming > 10:
+                use = True
+            elif (deals_damage or gives_str) and incoming > 15:
+                use = True
+            elif gives_dex and incoming > 10:
+                use = True
+            if use:
+                requires_target = getattr(pot, "requires_target", False)
+                if requires_target:
+                    tgt = pick_target(monsters, prefer_low_hp=True)
+                    if tgt is not None:
+                        tgt_idx = alive.index(tgt) if tgt in alive else 0
+                        if tgt_idx < MAX_MONSTERS:
+                            aid = _POTION_TARGETED_START + k * MAX_MONSTERS + tgt_idx
+                            return PotionAction(use=True, potion=pot, target_monster=tgt), aid
+                else:
+                    aid = _POTION_UNTARGETED_START + k
+                    return PotionAction(use=True, potion=pot), aid
 
         if play_avail and hand:
             best_card = None
