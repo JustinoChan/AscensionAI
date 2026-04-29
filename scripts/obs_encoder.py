@@ -14,6 +14,17 @@ from typing import Any, Dict, List, Tuple
 
 import numpy as np
 
+from game_data import (
+    CARD_ID_LIST,
+    CARD_MECHANICS,
+    POTION_EFFECTS,
+    RELIC_DB,
+    RELIC_FEATURE_DIM,
+    RELIC_FEATURE_NORMS,
+    R_RELIC_COUNT,
+    R_RELIC_VALUE,
+)
+
 
 # ---------------------------------------------------------------------------
 # Monster knowledge base — every STS1 monster with behavioral metadata.
@@ -143,11 +154,16 @@ MAX_CHOICES = 40
 
 PLAYER_STATE_DIM = 15
 SCREEN_TYPE_DIM = 14
-HAND_DIM = MAX_HAND * 10                     # 100
+HAND_CARD_DIM = 16                            # was 10: +4 identity +1 exhausts +1 upgraded
+HAND_DIM = MAX_HAND * HAND_CARD_DIM           # 160
 MONSTER_DIM = MAX_MONSTERS * _MONSTER_SLOT_DIM  # 5 * 29 = 145
 PLAYER_POWER_DIM = 20
 MONSTER_POWER_DIM = MAX_MONSTERS * 8          # 40
 CHOICE_DIM = 7
+RELIC_DIM = RELIC_FEATURE_DIM                 # 25
+POTION_SLOT_DIM = 8
+POTION_DIM = MAX_POTIONS * POTION_SLOT_DIM    # 40
+DECK_PROFILE_DIM = 20
 
 OBS_SIZE = (
     PLAYER_STATE_DIM
@@ -157,7 +173,10 @@ OBS_SIZE = (
     + PLAYER_POWER_DIM
     + MONSTER_POWER_DIM
     + CHOICE_DIM
-)  # 341
+    + RELIC_DIM
+    + POTION_DIM
+    + DECK_PROFILE_DIM
+)  # 486
 
 
 # ---------------------------------------------------------------------------
@@ -396,6 +415,53 @@ def _monster_behavior_vec(monster_id: str) -> np.ndarray:
     return np.array(flags, dtype=np.float32)
 
 
+# ---------------------------------------------------------------------------
+# Card identity embedding
+# ---------------------------------------------------------------------------
+_CARD_ID_EMBED_DIM = 4
+
+_CARD_ID_TO_IDX: Dict[str, int] = {}
+for _i, _cid in enumerate(CARD_ID_LIST):
+    _CARD_ID_TO_IDX[_cid.lower().replace(" ", "").replace("_", "")] = _i
+
+_CARD_EMBED_CACHE: Dict[int, np.ndarray] = {}
+
+
+def _card_embed(card_id: str) -> np.ndarray:
+    """Return a 4-dim identity vector for a card."""
+    key = card_id.lower().replace(" ", "").replace("_", "")
+    idx = _CARD_ID_TO_IDX.get(key, -1)
+    if idx in _CARD_EMBED_CACHE:
+        return _CARD_EMBED_CACHE[idx]
+    vec = np.zeros(_CARD_ID_EMBED_DIM, dtype=np.float32)
+    if idx < 0:
+        _CARD_EMBED_CACHE[idx] = vec
+        return vec
+    rng = np.random.RandomState(seed=idx + 1000)
+    vec = rng.randn(_CARD_ID_EMBED_DIM).astype(np.float32)
+    vec /= np.linalg.norm(vec) + 1e-8
+    _CARD_EMBED_CACHE[idx] = vec
+    return vec
+
+
+# ---------------------------------------------------------------------------
+# Relic ID normalisation for lookup
+# ---------------------------------------------------------------------------
+_RELIC_ID_NORM: Dict[str, str] = {}
+for _rid in RELIC_DB:
+    _RELIC_ID_NORM[
+        _rid.lower().replace(" ", "").replace("_", "")
+        .replace("-", "").replace("'", "")
+    ] = _rid
+
+
+def _relic_lookup(relic_id: str) -> str | None:
+    """Return the canonical RELIC_DB key for a relic_id, or None."""
+    key = (relic_id.lower().replace(" ", "").replace("_", "")
+           .replace("-", "").replace("'", ""))
+    return _RELIC_ID_NORM.get(key)
+
+
 def _encode_move_history(m: Any) -> np.ndarray:
     """Encode move_id, last_move_id, second_last_move_id as normalised floats."""
     vec = np.zeros(_MONSTER_MOVE_HIST_DIM, dtype=np.float32)
@@ -487,14 +553,15 @@ def encode_game_state(gs: Any) -> np.ndarray:
     obs[offset + sidx] = 1.0
     offset += SCREEN_TYPE_DIM
 
-    # === HAND CARDS (10 × 10 = 100) ===
+    # === HAND CARDS (10 × 16 = 160) ===
     for i in range(MAX_HAND):
-        base = offset + i * 10
+        base = offset + i * HAND_CARD_DIM
         if i < len(hand):
             card = hand[i]
             dmg, blk = _card_damage_block(card)
             ct = _card_type_str(card)
             cost = float(getattr(card, "cost", 0) or 0)
+            cid = str(getattr(card, "card_id", "") or "")
             obs[base + 0] = 1.0                                         # present
             obs[base + 1] = max(0.0, cost) / 4.0                        # cost
             obs[base + 2] = dmg / 40.0                                   # damage
@@ -505,6 +572,9 @@ def encode_game_state(gs: Any) -> np.ndarray:
             obs[base + 7] = 1.0 if ct in ("STATUS", "CURSE") else 0.0
             obs[base + 8] = 1.0 if getattr(card, "is_playable", False) else 0.0
             obs[base + 9] = 1.0 if getattr(card, "has_target", False) else 0.0
+            obs[base + 10:base + 10 + _CARD_ID_EMBED_DIM] = _card_embed(cid)
+            obs[base + 14] = 1.0 if getattr(card, "exhausts", False) else 0.0
+            obs[base + 15] = 1.0 if int(getattr(card, "upgrades", 0) or 0) > 0 else 0.0
     offset += HAND_DIM
 
     # === MONSTERS (5 × 29 = 145) ===
@@ -564,5 +634,117 @@ def encode_game_state(gs: Any) -> np.ndarray:
     choice_list = list(getattr(gs, "choice_list", []) or [])
     obs[offset] = len(choice_list) / float(MAX_CHOICES)
     offset += CHOICE_DIM
+
+    # === RELIC FEATURES (25) ===
+    relics = list(getattr(gs, "relics", []) or [])
+    relic_vec = np.zeros(RELIC_DIM, dtype=np.float32)
+    relic_count = 0
+    relic_value_sum = 0.0
+    for r in relics:
+        rid = str(getattr(r, "relic_id", "") or "")
+        canon = _relic_lookup(rid)
+        relic_count += 1
+        if canon is not None:
+            quality, effects = RELIC_DB[canon]
+            relic_value_sum += quality
+            for fidx, fval in effects.items():
+                relic_vec[fidx] += fval
+        else:
+            relic_value_sum += 1.0
+    relic_vec[R_RELIC_COUNT] = relic_count
+    relic_vec[R_RELIC_VALUE] = relic_value_sum
+    for fi in range(RELIC_DIM):
+        relic_vec[fi] /= RELIC_FEATURE_NORMS[fi]
+    obs[offset:offset + RELIC_DIM] = np.clip(relic_vec, -3.0, 3.0)
+    offset += RELIC_DIM
+
+    # === POTION SLOTS (5 × 8 = 40) ===
+    for i in range(MAX_POTIONS):
+        base = offset + i * POTION_SLOT_DIM
+        if i < len(potions):
+            p = potions[i]
+            pid = str(getattr(p, "potion_id", "") or "")
+            is_present = pid.lower() != "potion slot" and pid != ""
+            obs[base + 0] = 1.0 if is_present else 0.0
+            obs[base + 1] = 1.0 if getattr(p, "can_use", False) else 0.0
+            obs[base + 2] = 1.0 if getattr(p, "requires_target", False) else 0.0
+            effects = POTION_EFFECTS.get(pid, (0, 0, 0, 0, 0))
+            obs[base + 3] = float(effects[0])  # deals_damage
+            obs[base + 4] = float(effects[1])  # gives_block
+            obs[base + 5] = float(effects[2])  # gives_strength
+            obs[base + 6] = float(effects[3])  # gives_dex
+            obs[base + 7] = float(effects[4])  # heals
+    offset += POTION_DIM
+
+    # === DECK PROFILE (20) ===
+    n_deck = max(1, len(deck))
+    total_cost = 0.0
+    n_attacks = 0
+    n_skills = 0
+    n_powers = 0
+    n_status_curse = 0
+    n_exhaust = 0
+    n_draw = 0
+    n_aoe = 0
+    n_multi = 0
+    n_zero_cost = 0
+    str_scale_sum = 0.0
+    n_upgraded = 0
+    quality_sum = 0.0
+    key_cards = {"Barricade": 0, "Corruption": 0, "Demon Form": 0,
+                 "Feel No Pain": 0, "Limit Break": 0, "Offering": 0}
+    for c in deck:
+        cid = str(getattr(c, "card_id", "") or "")
+        ct = _card_type_str(c)
+        cost = float(getattr(c, "cost", 0) or 0)
+        total_cost += max(0.0, cost)
+        if ct == "ATTACK":
+            n_attacks += 1
+        elif ct == "SKILL":
+            n_skills += 1
+        elif ct == "POWER":
+            n_powers += 1
+        if ct in ("STATUS", "CURSE"):
+            n_status_curse += 1
+        if getattr(c, "exhausts", False):
+            n_exhaust += 1
+        if cost <= 0 and ct in ("ATTACK", "SKILL"):
+            n_zero_cost += 1
+        if int(getattr(c, "upgrades", 0) or 0) > 0:
+            n_upgraded += 1
+        mech = CARD_MECHANICS.get(cid)
+        if mech is not None:
+            draws, aoe, multi, sscale, qual = mech
+            n_draw += draws
+            if aoe:
+                n_aoe += 1
+            if multi:
+                n_multi += 1
+            str_scale_sum += sscale
+            quality_sum += qual
+        if cid in key_cards:
+            key_cards[cid] = 1
+
+    obs[offset + 0] = len(deck) / 40.0
+    obs[offset + 1] = (total_cost / n_deck) / 4.0
+    obs[offset + 2] = n_attacks / n_deck
+    obs[offset + 3] = n_skills / n_deck
+    obs[offset + 4] = n_powers / n_deck
+    obs[offset + 5] = n_status_curse / 10.0
+    obs[offset + 6] = n_exhaust / 10.0
+    obs[offset + 7] = n_draw / 10.0
+    obs[offset + 8] = n_aoe / 5.0
+    obs[offset + 9] = n_multi / 5.0
+    obs[offset + 10] = n_zero_cost / 10.0
+    obs[offset + 11] = str_scale_sum / 10.0
+    obs[offset + 12] = n_upgraded / n_deck
+    obs[offset + 13] = (quality_sum / n_deck) / 10.0
+    obs[offset + 14] = float(key_cards["Barricade"])
+    obs[offset + 15] = float(key_cards["Corruption"])
+    obs[offset + 16] = float(key_cards["Demon Form"])
+    obs[offset + 17] = float(key_cards["Feel No Pain"])
+    obs[offset + 18] = float(key_cards["Limit Break"])
+    obs[offset + 19] = float(key_cards["Offering"])
+    offset += DECK_PROFILE_DIM
 
     return obs
