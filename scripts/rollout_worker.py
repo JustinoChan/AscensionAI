@@ -232,7 +232,7 @@ class WorkerAgent:
         self.prev_mask = None
         self.pending_reward = 0.0
 
-        self._stuck_floor = -1
+        self._stuck_key = ""
         self._stuck_count = 0
         self._recent_actions: list[str] = []
         self._model_mtime = 0.0
@@ -248,6 +248,16 @@ class WorkerAgent:
                     log(f"Reloaded model (mtime={mtime:.0f})")
         except Exception as e:
             log(f"Model reload failed: {e}")
+
+    def _track_stuck(self, screen_name: str, action_cmd: str, in_combat: bool):
+        key = f"{screen_name}:{action_cmd}"
+        if key == self._stuck_key:
+            self._stuck_count += 1
+        else:
+            self._stuck_key = key
+            self._stuck_count = 1
+        if in_combat:
+            self._stuck_count = 0
 
     def on_state_change(self, gs) -> Action:
         try:
@@ -317,33 +327,25 @@ class WorkerAgent:
         if auto is not None:
             if VERBOSE:
                 log(f"  -> HEURISTIC: {auto.command}")
-            self._stuck_count = 0
+            self._track_stuck(screen_name, auto.command, in_combat=False)
             self.total_steps += 1
+            if self._stuck_count >= 10:
+                _dump_stuck_state(gs, screen_name, self.worker_id,
+                                  self._stuck_count, self._recent_actions)
+                log(f"STUCK (heuristic) on {screen_name} — dumped to bug_debug.log")
+                self._stuck_count = 0
+                proceed_avail = bool(getattr(gs, "proceed_available", False))
+                if proceed_avail:
+                    return Action("proceed")
+                if cancel_avail:
+                    return Action("leave")
             return auto
-
-        cur_floor = int(getattr(gs, "floor", -1) or -1)
-        if cur_floor == self._stuck_floor:
-            self._stuck_count += 1
-        else:
-            self._stuck_floor = cur_floor
-            self._stuck_count = 0
-
-        if self._stuck_count >= 30:
-            _dump_stuck_state(gs, screen_name, self.worker_id,
-                              self._stuck_count, self._recent_actions)
-            log(f"STUCK on {screen_name} floor={cur_floor} — dumped to bug_debug.log")
-            self._stuck_count = 0
-            proceed_avail = bool(getattr(gs, "proceed_available", False))
-            choice_list = list(getattr(gs, "choice_list", []) or [])
-            if proceed_avail:
-                return Action("proceed")
-            if choice_list:
-                return ChooseAction(choice_index=0)
-            return Action("proceed")
 
         action, log_prob, value = self.trainer.predict(obs, mask)
         spire_action = flat_action_to_spire_action(action, gs)
 
+        self._track_stuck(screen_name, spire_action.command,
+                          in_combat=bool(getattr(gs, "in_combat", False)))
         self._recent_actions.append(f"{screen_name}:{spire_action.command}")
         if len(self._recent_actions) > 20:
             self._recent_actions = self._recent_actions[-20:]
@@ -387,6 +389,11 @@ class WorkerAgent:
         if screen_name == "GRID":
             if scr and getattr(scr, "confirm_up", False):
                 return Action("proceed")
+            num_needed = int(getattr(scr, "num_cards", 1) or 1) if scr else 1
+            already = len(getattr(scr, "selected_cards", []) or []) if scr else 0
+            if already >= num_needed:
+                if proceed_avail:
+                    return Action("proceed")
             if choice_list:
                 return ChooseAction(choice_index=0)
             if proceed_avail:
@@ -409,15 +416,18 @@ class WorkerAgent:
             boss_avail = scr and getattr(scr, "boss_available", False)
             if boss_avail and not choice_list:
                 return ChooseAction(name="boss")
-            if choice_list:
+            next_nodes = list(getattr(scr, "next_nodes", []) or []) if scr else []
+            n = len(choice_list) or len(next_nodes)
+            if n > 0:
                 hp = int(getattr(gs, "current_hp", 0) or 0)
                 mhp = max(1, int(getattr(gs, "max_hp", 1) or 1))
-                n = len(choice_list)
                 idx = 0 if hp / mhp < 0.45 else min(n // 2, n - 1)
                 return ChooseAction(choice_index=idx)
             if boss_avail:
                 return ChooseAction(name="boss")
-            return Action("proceed") if proceed_avail else Action("state")
+            if proceed_avail:
+                return Action("proceed")
+            return Action("state")
 
         if screen_name == "BOSS_REWARD":
             return ChooseAction(choice_index=0) if choice_list else Action("proceed")
@@ -451,7 +461,7 @@ class WorkerAgent:
                         rt = getattr(r, "reward_type", None)
                         if rt is not None and rt.name == p:
                             return ChooseAction(choice_index=i)
-                return ChooseAction(choice_index=0)
+                return Action("proceed") if proceed_avail else Action("state")
             if choice_list:
                 for p in ["relic", "gold", "potion", "card"]:
                     if p == "potion" and potions_full:
@@ -459,7 +469,7 @@ class WorkerAgent:
                     for i, c in enumerate(choice_list):
                         if p in str(c).lower():
                             return ChooseAction(choice_index=i)
-                return ChooseAction(choice_index=0)
+                return Action("proceed") if proceed_avail else Action("state")
             return Action("proceed") if proceed_avail else Action("state")
 
         if screen_name == "REST":
@@ -480,7 +490,12 @@ class WorkerAgent:
         if screen_name == "EVENT":
             if choice_list:
                 return ChooseAction(choice_index=0)
-            return Action("proceed") if proceed_avail else Action("state")
+            options = list(getattr(scr, "options", []) or []) if scr else []
+            if options:
+                return ChooseAction(choice_index=0)
+            if proceed_avail:
+                return Action("proceed")
+            return Action("state")
 
         if not in_combat:
             if choice_list:
@@ -535,7 +550,7 @@ class WorkerAgent:
         self.prev_log_prob = None
         self.prev_value = None
         self.prev_mask = None
-        self._stuck_floor = -1
+        self._stuck_key = ""
         self._stuck_count = 0
         self._recent_actions.clear()
         self.initialized = False

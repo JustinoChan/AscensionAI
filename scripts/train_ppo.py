@@ -188,11 +188,20 @@ class PPOAgent:
         self.pending_reward = 0.0  # accumulates reward during auto-handled steps
         self.initialized = False
 
-        self._stuck_screen: Optional[str] = None
-        self._stuck_floor: int = -1
+        self._stuck_key: str = ""
         self._stuck_count: int = 0
         self._recent_actions: list[str] = []
 
+
+    def _track_stuck(self, screen_name: str, action_cmd: str, in_combat: bool):
+        key = f"{screen_name}:{action_cmd}"
+        if key == self._stuck_key:
+            self._stuck_count += 1
+        else:
+            self._stuck_key = key
+            self._stuck_count = 1
+        if in_combat:
+            self._stuck_count = 0
 
     def on_state_change(self, game_state) -> Action:
         try:
@@ -277,42 +286,30 @@ class PPOAgent:
         # ---- Auto-handle "mechanical" screens that don't need RL ----
         auto = self._auto_handle_screen(gs, screen_name)
         if auto is not None:
-            self._stuck_count = 0
+            self._track_stuck(screen_name, auto.command, in_combat=False)
             self.total_steps += 1
+            if self._stuck_count >= 10:
+                _dump_stuck_state(gs, screen_name, self._stuck_count,
+                                  self._recent_actions)
+                log(f"  STUCK (heuristic) on {screen_name} — dumped to bug_debug.log")
+                self._stuck_count = 0
+                proceed_avail = bool(getattr(gs, "proceed_available", False))
+                cancel_avail = bool(getattr(gs, "cancel_available", False))
+                if proceed_avail:
+                    return Action("proceed")
+                if cancel_avail:
+                    return Action("leave")
             if self.total_steps % 5 == 1:
                 log(f"  step={self.total_steps} floor={getattr(gs, 'floor', '?')} "
                     f"screen={screen_name} AUTO→{auto.command if hasattr(auto, 'command') else type(auto).__name__}")
             return auto  # reward will accumulate in pending_reward
 
-        # ---- Stuck detection: same floor too many steps → force action ----
-        cur_floor = int(getattr(gs, "floor", -1) or -1)
-        if cur_floor == self._stuck_floor:
-            self._stuck_count += 1
-        else:
-            self._stuck_floor = cur_floor
-            self._stuck_count = 0
-        self._stuck_screen = screen_name
-
-        if self._stuck_count >= 30:
-            _dump_stuck_state(gs, screen_name, self._stuck_count,
-                              self._recent_actions)
-            log(f"  STUCK on {screen_name} floor={cur_floor} — dumped to bug_debug.log")
-            self._stuck_count = 0
-            proceed_avail = bool(getattr(gs, "proceed_available", False))
-            cancel_avail = bool(getattr(gs, "cancel_available", False))
-            choice_list = list(getattr(gs, "choice_list", []) or [])
-            if proceed_avail:
-                return Action("proceed")
-            if cancel_avail:
-                return Action("leave")
-            if choice_list:
-                return ChooseAction(choice_index=0)
-            return Action("proceed")
-
         # Pick next action via RL
         action, log_prob, value = self.trainer.predict(obs, mask)
         spire_action = flat_action_to_spire_action(action, gs)
 
+        self._track_stuck(screen_name, spire_action.command,
+                          in_combat=bool(getattr(gs, "in_combat", False)))
         self._recent_actions.append(f"{screen_name}:{spire_action.command}")
         if len(self._recent_actions) > 20:
             self._recent_actions = self._recent_actions[-20:]
@@ -369,24 +366,40 @@ class PPOAgent:
                     return Action("leave")
             return None  # forced selection (discard etc.) → RL decides
 
-        # --- Mechanical: GRID confirmation — just confirm ---
+        # --- Mechanical: GRID — handle multi-select and confirmation ---
         if screen_name == "GRID":
             if scr and getattr(scr, "confirm_up", False):
                 return Action("proceed")
-            if not choice_list:
+            num_needed = int(getattr(scr, "num_cards", 1) or 1) if scr else 1
+            already = len(getattr(scr, "selected_cards", []) or []) if scr else 0
+            if already >= num_needed:
                 if proceed_avail:
                     return Action("proceed")
-                if cancel_avail:
-                    return Action("leave")
+            if choice_list:
+                return ChooseAction(choice_index=0)
+            if proceed_avail:
                 return Action("proceed")
-            return None  # card selection (upgrade/transform/purge) → RL decides
+            if cancel_avail:
+                return Action("leave")
+            return Action("proceed")
 
-        # --- Mechanical: MAP boss-only (no path choices) ---
+        # --- Mechanical: MAP — boss fight or path selection ---
         if screen_name == "MAP":
             boss_avail = scr and getattr(scr, "boss_available", False)
             if boss_avail and not choice_list:
                 return ChooseAction(name="boss")
-            return None  # path selection → RL decides
+            next_nodes = list(getattr(scr, "next_nodes", []) or []) if scr else []
+            n = len(choice_list) or len(next_nodes)
+            if n > 0:
+                hp = int(getattr(gs, "current_hp", 0) or 0)
+                mhp = max(1, int(getattr(gs, "max_hp", 1) or 1))
+                idx = 0 if hp / mhp < 0.45 else min(n // 2, n - 1)
+                return ChooseAction(choice_index=idx)
+            if boss_avail:
+                return ChooseAction(name="boss")
+            if proceed_avail:
+                return Action("proceed")
+            return Action("state")
 
         # --- Mechanical: COMBAT_REWARD — always pick all rewards ---
         if screen_name == "COMBAT_REWARD":
@@ -401,7 +414,7 @@ class PPOAgent:
                         rt = getattr(r, "reward_type", None)
                         if rt is not None and rt.name == p:
                             return ChooseAction(choice_index=i)
-                return ChooseAction(choice_index=0)
+                return Action("proceed") if proceed_avail else Action("state")
             if choice_list:
                 for p in ["relic", "gold", "potion", "card"]:
                     if p == "potion" and potions_full:
@@ -409,7 +422,7 @@ class PPOAgent:
                     for i, c in enumerate(choice_list):
                         if p in str(c).lower():
                             return ChooseAction(choice_index=i)
-                return ChooseAction(choice_index=0)
+                return Action("proceed") if proceed_avail else Action("state")
             return Action("proceed") if proceed_avail else Action("state")
 
         # --- Mechanical: SHOP — skip shops for now ---
@@ -419,8 +432,19 @@ class PPOAgent:
             return Action("proceed") if proceed_avail else (
                 Action("leave") if cancel_avail else Action("proceed"))
 
+        # --- Mechanical: EVENT — pick first option if choices exist ---
+        if screen_name == "EVENT":
+            if choice_list:
+                return ChooseAction(choice_index=0)
+            options = list(getattr(scr, "options", []) or []) if scr else []
+            if options:
+                return ChooseAction(choice_index=0)
+            if proceed_avail:
+                return Action("proceed")
+            return Action("state")
+
         # --- Decision screens → RL handles ---
-        # CARD_REWARD, REST, EVENT, BOSS_REWARD, and any others with choices
+        # CARD_REWARD, REST, BOSS_REWARD, and any others with choices
 
         # Trivial: no choices and only one possible navigation action
         if not choice_list and not cancel_avail:
@@ -483,8 +507,7 @@ class PPOAgent:
         self.prev_action = None
         self.prev_log_prob = None
         self.prev_value = None
-        self._stuck_screen = None
-        self._stuck_floor = -1
+        self._stuck_key = ""
         self._stuck_count = 0
         self._recent_actions.clear()
         self.prev_mask = None

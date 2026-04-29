@@ -180,7 +180,7 @@ def _pick_card_reward_idx(choice_list: list) -> int:
 
 
 def _pick_combat_reward_from_objects(rewards: list, potions_full: bool = False) -> int:
-    """Pick reward from CombatReward objects in priority order."""
+    """Pick reward from CombatReward objects in priority order. Returns -1 if nothing pickable."""
     for p in ("RELIC", "SAPPHIRE_KEY", "EMERALD_KEY",
               "GOLD", "STOLEN_GOLD", "POTION", "CARD"):
         if p == "POTION" and potions_full:
@@ -189,7 +189,7 @@ def _pick_combat_reward_from_objects(rewards: list, potions_full: bool = False) 
             rt = getattr(r, "reward_type", None)
             if rt is not None and rt.name == p:
                 return i
-    return 0
+    return -1
 
 
 def _pick_combat_reward_idx(choice_list: list, potions_full: bool = False) -> int:
@@ -380,6 +380,11 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
     if screen == "GRID":
         if scr and getattr(scr, "confirm_up", False):
             return Action("proceed"), _PROCEED
+        num_needed = int(getattr(scr, "num_cards", 1) or 1) if scr else 1
+        already = len(getattr(scr, "selected_cards", []) or []) if scr else 0
+        if already >= num_needed:
+            if proceed_avail:
+                return Action("proceed"), _PROCEED
         if choice_list:
             idx = _pick_grid_card_idx(choice_list)
             return ChooseAction(choice_index=idx), _CHOOSE_START + idx
@@ -394,9 +399,13 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
         boss_avail = scr and getattr(scr, "boss_available", False)
         if boss_avail and not choice_list:
             return ChooseAction(name="boss"), _CHOOSE_START
-        if choice_list:
-            idx = _pick_map_idx(choice_list, gs)
+        next_nodes = list(getattr(scr, "next_nodes", []) or []) if scr else []
+        n = len(choice_list) or len(next_nodes)
+        if n > 0:
+            idx = _pick_map_idx(choice_list, gs) if choice_list else 0
             return ChooseAction(choice_index=idx), _CHOOSE_START + idx
+        if boss_avail:
+            return ChooseAction(name="boss"), _CHOOSE_START
         if proceed_avail:
             return Action("proceed"), _PROCEED
         return None, None
@@ -428,7 +437,10 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
         rewards = list(getattr(scr_obj, "rewards", []) or []) if scr_obj else []
         if rewards:
             idx = _pick_combat_reward_from_objects(rewards, potions_full)
-            return ChooseAction(choice_index=idx), _CHOOSE_START + idx
+            if idx >= 0:
+                return ChooseAction(choice_index=idx), _CHOOSE_START + idx
+            if proceed_avail:
+                return Action("proceed"), _PROCEED
         if choice_list:
             idx = _pick_combat_reward_idx(choice_list, potions_full=potions_full)
             return ChooseAction(choice_index=idx), _CHOOSE_START + idx
@@ -450,6 +462,9 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
         if choice_list:
             idx = _pick_event_idx(choice_list, gs)
             return ChooseAction(choice_index=idx), _CHOOSE_START + idx
+        options = list(getattr(scr, "options", []) or []) if scr else []
+        if options:
+            return ChooseAction(choice_index=0), _CHOOSE_START
         if proceed_avail:
             return Action("proceed"), _PROCEED
         return None, None
