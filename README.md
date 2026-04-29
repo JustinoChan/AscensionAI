@@ -12,8 +12,8 @@ STS Game  <-->  Communication Mod  <-->  Python Agent (stdin/stdout)
                                      PPOTrainer (Actor-Critic MLP)
 ```
 
-- **All decision screens** (combat, card rewards, events, rest, shop, map, boss relics) are handled by the RL policy network
-- **Mechanical screens** (chest open, grid confirm, boss node) are auto-handled since the optimal action is always the same
+- **Decision screens** (combat, card rewards, rest, boss relics) are handled by the RL policy network
+- **Heuristic screens** (events, map paths, combat rewards, shops, chests, grid select) are auto-handled with fallback logic for edge cases (full potions, multi-select grids, empty choice lists)
 - The observation encoder captures player state, hand cards, monster identity/behavior/intent/powers, and screen context
 - Action masking ensures only legal actions are chosen
 
@@ -200,19 +200,21 @@ python scripts/train_offline.py --model models/ppo_sts.pt --data rollouts_shared
 
 ## Log Files
 
-All scripts write debug logs to the project root:
+All logs are written to the `logs/` directory:
 
 | Log file | Source |
 |----------|--------|
-| `train_bc_ppo_debug.log` | `train_bc_ppo.py` — BC + PPO end-to-end progress |
-| `train_debug.log` | `train_ppo.py` — PPO-only training progress |
-| `bc_debug.log` | `behavior_clone.py` — demo collection + supervised training |
-| `worker_N_debug.log` | `rollout_worker.py` — per-worker game progress |
-| `train_offline_debug.log` | `train_offline.py` — offline PPO update stats |
-| `eval_debug.log` | `eval_model.py` — evaluation results |
-| `game_logger_debug.log` | `game_logger.py` — passive game state logging |
+| `logs/train_bc_ppo_debug.log` | `train_bc_ppo.py` — BC + PPO end-to-end progress |
+| `logs/train_debug.log` | `train_ppo.py` — PPO-only training progress |
+| `logs/bc_debug.log` | `behavior_clone.py` — demo collection + supervised training |
+| `logs/worker_N_debug.log` | `rollout_worker.py` — per-worker game progress |
+| `logs/train_offline_debug.log` | `train_offline.py` — offline PPO update stats |
+| `logs/eval_debug.log` | `eval_model.py` — evaluation results |
+| `logs/game_logger_debug.log` | `game_logger.py` — passive game state logging |
+| `logs/bug_debug.log` | Stuck-state detection dumps for debugging freezes |
+| `logs/training_stats.csv` | Per-game training metrics (floor, HP, reward, loss) |
 
-Training stats are written to `logs/training_stats.csv` and can be visualized with:
+Training stats can be visualized with:
 
 ```bash
 python scripts/plot_training.py --save logs/training_plot.png
@@ -237,6 +239,7 @@ AscensionAI/
 │   ├── game_logger.py        # Passive game state recorder
 │   ├── plot_training.py      # Training stats visualization
 │   └── analyze_trace.py      # Game logger trace analyzer
+├── logs/                     # Debug logs, training stats, stuck-state dumps
 ├── external/
 │   └── spirecomm/            # SpireComm library (Communication Mod protocol)
 ├── requirements.txt
@@ -250,7 +253,7 @@ AscensionAI/
 
 2. **Action space** (`sts_gym_env.py`): 134 discrete actions covering targeted/untargeted card plays (50+10), end turn, targeted/untargeted potions (25+5), choice selection (40), proceed, leave, and no-op. Illegal actions are masked out per game state.
 
-3. **Reward shaping** (`sts_gym_env.py`): Dense per-step rewards for gold, relics, floor progression, combat damage, card management, and act advancement — plus terminal bonuses (+50 victory, -5 defeat).
+3. **Reward shaping** (`sts_gym_env.py`): Dense per-step rewards for gold, relics, floor progression, combat damage, card management, and act advancement — plus terminal bonuses (+50 victory, -5 defeat). Minion-spawner enemies (Gremlin Leader, Reptomancer, Bronze Automaton) receive bonus damage and kill rewards to encourage the RL to prioritize them.
 
 4. **Behavior cloning** (`behavior_clone.py`): A hand-coded heuristic plays full games covering every decision surface. The neural network trains on these demonstrations via cross-entropy loss to get a reasonable starting policy.
 
