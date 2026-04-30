@@ -18,24 +18,45 @@ from spirecomm.communication.action import Action, ChooseAction
 # Card knowledge
 # ---------------------------------------------------------------------------
 GOOD_CARDS = frozenset({
-    "inflame", "shrug it off", "anger", "uppercut", "offering",
-    "battle trance", "headbutt", "feed", "impervious", "demon form",
-    "metallicize", "reaper", "limit break", "barricade", "corruption",
+    # Powers — scaling / build-defining
+    "inflame", "demon form", "metallicize", "barricade", "corruption",
+    "feel no pain", "dark embrace", "evolve", "berserk",
+    # Skills — universally strong
+    "shrug it off", "offering", "battle trance", "impervious",
+    "disarm", "shockwave", "burning pact", "double tap",
+    "spot weakness",
+    # Attacks — high impact
+    "uppercut", "headbutt", "feed", "reaper", "whirlwind",
+    "immolate", "fiend fire", "limit break",
+    # Colorless
+    "apotheosis",
 })
 OK_CARDS = frozenset({
-    "cleave", "thunderclap", "iron wave", "body slam", "carnage",
-    "pummel", "flame barrier", "feel no pain", "dark embrace",
-    "second wind", "ghostly armor", "disarm", "clothesline",
-    "power through", "true grit", "fire breathing",
+    # Common attacks
+    "anger", "cleave", "thunderclap", "iron wave", "body slam",
+    "heavy blade", "pommel strike", "sword boomerang",
+    # Uncommon attacks
+    "carnage", "pummel", "dropkick", "blood for blood",
+    "hemokinesis", "sever soul", "bludgeon",
+    # Skills
+    "flame barrier", "second wind", "ghostly armor", "clothesline",
+    "power through", "true grit", "entrench", "intimidate",
+    "sentinel", "seeing red", "warcry", "armaments", "exhume",
+    # Powers
+    "fire breathing", "brutality", "rage", "juggernaut",
 })
 JUNK_CARDS = frozenset({
     "wound", "burn", "dazed", "slimed", "void",
     "regret", "shame", "doubt", "pain", "decay", "parasite",
+    "normality", "clumsy", "injury", "writhe", "pride",
+    "ascendersbane", "necronomicurse",
 })
 
 _PURGE_PRIORITY = {
     "wound": 10, "burn": 10, "dazed": 10, "slimed": 10, "void": 10,
-    "regret": 9, "shame": 9, "doubt": 9, "pain": 9, "decay": 9,
+    "normality": 10, "pain": 10, "decay": 10, "parasite": 10,
+    "regret": 9, "shame": 9, "doubt": 9, "clumsy": 9, "injury": 9,
+    "writhe": 9, "pride": 9, "necronomicurse": 9, "ascendersbane": 9,
     "strike": 5, "defend": 4,
 }
 
