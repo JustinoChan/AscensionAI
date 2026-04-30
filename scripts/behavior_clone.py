@@ -91,6 +91,12 @@ log("Imports done")
 
 
 # ---------------------------------------------------------------------------
+# Shop visit tracking (prevents SHOP_ROOM ↔ SHOP_SCREEN infinite loop)
+# ---------------------------------------------------------------------------
+_visited_shop_floors: set = set()
+
+
+# ---------------------------------------------------------------------------
 # Heuristic action picker
 # ---------------------------------------------------------------------------
 def _screen_name(gs) -> str:
@@ -297,8 +303,10 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
 
     # --- SHOP_ROOM ---
     if screen == "SHOP_ROOM":
+        floor = int(getattr(gs, "floor", 0) or 0)
         gold = int(getattr(gs, "gold", 0) or 0)
-        if choice_list and gold >= 75:
+        if floor not in _visited_shop_floors and gold >= 50 and choice_list:
+            _visited_shop_floors.add(floor)
             lower = [str(c).lower() for c in choice_list]
             for i, c in enumerate(lower):
                 if "shop" in c or "merchant" in c:
@@ -312,21 +320,33 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
     # --- SHOP_SCREEN ---
     if screen == "SHOP_SCREEN":
         gold = int(getattr(gs, "gold", 0) or 0)
-        if scr is not None and gold >= 75:
+        if scr is not None and gold >= 30:
             for card in (getattr(scr, "cards", None) or []):
                 name = str(getattr(card, "name", "") or "")
                 price = int(getattr(card, "price", 999) or 999)
                 if name.lower() in GOOD_CARDS and gold >= price:
+                    return ChooseAction(name=name), _CHOOSE_START
+            if getattr(scr, "purge_available", False):
+                purge_cost = int(getattr(scr, "purge_cost", 999) or 999)
+                if gold >= purge_cost:
+                    return ChooseAction(name="purge"), _CHOOSE_START
+            for card in (getattr(scr, "cards", None) or []):
+                name = str(getattr(card, "name", "") or "")
+                price = int(getattr(card, "price", 999) or 999)
+                if name.lower() in OK_CARDS and gold >= price:
                     return ChooseAction(name=name), _CHOOSE_START
             for relic in (getattr(scr, "relics", None) or []):
                 name = str(getattr(relic, "name", "") or "")
                 price = int(getattr(relic, "price", 999) or 999)
                 if gold >= price:
                     return ChooseAction(name=name), _CHOOSE_START
-            if getattr(scr, "purge_available", False):
-                purge_cost = int(getattr(scr, "purge_cost", 999) or 999)
-                if gold >= purge_cost:
-                    return ChooseAction(name="purge"), _CHOOSE_START
+            potions_full = bool(getattr(gs, "are_potions_full", lambda: False)())
+            if not potions_full:
+                for pot in (getattr(scr, "potions", None) or []):
+                    name = str(getattr(pot, "name", "") or "")
+                    price = int(getattr(pot, "price", 999) or 999)
+                    if gold >= price:
+                        return ChooseAction(name=name), _CHOOSE_START
         return Action("cancel"), _LEAVE
 
     # --- COMBAT ---
@@ -439,6 +459,7 @@ class DemoCollector:
         if terminal:
             self.games_done += 1
             self.initialized = False
+            _visited_shop_floors.clear()
             log(f"Demo game #{self.games_done} ended. "
                 f"Samples so far: {len(self.observations)}, total_steps={self.total_steps}")
             proceed_avail = bool(getattr(gs, "proceed_available", False))

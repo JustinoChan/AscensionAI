@@ -295,21 +295,33 @@ def auto_handle_screen(
 
     if screen_name == "SHOP_SCREEN":
         gold = int(getattr(gs, "gold", 0) or 0)
-        if scr is not None and gold >= 75:
+        if scr is not None and gold >= 30:
             for card in (getattr(scr, "cards", None) or []):
                 name = str(getattr(card, "name", "") or "")
                 price = int(getattr(card, "price", 999) or 999)
                 if name.lower() in GOOD_CARDS and gold >= price:
+                    return ChooseAction(name=name)
+            if getattr(scr, "purge_available", False):
+                purge_cost = int(getattr(scr, "purge_cost", 999) or 999)
+                if gold >= purge_cost:
+                    return ChooseAction(name="purge")
+            for card in (getattr(scr, "cards", None) or []):
+                name = str(getattr(card, "name", "") or "")
+                price = int(getattr(card, "price", 999) or 999)
+                if name.lower() in OK_CARDS and gold >= price:
                     return ChooseAction(name=name)
             for relic in (getattr(scr, "relics", None) or []):
                 name = str(getattr(relic, "name", "") or "")
                 price = int(getattr(relic, "price", 999) or 999)
                 if gold >= price:
                     return ChooseAction(name=name)
-            if getattr(scr, "purge_available", False):
-                purge_cost = int(getattr(scr, "purge_cost", 999) or 999)
-                if gold >= purge_cost:
-                    return ChooseAction(name="purge")
+            potions_full = bool(getattr(gs, "are_potions_full", lambda: False)())
+            if not potions_full:
+                for pot in (getattr(scr, "potions", None) or []):
+                    name = str(getattr(pot, "name", "") or "")
+                    price = int(getattr(pot, "price", 999) or 999)
+                    if gold >= price:
+                        return ChooseAction(name=name)
         return Action("cancel")
 
     # ---- EVENT ----

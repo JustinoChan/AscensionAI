@@ -185,15 +185,47 @@ class StateLogger:
                 self.last_sig = sig
                 self.count += 1
                 self._write(rec)
-                if self.count <= 5 or self.count % 25 == 0:
-                    dlog(
-                        f"state #{self.count}: screen={rec.get('screen_type')} "
-                        f"floor={rec.get('floor')} choices={len(rec.get('choice_list') or [])}"
-                    )
+                self._log_state(rec, gs)
         except Exception as e:
             dlog(f"on_state_change error: {e}")
         time.sleep(POLL_THROTTLE_SEC)
         return Action("state")
+
+    def _log_state(self, rec: dict, gs: Any) -> None:
+        screen = rec.get("screen_type", "?")
+        choices = rec.get("choice_list") or []
+        flags = []
+        for flag in ("proceed", "cancel", "choice", "play", "end", "potion"):
+            if rec.get(f"{flag}_available"):
+                flags.append(flag)
+        flag_str = ",".join(flags) if flags else "none"
+
+        dlog(
+            f"#{self.count} screen={screen} floor={rec.get('floor')} "
+            f"hp={rec.get('current_hp')}/{rec.get('max_hp')} "
+            f"gold={rec.get('gold')} flags=[{flag_str}] "
+            f"choices({len(choices)})={choices[:8]}"
+        )
+
+        scr = getattr(gs, "screen", None)
+        if screen in ("SHOP_ROOM", "SHOP_SCREEN") and scr is not None:
+            cards = getattr(scr, "cards", None) or []
+            relics = getattr(scr, "relics", None) or []
+            potions = getattr(scr, "potions", None) or []
+            purge = getattr(scr, "purge_available", False)
+            purge_cost = getattr(scr, "purge_cost", None)
+            dlog(f"  SHOP cards={[(str(getattr(c,'name',c)), getattr(c,'price','?')) for c in cards]}")
+            dlog(f"  SHOP relics={[(str(getattr(r,'name',r)), getattr(r,'price','?')) for r in relics]}")
+            if potions:
+                dlog(f"  SHOP potions={[(str(getattr(p,'name',p)), getattr(p,'price','?')) for p in potions]}")
+            dlog(f"  SHOP purge_available={purge} purge_cost={purge_cost}")
+
+        if screen in ("COMBAT_REWARD",) and scr is not None:
+            rewards = getattr(scr, "rewards", None) or []
+            dlog(f"  REWARDS={[_shallow(r, depth=1) for r in rewards]}")
+
+        if screen in ("CARD_REWARD", "BOSS_REWARD", "REST", "EVENT", "HAND_SELECT", "GRID"):
+            dlog(f"  DETAIL screen_obj={_shallow(scr, depth=2)}")
 
     def on_out_of_game(self) -> Action:
         rec = {
