@@ -1166,6 +1166,52 @@ class AscensionApp:
         _logger.info(f"Orphan sweep done: scanned {scanned} java procs, killed {killed}")
         return killed
 
+    _OUR_SCRIPTS = (
+        "rollout_worker.py", "train_ppo.py", "train_bc_ppo.py",
+        "behavior_clone.py", "eval_model.py", "game_logger.py",
+        "train_offline.py",
+    )
+
+    def _kill_orphan_python_scripts(self) -> int:
+        """Kill any Python processes still running our scripts."""
+        _logger.info("Sweeping for orphan Python script processes...")
+        try:
+            import psutil
+        except ImportError:
+            _logger.warning("psutil not available for Python orphan sweep")
+            return 0
+
+        killed = 0
+        scanned = 0
+        our_pid = os.getpid()
+
+        for p in psutil.process_iter(["pid", "name", "cmdline"]):
+            try:
+                if p.info["pid"] == our_pid:
+                    continue
+                name = (p.info.get("name") or "").lower()
+                if not name.startswith("python"):
+                    continue
+                scanned += 1
+                cmdline = " ".join(p.info.get("cmdline") or [])
+                matched_script = None
+                for script in self._OUR_SCRIPTS:
+                    if script in cmdline:
+                        matched_script = script
+                        break
+                if matched_script:
+                    _logger.info(f"Killing orphan python PID {p.info['pid']}: "
+                                 f"script={matched_script}, cmdline={cmdline[:200]}")
+                    p.kill()
+                    killed += 1
+            except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+                _logger.debug(f"Python orphan sweep: PID access issue: {e}")
+            except Exception as e:
+                _logger.warning(f"Python orphan sweep unexpected error: {e}")
+
+        _logger.info(f"Python orphan sweep done: scanned {scanned} python procs, killed {killed}")
+        return killed
+
     def _stop(self):
         _logger.info("=" * 40)
         _logger.info("STOP sequence starting")
@@ -1209,12 +1255,15 @@ class AscensionApp:
                 _logger.debug(f"Launcher PID {proc.pid} already exited (rc={poll})")
         self.processes.clear()
 
-        orphans = self._kill_orphan_sts_instances()
-        closed += orphans
+        java_orphans = self._kill_orphan_sts_instances()
+        py_orphans = self._kill_orphan_python_scripts()
+        closed += java_orphans + py_orphans
         if closed:
-            self._append_log("All", f"Closed {closed} Slay the Spire instance(s).")
+            self._append_log("All", f"Closed {closed} process(es) "
+                             f"({java_orphans} java, {py_orphans} python scripts).")
         _logger.info(f"Stop complete: {closed} process(es) closed "
-                     f"({closed - orphans} tracked + {orphans} orphans)")
+                     f"(tracked launchers + {java_orphans} java orphans "
+                     f"+ {py_orphans} python orphans)")
 
         self.start_btn.configure(state="normal")
         self.stop_btn.configure(state="disabled")
