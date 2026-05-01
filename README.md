@@ -7,14 +7,14 @@ A reinforcement learning agent that learns to play **Slay the Spire** (Ironclad)
 ```
 STS Game  <-->  Communication Mod  <-->  Python Agent (stdin/stdout)
                                               |
-                                     obs_encoder (341-d vector)
+                                     obs_encoder (525-d vector)
                                      sts_gym_env (134 discrete actions)
                                      PPOTrainer (Actor-Critic MLP)
 ```
 
-- **Decision screens** (combat, card rewards, rest, boss relics) are handled by the RL policy network
-- **Heuristic screens** (events, map paths, combat rewards, shops, chests, grid select) are auto-handled with fallback logic for edge cases (full potions, multi-select grids, empty choice lists)
-- The observation encoder captures player state, hand cards, monster identity/behavior/intent/powers, and screen context
+- **Decision screens** (combat, card rewards, rest, boss relics, map pathing) are handled by the RL policy network
+- **Heuristic screens** (events, combat rewards, shops, chests, grid select) are auto-handled with fallback logic for edge cases (full potions, multi-select grids, card matching events, empty choice lists)
+- The observation encoder captures player state, hand cards, monster identity/behavior/intent/powers, screen context, and map path lookahead
 - Action masking ensures only legal actions are chosen
 
 ### Training Pipeline
@@ -233,8 +233,10 @@ AscensionAI/
 │   ├── rollout_worker.py     # Parallel rollout collector (per STS instance)
 │   ├── train_offline.py      # Offline PPO trainer for parallel workers
 │   ├── ppo_model.py          # PPOTrainer & GameBuffer (shared by all scripts)
-│   ├── obs_encoder.py        # Game state → 341-d vector (with monster knowledge base)
+│   ├── obs_encoder.py        # Game state → 525-d vector (with monster knowledge base)
 │   ├── sts_gym_env.py        # Action space (134 actions), masking, rewards
+│   ├── screen_handler.py     # Shared non-combat screen handler (heuristic + RL delegation)
+│   ├── game_data.py          # Card, relic, and potion databases for the encoder
 │   ├── eval_model.py         # Greedy evaluation harness
 │   ├── game_logger.py        # Passive game state recorder
 │   ├── plot_training.py      # Training stats visualization
@@ -249,7 +251,7 @@ AscensionAI/
 
 ## How It Works
 
-1. **Observation encoding** (`obs_encoder.py`): Converts the full game state into a 341-float vector covering player stats, hand cards, monster identity/behavior/intents/powers, and screen context. Includes a database of all 66 STS monsters with behavioral flags (enrages on skills, splits, scales strength, multi-hit, retaliates, escapes) and a unique identity embedding per monster.
+1. **Observation encoding** (`obs_encoder.py`): Converts the full game state into a 525-float vector covering player stats, hand cards, monster identity/behavior/intents/powers, screen context, relic/potion inventories, deck profile, and map path lookahead. Includes a database of all 66 STS monsters with behavioral flags (enrages on skills, splits, scales strength, multi-hit, retaliates, escapes) and a unique identity embedding per monster. Map encoding uses BFS lookahead to provide elite/rest/combat density for each path choice.
 
 2. **Action space** (`sts_gym_env.py`): 134 discrete actions covering targeted/untargeted card plays (50+10), end turn, targeted/untargeted potions (25+5), choice selection (40), proceed, leave, and no-op. Illegal actions are masked out per game state.
 
