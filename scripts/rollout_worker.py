@@ -336,6 +336,7 @@ class WorkerAgent:
                 log(f"STUCK (heuristic) on {screen_name} — dumped to bug_debug.log")
                 self._stuck_count = 0
                 proceed_avail = bool(getattr(gs, "proceed_available", False))
+                cancel_avail = bool(getattr(gs, "cancel_available", False))
                 if proceed_avail:
                     return Action("proceed")
                 if cancel_avail:

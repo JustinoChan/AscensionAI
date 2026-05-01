@@ -1,8 +1,8 @@
 """
 sts_gym_env.py — Action space, masking, and rewards for Slay the Spire RL.
 
-  - 341-dim observation via obs_encoder (cards, monster knowledge, powers, screen)
-  - Discrete(114) action space with per-card, per-target control
+  - Observation via obs_encoder (cards, monsters, powers, relics, potions, map)
+  - Discrete(134) action space with per-card, per-target control
   - Action masking ensures only legal moves are chosen
   - Reward shaping with dominant terminal bonuses
 """

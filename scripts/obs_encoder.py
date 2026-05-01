@@ -180,6 +180,8 @@ def _map_lookahead(start_node, game_map, depth: int = MAP_LOOKAHEAD) -> List[int
     counts = [0] * MAP_NODE_TYPES
     if start_node is None or game_map is None:
         return counts
+    if not hasattr(game_map, "get_node"):
+        return counts
     real = game_map.get_node(start_node.x, start_node.y)
     if real is None:
         return counts

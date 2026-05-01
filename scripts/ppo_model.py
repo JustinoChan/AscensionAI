@@ -210,7 +210,7 @@ class PPOTrainer:
         }, path)
 
     def load(self, path: str):
-        ckpt = torch.load(path, map_location=self.device)
+        ckpt = torch.load(path, map_location=self.device, weights_only=True)
         try:
             self.shared.load_state_dict(ckpt["shared"])
             self.policy_head.load_state_dict(ckpt["policy_head"])

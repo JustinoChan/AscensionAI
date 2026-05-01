@@ -187,7 +187,8 @@ def _pick_grid_match(choice_list: list, scr) -> Optional[int]:
     lower = [str(c).lower().rstrip("+") for c in choice_list]
 
     if selected:
-        target = str(selected[-1]).lower().rstrip("+")
+        last = selected[-1]
+        target = str(getattr(last, "name", last)).lower().rstrip("+")
         for i, name in enumerate(lower):
             if name == target:
                 return i
