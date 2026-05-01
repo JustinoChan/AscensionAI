@@ -64,6 +64,7 @@ from sts_gym_env import (
     RewardTracker,
 )
 from ppo_model import PPOTrainer
+from screen_handler import auto_handle_screen
 
 
 os.makedirs(os.path.join(_root, "logs"), exist_ok=True)
@@ -103,51 +104,8 @@ log("=== EVAL STARTING ===")
 _init_csv()
 
 
-# ---------------------------------------------------------------------------
-# Mechanical screen handling — mirrors train_ppo._auto_handle_screen
-# ---------------------------------------------------------------------------
 def auto_handle(gs: Any, screen_name: str) -> Optional[Action]:
-    """Handle only mechanical screens; decision screens fall through to model."""
-    in_combat = bool(getattr(gs, "in_combat", False))
-    choice_list = list(getattr(gs, "choice_list", []) or [])
-    proceed_avail = bool(getattr(gs, "proceed_available", False))
-    cancel_avail = bool(getattr(gs, "cancel_available", False))
-    scr = getattr(gs, "screen", None)
-
-    if in_combat and screen_name == "NONE":
-        return None
-
-    if screen_name == "CHEST":
-        if scr and getattr(scr, "chest_open", False):
-            return Action("proceed") if proceed_avail else Action("state")
-        return ChooseAction(name="open")
-
-    if screen_name == "HAND_SELECT":
-        if scr and getattr(scr, "can_pick_zero", False) and proceed_avail:
-            return Action("proceed")
-        return None
-
-    if screen_name == "GRID":
-        if scr and getattr(scr, "confirm_up", False):
-            return Action("proceed")
-        if proceed_avail and not choice_list:
-            return Action("proceed")
-        return None
-
-    if screen_name == "MAP":
-        boss_avail = scr and getattr(scr, "boss_available", False)
-        if boss_avail and not choice_list:
-            return ChooseAction(name="boss")
-        return None
-
-    if not choice_list and not cancel_avail:
-        if proceed_avail:
-            return Action("proceed")
-        return Action("state")
-    if not choice_list and cancel_avail and not proceed_avail:
-        return Action("leave")
-
-    return None
+    return auto_handle_screen(gs, screen_name, heuristic_all=False)
 
 
 # ---------------------------------------------------------------------------

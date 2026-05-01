@@ -227,6 +227,11 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
                 return ChooseAction(choice_index=idx), _CHOOSE_START + idx
             if for_transform:
                 return ChooseAction(choice_index=0), _CHOOSE_START
+            any_number = bool(getattr(scr, "any_number", False)) if scr else False
+            if any_number:
+                if proceed_avail:
+                    return Action("proceed"), _PROCEED
+                return ChooseAction(choice_index=0), _CHOOSE_START
             idx = _pick_grid_match(choice_list, scr)
             if idx is not None:
                 return ChooseAction(choice_index=idx), _CHOOSE_START + idx

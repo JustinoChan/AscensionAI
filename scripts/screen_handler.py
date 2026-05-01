@@ -223,17 +223,17 @@ def pick_map(choice_list: list, gs) -> int:
         score = float(_MAP_SYMBOL_SCORES.get(sym, 1))
 
         if sym == "E":
-            if act == 1 and hp_pct > 0.6:
-                score += 6
-            elif hp_pct > 0.75:
-                score += 4
-            elif hp_pct < 0.4:
+            if hp_pct < 0.4:
                 score -= 8
+            elif act == 1 and hp_pct > 0.6:
+                score += 6
+            elif hp_pct > 0.6:
+                score += 4
         elif sym == "R":
             if hp_pct < 0.4:
                 score += 10
             elif hp_pct < 0.6:
-                score += 4
+                score += 6
             else:
                 score -= 2
         elif sym == "M":
@@ -291,7 +291,7 @@ def auto_handle_screen(
                          decision screens so the RL policy can choose.
 
     Decision screens (RL-only when heuristic_all=False):
-      CARD_REWARD, REST, BOSS_REWARD, HAND_SELECT (forced selection)
+      CARD_REWARD, REST, BOSS_REWARD, HAND_SELECT, MAP
     """
     in_combat = bool(getattr(gs, "in_combat", False))
     choice_list = list(getattr(gs, "choice_list", []) or [])
@@ -345,6 +345,11 @@ def auto_handle_screen(
             if for_upgrade:
                 return ChooseAction(choice_index=_pick_grid_upgrade(choice_list))
             if for_transform:
+                return ChooseAction(choice_index=0)
+            any_number = bool(getattr(scr, "any_number", False)) if scr else False
+            if any_number:
+                if proceed_avail:
+                    return Action("proceed")
                 return ChooseAction(choice_index=0)
             idx = _pick_grid_match(choice_list, scr)
             if idx is not None:
