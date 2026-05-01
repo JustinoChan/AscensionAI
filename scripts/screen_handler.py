@@ -154,7 +154,7 @@ def pick_hand_select(choice_list: list) -> int:
 
 
 def pick_grid_card(choice_list: list) -> int:
-    """Pick card for GRID (purge = worst, upgrade = best). Defaults to worst."""
+    """Pick card for GRID purge (worst card first)."""
     best_idx, best_score = 0, -1
     for i, c in enumerate(choice_list):
         name = str(c).lower().rstrip("+")
@@ -165,13 +165,85 @@ def pick_grid_card(choice_list: list) -> int:
     return best_idx
 
 
+def _pick_grid_upgrade(choice_list: list) -> int:
+    """Pick best card to upgrade from GRID."""
+    for i, c in enumerate(choice_list):
+        if str(c).lower().rstrip("+") in GOOD_CARDS:
+            return i
+    for i, c in enumerate(choice_list):
+        if str(c).lower().rstrip("+") in OK_CARDS:
+            return i
+    return 0
+
+
+def _pick_grid_match(choice_list: list, scr) -> Optional[int]:
+    """Pick card for a matching event (e.g. Match and Keep).
+
+    If a card was already selected, find its duplicate in the remaining choices.
+    Otherwise pick the first card that has a duplicate somewhere in the list.
+    Returns None if no match is possible (caller should leave).
+    """
+    selected = list(getattr(scr, "selected_cards", []) or []) if scr else []
+    lower = [str(c).lower().rstrip("+") for c in choice_list]
+
+    if selected:
+        target = str(selected[-1]).lower().rstrip("+")
+        for i, name in enumerate(lower):
+            if name == target:
+                return i
+
+    from collections import Counter
+    counts = Counter(lower)
+    for i, name in enumerate(lower):
+        if counts[name] >= 2:
+            return i
+    return None
+
+
+_MAP_SYMBOL_SCORES = {
+    "E": 5, "?": 3, "$": 2, "M": 1, "T": 4, "R": 0,
+}
+
+
 def pick_map(choice_list: list, gs) -> int:
+    """Elite-seeking, health-aware map pathing for Ironclad."""
     hp = int(getattr(gs, "current_hp", 0) or 0)
     mhp = max(1, int(getattr(gs, "max_hp", 1) or 1))
+    hp_pct = hp / mhp
+    act = int(getattr(gs, "act", 0) or 0)
+    scr = getattr(gs, "screen", None)
+    next_nodes = list(getattr(scr, "next_nodes", []) or []) if scr else []
     n = len(choice_list)
-    if hp / mhp < 0.45:
+    if not next_nodes or n == 0:
         return 0
-    return min(n // 2, n - 1)
+
+    best_idx, best_score = 0, -999.0
+    for i in range(min(n, len(next_nodes))):
+        sym = getattr(next_nodes[i], "symbol", "?")
+        score = float(_MAP_SYMBOL_SCORES.get(sym, 1))
+
+        if sym == "E":
+            if act == 1 and hp_pct > 0.6:
+                score += 6
+            elif hp_pct > 0.75:
+                score += 4
+            elif hp_pct < 0.4:
+                score -= 8
+        elif sym == "R":
+            if hp_pct < 0.4:
+                score += 10
+            elif hp_pct < 0.6:
+                score += 4
+            else:
+                score -= 2
+        elif sym == "M":
+            if hp_pct < 0.3:
+                score -= 3
+
+        if score > best_score:
+            best_score = score
+            best_idx = i
+    return best_idx
 
 
 def pick_shop_item(choice_list: list, gs, scr) -> Optional[int]:
@@ -265,7 +337,22 @@ def auto_handle_screen(
             if proceed_avail:
                 return Action("proceed")
         if choice_list:
-            return ChooseAction(choice_index=0)
+            for_purge = bool(getattr(scr, "for_purge", False)) if scr else False
+            for_upgrade = bool(getattr(scr, "for_upgrade", False)) if scr else False
+            for_transform = bool(getattr(scr, "for_transform", False)) if scr else False
+            if for_purge:
+                return ChooseAction(choice_index=pick_grid_card(choice_list))
+            if for_upgrade:
+                return ChooseAction(choice_index=_pick_grid_upgrade(choice_list))
+            if for_transform:
+                return ChooseAction(choice_index=0)
+            idx = _pick_grid_match(choice_list, scr)
+            if idx is not None:
+                return ChooseAction(choice_index=idx)
+            if cancel_avail:
+                return Action("leave")
+            if proceed_avail:
+                return Action("proceed")
         if proceed_avail:
             return Action("proceed")
         if cancel_avail:
@@ -277,18 +364,13 @@ def auto_handle_screen(
         boss_avail = scr and getattr(scr, "boss_available", False)
         if boss_avail and not choice_list:
             return ChooseAction(name="boss")
-        next_nodes = list(getattr(scr, "next_nodes", []) or []) if scr else []
-        n = len(choice_list) or len(next_nodes)
-        if n > 0:
-            hp = int(getattr(gs, "current_hp", 0) or 0)
-            mhp = max(1, int(getattr(gs, "max_hp", 1) or 1))
-            idx = 0 if hp / mhp < 0.45 else min(n // 2, n - 1)
-            return ChooseAction(choice_index=idx)
-        if boss_avail:
-            return ChooseAction(name="boss")
-        if proceed_avail:
-            return Action("proceed")
-        return Action("state")
+        if not choice_list:
+            if proceed_avail:
+                return Action("proceed")
+            return Action("state")
+        if heuristic_all:
+            return ChooseAction(choice_index=pick_map(choice_list, gs))
+        return None
 
     # ---- COMBAT_REWARD ----
     if screen_name == "COMBAT_REWARD":

@@ -165,6 +165,41 @@ POTION_SLOT_DIM = 8
 POTION_DIM = MAX_POTIONS * POTION_SLOT_DIM    # 40
 DECK_PROFILE_DIM = 20
 
+MAX_MAP_CHOICES = 4
+MAP_NODE_TYPES = 6                            # M, E, R, $, ?, T
+MAP_LOOKAHEAD = 3
+MAP_CHOICE_DIM = MAP_NODE_TYPES + 3           # one-hot type + elite/rest/combat density
+MAP_GLOBAL_DIM = 3                            # n_choices, boss_avail, floors_remaining
+MAP_DIM = MAX_MAP_CHOICES * MAP_CHOICE_DIM + MAP_GLOBAL_DIM  # 39
+
+_MAP_SYMBOL_IDX = {"M": 0, "E": 1, "R": 2, "$": 3, "?": 4, "T": 5}
+
+
+def _map_lookahead(start_node, game_map, depth: int = MAP_LOOKAHEAD) -> List[int]:
+    """BFS from start_node for `depth` floors, counting reachable node types."""
+    counts = [0] * MAP_NODE_TYPES
+    if start_node is None or game_map is None:
+        return counts
+    real = game_map.get_node(start_node.x, start_node.y)
+    if real is None:
+        return counts
+    frontier = list(real.children)
+    for _ in range(depth):
+        next_frontier = []
+        seen_xy = set()
+        for node in frontier:
+            key = (node.x, node.y)
+            if key in seen_xy:
+                continue
+            seen_xy.add(key)
+            sym = getattr(node, "symbol", "?")
+            idx = _MAP_SYMBOL_IDX.get(sym, 4)
+            counts[idx] += 1
+            next_frontier.extend(node.children)
+        frontier = next_frontier
+    return counts
+
+
 OBS_SIZE = (
     PLAYER_STATE_DIM
     + SCREEN_TYPE_DIM
@@ -176,7 +211,8 @@ OBS_SIZE = (
     + RELIC_DIM
     + POTION_DIM
     + DECK_PROFILE_DIM
-)  # 486
+    + MAP_DIM
+)  # 525
 
 
 # ---------------------------------------------------------------------------
@@ -746,5 +782,35 @@ def encode_game_state(gs: Any) -> np.ndarray:
     obs[offset + 18] = float(key_cards["Limit Break"])
     obs[offset + 19] = float(key_cards["Offering"])
     offset += DECK_PROFILE_DIM
+
+    # === MAP PATH ENCODING (39) ===
+    scr = getattr(gs, "screen", None)
+    if screen_name == "MAP" and scr is not None:
+        game_map = getattr(gs, "map", None)
+        next_nodes = list(getattr(scr, "next_nodes", []) or [])
+        boss_avail = bool(getattr(scr, "boss_available", False))
+        act = int(getattr(gs, "act", 0) or 0)
+        floor = int(getattr(gs, "floor", 0) or 0)
+        act_last_floor = {1: 17, 2: 34, 3: 51}.get(act, 51)
+        floors_remaining = max(0, act_last_floor - floor)
+
+        n_valid = min(len(next_nodes), MAX_MAP_CHOICES)
+        for ci in range(n_valid):
+            node = next_nodes[ci]
+            base = offset + ci * MAP_CHOICE_DIM
+            sym = getattr(node, "symbol", "?")
+            type_idx = _MAP_SYMBOL_IDX.get(sym, 4)
+            obs[base + type_idx] = 1.0
+            counts = _map_lookahead(node, game_map)
+            total = max(1, sum(counts))
+            obs[base + MAP_NODE_TYPES + 0] = counts[1] / total  # elite density
+            obs[base + MAP_NODE_TYPES + 1] = counts[2] / total  # rest density
+            obs[base + MAP_NODE_TYPES + 2] = counts[0] / total  # combat density
+
+        gbase = offset + MAX_MAP_CHOICES * MAP_CHOICE_DIM
+        obs[gbase + 0] = n_valid / MAX_MAP_CHOICES
+        obs[gbase + 1] = float(boss_avail)
+        obs[gbase + 2] = floors_remaining / 17.0
+    offset += MAP_DIM
 
     return obs

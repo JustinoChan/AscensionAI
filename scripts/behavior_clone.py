@@ -84,7 +84,8 @@ from screen_handler import (
     GOOD_CARDS, OK_CARDS, JUNK_CARDS,
     pick_card_reward, pick_combat_reward_obj, pick_combat_reward_str,
     pick_rest, pick_event, pick_boss_relic, pick_hand_select,
-    pick_grid_card, pick_map, pick_shop_item,
+    pick_grid_card, _pick_grid_upgrade, _pick_grid_match, pick_map,
+    pick_shop_item,
 )
 
 log("Imports done")
@@ -205,7 +206,7 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
             return Action("leave"), _LEAVE
         return Action("proceed"), _PROCEED
 
-    # --- Mechanical: GRID confirmation ---
+    # --- Mechanical: GRID ---
     if screen == "GRID":
         if scr and getattr(scr, "confirm_up", False):
             return Action("proceed"), _PROCEED
@@ -215,8 +216,24 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
             if proceed_avail:
                 return Action("proceed"), _PROCEED
         if choice_list:
-            idx = pick_grid_card(choice_list)
-            return ChooseAction(choice_index=idx), _CHOOSE_START + idx
+            for_purge = bool(getattr(scr, "for_purge", False)) if scr else False
+            for_upgrade = bool(getattr(scr, "for_upgrade", False)) if scr else False
+            for_transform = bool(getattr(scr, "for_transform", False)) if scr else False
+            if for_purge:
+                idx = pick_grid_card(choice_list)
+                return ChooseAction(choice_index=idx), _CHOOSE_START + idx
+            if for_upgrade:
+                idx = _pick_grid_upgrade(choice_list)
+                return ChooseAction(choice_index=idx), _CHOOSE_START + idx
+            if for_transform:
+                return ChooseAction(choice_index=0), _CHOOSE_START
+            idx = _pick_grid_match(choice_list, scr)
+            if idx is not None:
+                return ChooseAction(choice_index=idx), _CHOOSE_START + idx
+            if cancel_avail:
+                return Action("leave"), _LEAVE
+            if proceed_avail:
+                return Action("proceed"), _PROCEED
         if proceed_avail:
             return Action("proceed"), _PROCEED
         if cancel_avail:
