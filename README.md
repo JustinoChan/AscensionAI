@@ -212,6 +212,7 @@ All logs are written to the `logs/` directory:
 | `logs/eval_debug.log` | `eval_model.py` — evaluation results |
 | `logs/game_logger_debug.log` | `game_logger.py` — passive game state logging |
 | `logs/bug_debug.log` | Stuck-state detection dumps for debugging freezes |
+| `logs/control_panel_debug.log` | `AscensionAI.pyw` — GUI launch, process PIDs, kill results, errors |
 | `logs/training_stats.csv` | Per-game training metrics (floor, HP, reward, loss) |
 
 Training stats can be visualized with:

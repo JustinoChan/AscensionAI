@@ -25,7 +25,9 @@ if not _in_venv and _VENV_PYTHONW.exists():
     os.execv(str(_VENV_PYTHONW), [str(_VENV_PYTHONW), str(Path(__file__).resolve())] + sys.argv[1:])
 
 import csv as _csv
+import logging
 import time
+import traceback
 import platform
 import subprocess
 import threading
@@ -44,6 +46,27 @@ MTS_LAUNCHER = STS_DIR / "mts-launcher.jar"
 JAVA_EXE = STS_DIR / "jre" / "bin" / "java.exe"
 CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", "")) / "ModTheSpire" / "CommunicationMod"
 CONFIG_FILE = CONFIG_DIR / "config.properties"
+
+# ---------------------------------------------------------------------------
+# File-based debug logger — always writes, survives GUI crashes
+# ---------------------------------------------------------------------------
+(ROOT / "logs").mkdir(exist_ok=True)
+_log_file = ROOT / "logs" / "control_panel_debug.log"
+_logger = logging.getLogger("AscensionAI")
+_logger.setLevel(logging.DEBUG)
+_fh = logging.FileHandler(str(_log_file), encoding="utf-8")
+_fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+_logger.addHandler(_fh)
+_logger.info("=" * 60)
+_logger.info("AscensionAI Control Panel starting")
+_logger.info(f"Python: {sys.executable}")
+_logger.info(f"Platform: {platform.platform()}")
+_logger.info(f"ROOT: {ROOT}")
+_logger.info(f"VENV_PYTHON: {VENV_PYTHON}  exists={VENV_PYTHON.exists()}")
+_logger.info(f"JAVA_EXE: {JAVA_EXE}  exists={JAVA_EXE.exists()}")
+_logger.info(f"MTS_LAUNCHER: {MTS_LAUNCHER}  exists={MTS_LAUNCHER.exists()}")
+_logger.info(f"CONFIG_FILE: {CONFIG_FILE}")
+_logger.info(f"STS_DIR: {STS_DIR}  exists={STS_DIR.exists()}")
 
 MODES = {
     "Parallel Workers": "worker",
@@ -71,21 +94,26 @@ SPINNER_CONFIG = {
 # Hardware detection
 # ---------------------------------------------------------------------------
 def detect_hardware() -> dict:
+    _logger.info("Detecting hardware...")
     info = {}
 
     info["cpu_name"] = _detect_wmi("(Get-CimInstance Win32_Processor).Name") or platform.processor() or "Unknown CPU"
     info["cpu_cores"] = os.cpu_count() or 4
+    _logger.info(f"CPU: {info['cpu_name']} ({info['cpu_cores']} cores)")
 
     try:
         import psutil
         mem = psutil.virtual_memory()
         info["ram_total_gb"] = round(mem.total / (1024 ** 3), 1)
         info["ram_avail_gb"] = round(mem.available / (1024 ** 3), 1)
+        _logger.info(f"RAM: {info['ram_total_gb']}GB total, {info['ram_avail_gb']}GB available (psutil)")
     except ImportError:
         info["ram_total_gb"] = 0
         info["ram_avail_gb"] = 0
+        _logger.warning("psutil not available — RAM detection disabled")
 
     info["gpu_name"] = _detect_wmi("(Get-CimInstance Win32_VideoController).Name", skip_virtual=True) or "Unknown GPU"
+    _logger.info(f"GPU: {info['gpu_name']}")
 
     per_instance_mb = 500
     reserve_mb = 4096
@@ -93,6 +121,7 @@ def detect_hardware() -> dict:
     n_ram = max(1, int((avail_mb - reserve_mb) / per_instance_mb))
     n_cpu = max(1, info["cpu_cores"] - 1)
     info["recommended_workers"] = max(1, min(n_ram, n_cpu, 6))
+    _logger.info(f"Worker calc: n_ram={n_ram}, n_cpu={n_cpu}, recommended={info['recommended_workers']}")
 
     return info
 
@@ -106,13 +135,15 @@ def _detect_wmi(ps_expression: str, skip_virtual: bool = False) -> str:
             creationflags=subprocess.CREATE_NO_WINDOW,
         )
         lines = [l.strip() for l in out.strip().splitlines() if l.strip()]
+        _logger.debug(f"WMI query '{ps_expression}' returned {len(lines)} line(s): {lines}")
         if skip_virtual:
             skip_keywords = ("virtual", "microsoft basic", "remote", "parsec")
             real = [l for l in lines if not any(k in l.lower() for k in skip_keywords)]
             if real:
                 return real[0]
         return lines[0] if lines else ""
-    except Exception:
+    except Exception as e:
+        _logger.warning(f"WMI query failed: {ps_expression!r} — {e}")
         return ""
 
 
@@ -128,32 +159,42 @@ def write_config(command: str):
     ts = datetime.now().strftime("%a %b %d %H:%M:%S %z %Y")
     content = f"#{ts}\nverbose=true\ncommand={command}\nrunAtGameStart=true\n"
     CONFIG_FILE.write_text(content, encoding="ascii")
+    _logger.info(f"Config written to {CONFIG_FILE}")
+    _logger.debug(f"Config content:\n{content.rstrip()}")
 
 
 def build_command(mode: str, worker_id: int = 1, games: int = 20, bc_games: int = 50) -> str:
     py = escape_properties_path(VENV_PYTHON)
     root = escape_properties_path(ROOT)
     if mode == "worker":
-        return f"{py} {root}/scripts/rollout_worker.py --model models/ppo_sts.pt --out rollouts_shared --id {worker_id}"
+        cmd = f"{py} {root}/scripts/rollout_worker.py --model models/ppo_sts.pt --out rollouts_shared --id {worker_id}"
     elif mode == "train":
-        return f"{py} {root}/scripts/train_ppo.py --save models/ppo_sts.pt --resume models/ppo_sts.pt --save-every 5"
+        cmd = f"{py} {root}/scripts/train_ppo.py --save models/ppo_sts.pt --resume models/ppo_sts.pt --save-every 5"
     elif mode == "bc_ppo":
-        return f"{py} {root}/scripts/train_bc_ppo.py --bc-games {bc_games} --ppo-games 200 --save models/ppo_sts.pt"
+        cmd = f"{py} {root}/scripts/train_bc_ppo.py --bc-games {bc_games} --ppo-games 200 --save models/ppo_sts.pt"
     elif mode == "bc":
-        return f"{py} {root}/scripts/behavior_clone.py --games 50 --save models/ppo_sts.pt"
+        cmd = f"{py} {root}/scripts/behavior_clone.py --games 50 --save models/ppo_sts.pt"
     elif mode == "eval":
-        return f"{py} {root}/scripts/eval_model.py --model models/ppo_sts.pt --games {games}"
+        cmd = f"{py} {root}/scripts/eval_model.py --model models/ppo_sts.pt --games {games}"
     elif mode == "logger":
-        return f"{py} {root}/scripts/game_logger.py"
-    return ""
+        cmd = f"{py} {root}/scripts/game_logger.py"
+    else:
+        _logger.error(f"build_command: unknown mode '{mode}'")
+        cmd = ""
+    _logger.info(f"build_command(mode={mode}, worker_id={worker_id}, games={games}, bc_games={bc_games}) -> {cmd}")
+    return cmd
 
 
 def launch_sts() -> subprocess.Popen:
-    return subprocess.Popen(
-        [str(JAVA_EXE), "-jar", str(MTS_LAUNCHER)],
+    args = [str(JAVA_EXE), "-jar", str(MTS_LAUNCHER)]
+    _logger.info(f"Launching STS: {args}  cwd={STS_DIR}")
+    proc = subprocess.Popen(
+        args,
         cwd=str(STS_DIR),
         creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
     )
+    _logger.info(f"STS process spawned: PID {proc.pid}")
+    return proc
 
 
 # ---------------------------------------------------------------------------
@@ -175,12 +216,18 @@ class LogTailer:
         self._stop.set()
 
     def _run(self):
+        _logger.debug(f"LogTailer waiting for {self.path} to exist...")
         while not self._stop.is_set():
             if not self.path.exists():
                 self._stop.wait(1.0)
                 continue
             break
 
+        if self._stop.is_set():
+            _logger.debug(f"LogTailer for {self.path} stopped before file appeared")
+            return
+
+        _logger.debug(f"LogTailer opening {self.path} (size={self.path.stat().st_size})")
         try:
             with open(self.path, "r", encoding="utf-8", errors="replace") as f:
                 f.seek(0, 2)
@@ -190,8 +237,9 @@ class LogTailer:
                         self.callback(line.rstrip("\n"))
                     else:
                         self._stop.wait(0.3)
-        except Exception:
-            pass
+        except Exception as e:
+            _logger.error(f"LogTailer error on {self.path}: {e}")
+        _logger.debug(f"LogTailer for {self.path} finished")
 
 
 # ---------------------------------------------------------------------------
@@ -209,10 +257,6 @@ class AscensionApp:
         self.trainer_proc: subprocess.Popen | None = None
         self.tailers: list[LogTailer] = []
         self.running = False
-        # Per-worker process tracking for individual graceful kill.
-        # mts-launcher exits seconds after spawning the real STS JVM, so
-        # we snapshot the spawned java PIDs while the parent link is still
-        # alive — otherwise we can't tell which orphan java belongs to whom.
         self.worker_launcher_pids: dict[int, int] = {}
         self.worker_sts_pids: dict[int, set[int]] = {}
 
@@ -220,6 +264,13 @@ class AscensionApp:
 
         self._build_ui()
         self._refresh_stats()
+        _logger.info(f"GUI initialized — hw={self.hw}")
+
+    def _dbg(self, tab: str, msg: str):
+        """Log to file always; show in GUI when verbose is checked."""
+        _logger.debug(f"[{tab}] {msg}")
+        if getattr(self, "verbose_var", None) and self.verbose_var.get():
+            self._append_log(tab, f"[DBG] {msg}")
 
     # ----- UI construction -----
 
@@ -403,12 +454,14 @@ class AscensionApp:
         try:
             with open(csv_path, "r", encoding="utf-8", newline="") as f:
                 rows = list(_csv.DictReader(f))
-        except Exception:
+        except Exception as e:
+            _logger.warning(f"Failed to parse training_stats.csv: {e}")
             return None
         if not rows:
             return None
 
         floors, rewards, wins, best, updates = [], [], 0, 0, 0
+        parse_errors = 0
         for r in rows:
             try:
                 fl = float(r.get("final_floor") or 0)
@@ -416,20 +469,23 @@ class AscensionApp:
                 if fl > best:
                     best = fl
             except Exception:
-                pass
+                parse_errors += 1
             try:
                 rewards.append(float(r.get("total_reward") or 0))
             except Exception:
-                pass
+                parse_errors += 1
             try:
                 if int(float(r.get("victory") or 0)):
                     wins += 1
             except Exception:
-                pass
+                parse_errors += 1
             try:
                 updates = int(float(r.get("total_updates") or 0))
             except Exception:
-                pass
+                parse_errors += 1
+        if parse_errors:
+            _logger.debug(f"training_stats.csv: {parse_errors} field parse error(s) "
+                          f"across {len(rows)} rows")
 
         recent_floors = floors[-25:]
         recent_rewards = rewards[-25:]
@@ -450,14 +506,19 @@ class AscensionApp:
         try:
             with open(csv_path, "r", encoding="utf-8", newline="") as f:
                 rows = list(_csv.DictReader(f))
-        except Exception:
+        except Exception as e:
+            _logger.warning(f"Failed to parse eval_stats.csv: {e}")
             return None
         if not rows:
             return None
         last_tag = rows[-1].get("run", "")
         run_rows = [r for r in rows if r.get("run") == last_tag]
-        wins = sum(1 for r in run_rows if int(float(r.get("victory") or 0)))
-        floors = [float(r.get("final_floor") or 0) for r in run_rows]
+        try:
+            wins = sum(1 for r in run_rows if int(float(r.get("victory") or 0)))
+            floors = [float(r.get("final_floor") or 0) for r in run_rows]
+        except Exception as e:
+            _logger.warning(f"Error parsing eval_stats.csv run '{last_tag}': {e}")
+            return None
         return {
             "games": len(run_rows),
             "win_rate": wins / len(run_rows) if run_rows else 0.0,
@@ -485,32 +546,44 @@ class AscensionApp:
                     f"Win Rate: {es['win_rate']:.0%}  |  "
                     f"Avg Floor: {es['avg_floor']:.1f}"
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            _logger.error(f"_refresh_stats error: {e}")
         self.root.after(5000, self._refresh_stats)
 
     def _show_plot(self):
         csv_path = ROOT / "logs" / "training_stats.csv"
         if not csv_path.exists():
+            _logger.debug("_show_plot: no training_stats.csv")
             messagebox.showinfo("No Data", "No training stats yet.\nRun some training games first.")
             return
         out_path = ROOT / "logs" / "training_plot.png"
+        plot_cmd = [str(VENV_PYTHON), str(SCRIPTS / "plot_training.py"),
+                    "--save", str(out_path)]
+        _logger.info(f"Generating plot: {plot_cmd}")
         try:
-            subprocess.run(
-                [str(VENV_PYTHON), str(SCRIPTS / "plot_training.py"),
-                 "--save", str(out_path)],
+            result = subprocess.run(
+                plot_cmd,
                 cwd=str(ROOT), check=True, timeout=30,
+                capture_output=True,
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
+            _logger.info(f"Plot generated: {out_path} "
+                         f"(size={out_path.stat().st_size} bytes)")
+            if result.stderr:
+                _logger.debug(f"Plot stderr: {result.stderr.decode(errors='replace')[:500]}")
             os.startfile(str(out_path))
         except Exception as e:
+            _logger.error(f"Plot generation failed: {e}")
             messagebox.showerror("Plot Error", f"Failed to generate plot:\n{e}")
 
     # ----- Start / Stop -----
 
     def _start(self):
+        _logger.info("=" * 40)
+        _logger.info("START pressed")
         errors = self._validate()
         if errors:
+            _logger.error(f"Validation failed:\n{errors}")
             messagebox.showerror("Cannot Start", errors)
             return
 
@@ -523,20 +596,32 @@ class AscensionApp:
         self._remove_extra_tabs()
         self._clear_logs()
 
-        os.environ["ASCENSION_VERBOSE"] = "1" if self.verbose_var.get() else "0"
+        verbose = self.verbose_var.get()
+        os.environ["ASCENSION_VERBOSE"] = "1" if verbose else "0"
 
         mode = MODES.get(self.mode_var.get(), "worker")
         n = self.workers_var.get()
+
+        model_path = ROOT / "models" / "ppo_sts.pt"
+        _logger.info(f"Mode: {mode} | Spinner: {n} | Verbose: {verbose}")
+        _logger.info(f"Model checkpoint: {model_path}  exists={model_path.exists()}")
+        if model_path.exists():
+            _logger.info(f"Model size: {model_path.stat().st_size} bytes, "
+                         f"modified: {datetime.fromtimestamp(model_path.stat().st_mtime)}")
 
         (ROOT / "models").mkdir(exist_ok=True)
         (ROOT / "logs").mkdir(exist_ok=True)
 
         if mode == "worker":
             (ROOT / "rollouts_shared").mkdir(exist_ok=True)
+            rollout_count = len(list((ROOT / "rollouts_shared").glob("*.npz")))
+            _logger.info(f"rollouts_shared/ has {rollout_count} existing .npz files")
             self.status_var.set(f"Launching {n} workers + trainer...")
             threading.Thread(target=self._launch_parallel, args=(n,), daemon=True).start()
         elif mode == "collect":
             (ROOT / "rollouts_shared").mkdir(exist_ok=True)
+            rollout_count = len(list((ROOT / "rollouts_shared").glob("*.npz")))
+            _logger.info(f"rollouts_shared/ has {rollout_count} existing .npz files")
             self.status_var.set(f"Launching {n} collectors (no trainer)...")
             threading.Thread(target=self._launch_parallel,
                              args=(n,), kwargs={"with_trainer": False},
@@ -556,146 +641,193 @@ class AscensionApp:
         elif mode == "logger":
             self.status_var.set("Launching passive game logger...")
             threading.Thread(target=self._launch_single, args=("logger",), daemon=True).start()
+        _logger.info(f"Launch thread started for mode={mode}")
 
     def _launch_single(self, mode: str, games: int = 20):
-        cmd = build_command(mode, games=games, bc_games=games)
-        write_config(cmd)
+        _logger.info(f"_launch_single: mode={mode}, games={games}")
+        try:
+            cmd = build_command(mode, games=games, bc_games=games)
+            write_config(cmd)
 
-        _mode_info = {
-            "train":   ("Training",   "logs/train_debug.log"),
-            "bc_ppo":  ("BC\u2192PPO",     "logs/train_bc_ppo_debug.log"),
-            "bc":      ("BC",          "logs/bc_debug.log"),
-            "eval":    ("Evaluation",  "logs/eval_debug.log"),
-            "logger":  ("Logger",      "logs/game_logger_debug.log"),
-        }
-        log_name, log_file = _mode_info.get(mode, ("Training", "logs/train_debug.log"))
+            _mode_info = {
+                "train":   ("Training",   "logs/train_debug.log"),
+                "bc_ppo":  ("BC\u2192PPO",     "logs/train_bc_ppo_debug.log"),
+                "bc":      ("BC",          "logs/bc_debug.log"),
+                "eval":    ("Evaluation",  "logs/eval_debug.log"),
+                "logger":  ("Logger",      "logs/game_logger_debug.log"),
+            }
+            log_name, log_file = _mode_info.get(mode, ("Training", "logs/train_debug.log"))
+            _logger.info(f"Log tab: {log_name}, log file: {log_file}")
 
-        self.root.after(0, lambda: self._add_log_tab(log_name))
-        time.sleep(0.1)
+            self.root.after(0, lambda: self._add_log_tab(log_name))
+            time.sleep(0.1)
 
-        self._append_log(log_name, f"Config written, launching STS ({mode})...")
-        proc = launch_sts()
-        self.processes.append(proc)
-        self._append_log(log_name, f"STS launched (PID {proc.pid})")
+            self._append_log(log_name, f"Config written, launching STS ({mode})...")
+            proc = launch_sts()
+            self.processes.append(proc)
+            self._append_log(log_name, f"STS launched (PID {proc.pid})")
+            _logger.info(f"STS launched for {mode}: PID {proc.pid}, total processes tracked: {len(self.processes)}")
 
-        tailer = LogTailer(ROOT / log_file, lambda line, n=log_name: self._append_log(n, line))
-        tailer.start()
-        self.tailers.append(tailer)
+            log_path = ROOT / log_file
+            _logger.debug(f"Starting LogTailer for {log_path}")
+            tailer = LogTailer(log_path, lambda line, n=log_name: self._append_log(n, line))
+            tailer.start()
+            self.tailers.append(tailer)
 
-        self.root.after(0, lambda: self.status_var.set(f"Running ({mode})"))
+            self.root.after(0, lambda: self.status_var.set(f"Running ({mode})"))
+            _logger.info(f"_launch_single complete for {mode}")
+        except Exception as e:
+            _logger.error(f"_launch_single FAILED: {traceback.format_exc()}")
+            self._append_log("All", f"ERROR launching {mode}: {e}")
 
     def _wait_for_ready(self, log_file: Path, tab_name: str, timeout: int = 120) -> bool:
         """Block until a worker's log file contains 'Signaling ready', or timeout."""
+        _logger.info(f"_wait_for_ready: {tab_name}, file={log_file}, timeout={timeout}s")
         self._append_log(tab_name, f"Waiting for worker to signal ready (up to {timeout}s)...")
         start = time.time()
+        last_status_log = start
         while time.time() - start < timeout:
             if not self.running:
+                _logger.info(f"_wait_for_ready: {tab_name} aborted (self.running=False)")
                 return False
             try:
                 if log_file.exists():
                     text = log_file.read_text(encoding="utf-8", errors="replace")
                     if "Signaling ready" in text:
-                        self._append_log(tab_name, "Worker signaled ready!")
+                        elapsed = time.time() - start
+                        _logger.info(f"_wait_for_ready: {tab_name} ready after {elapsed:.1f}s")
+                        self._append_log(tab_name, f"Worker signaled ready! ({elapsed:.0f}s)")
                         return True
-            except OSError:
-                pass
+                    now = time.time()
+                    if now - last_status_log >= 15.0:
+                        elapsed = now - start
+                        lines = len(text.splitlines())
+                        _logger.debug(f"_wait_for_ready: {tab_name} still waiting "
+                                      f"({elapsed:.0f}s elapsed, log has {lines} lines)")
+                        self._dbg(tab_name, f"Still waiting for ready signal... "
+                                  f"({elapsed:.0f}s, {lines} log lines)")
+                        last_status_log = now
+                else:
+                    now = time.time()
+                    if now - last_status_log >= 15.0:
+                        _logger.debug(f"_wait_for_ready: {tab_name} log file doesn't exist yet "
+                                      f"({now - start:.0f}s elapsed)")
+                        last_status_log = now
+            except OSError as e:
+                _logger.warning(f"_wait_for_ready: OSError reading {log_file}: {e}")
             time.sleep(1.0)
-        self._append_log(tab_name, "Timed out waiting for worker to be ready.")
+        elapsed = time.time() - start
+        _logger.warning(f"_wait_for_ready: {tab_name} TIMED OUT after {elapsed:.1f}s")
+        self._append_log(tab_name, f"Timed out waiting for worker to be ready ({elapsed:.0f}s).")
         return False
 
     def _launch_parallel(self, n_workers: int, with_trainer: bool = True):
-        self.worker_launcher_pids.clear()
-        self.worker_sts_pids.clear()
+        _logger.info(f"_launch_parallel: n_workers={n_workers}, with_trainer={with_trainer}")
+        try:
+            self.worker_launcher_pids.clear()
+            self.worker_sts_pids.clear()
 
-        # Clear stale worker logs so we don't match old "Signaling ready" lines
-        for i in range(1, n_workers + 1):
-            log_file = ROOT / "logs" / f"worker_{i}_debug.log"
-            try:
-                if log_file.exists():
-                    log_file.unlink()
-            except OSError:
-                pass
+            for i in range(1, n_workers + 1):
+                log_file = ROOT / "logs" / f"worker_{i}_debug.log"
+                try:
+                    if log_file.exists():
+                        _logger.debug(f"Deleting stale log: {log_file} "
+                                      f"(size={log_file.stat().st_size})")
+                        log_file.unlink()
+                except OSError as e:
+                    _logger.warning(f"Failed to delete stale log {log_file}: {e}")
 
-        if with_trainer:
-            # Start offline trainer first
-            self._append_log("All", "Starting offline trainer...")
-            self.root.after(0, lambda: self._add_log_tab("Trainer"))
-            time.sleep(0.1)
+            if with_trainer:
+                self._append_log("All", "Starting offline trainer...")
+                self.root.after(0, lambda: self._add_log_tab("Trainer"))
+                time.sleep(0.1)
 
-            trainer_cmd = [
-                str(VENV_PYTHON), str(SCRIPTS / "train_offline.py"),
-                "--model", str(ROOT / "models" / "ppo_sts.pt"),
-                "--data", str(ROOT / "rollouts_shared"),
-                "--delete-consumed",
-            ]
-            self.trainer_proc = subprocess.Popen(
-                trainer_cmd, cwd=str(ROOT),
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
-            self._append_log("Trainer", f"Offline trainer started (PID {self.trainer_proc.pid})")
+                trainer_cmd = [
+                    str(VENV_PYTHON), str(SCRIPTS / "train_offline.py"),
+                    "--model", str(ROOT / "models" / "ppo_sts.pt"),
+                    "--data", str(ROOT / "rollouts_shared"),
+                    "--delete-consumed",
+                ]
+                _logger.info(f"Trainer command: {trainer_cmd}")
+                self.trainer_proc = subprocess.Popen(
+                    trainer_cmd, cwd=str(ROOT),
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
+                _logger.info(f"Offline trainer started: PID {self.trainer_proc.pid}")
+                self._append_log("Trainer", f"Offline trainer started (PID {self.trainer_proc.pid})")
 
-            tailer = LogTailer(ROOT / "logs" / "train_offline_debug.log",
-                               lambda line: self._append_log("Trainer", line))
-            tailer.start()
-            self.tailers.append(tailer)
-        else:
-            self._append_log("All",
-                "Collect-only mode: no local trainer. "
-                "Rollouts will accumulate in rollouts_shared/ — "
-                "zip and send to the trainer when done.")
+                tailer = LogTailer(ROOT / "logs" / "train_offline_debug.log",
+                                   lambda line: self._append_log("Trainer", line))
+                tailer.start()
+                self.tailers.append(tailer)
+            else:
+                _logger.info("Collect-only mode: no trainer launched")
+                self._append_log("All",
+                    "Collect-only mode: no local trainer. "
+                    "Rollouts will accumulate in rollouts_shared/ — "
+                    "zip and send to the trainer when done.")
 
-        # Launch workers one at a time, waiting for each to be ready
-        # before writing the next config
-        for i in range(1, n_workers + 1):
-            if not self.running:
-                break
+            for i in range(1, n_workers + 1):
+                if not self.running:
+                    _logger.info(f"_launch_parallel: aborted at worker {i} (self.running=False)")
+                    break
 
-            tab_name = f"Worker {i}"
-            self.root.after(0, lambda tn=tab_name: self._add_log_tab(tn))
-            time.sleep(0.1)
+                tab_name = f"Worker {i}"
+                self.root.after(0, lambda tn=tab_name: self._add_log_tab(tn))
+                time.sleep(0.1)
 
-            cmd = build_command("worker", worker_id=i)
-            write_config(cmd)
-            self._append_log(tab_name, f"Config written for worker {i}, launching STS...")
-            self._append_log(tab_name, "Click 'Play' in ModTheSpire when it appears.")
+                cmd = build_command("worker", worker_id=i)
+                write_config(cmd)
+                self._append_log(tab_name, f"Config written for worker {i}, launching STS...")
+                self._append_log(tab_name, "Click 'Play' in ModTheSpire when it appears.")
 
-            proc = launch_sts()
-            self.processes.append(proc)
-            self.worker_launcher_pids[i] = proc.pid
-            self.worker_sts_pids[i] = set()
-            self._append_log(tab_name, f"STS instance launched (PID {proc.pid})")
+                proc = launch_sts()
+                self.processes.append(proc)
+                self.worker_launcher_pids[i] = proc.pid
+                self.worker_sts_pids[i] = set()
+                _logger.info(f"Worker {i}: launcher PID={proc.pid}, "
+                             f"total processes tracked={len(self.processes)}")
+                self._append_log(tab_name, f"STS instance launched (PID {proc.pid})")
 
-            threading.Thread(
-                target=self._capture_sts_pids_for_worker,
-                args=(proc.pid, i),
-                daemon=True,
-            ).start()
+                threading.Thread(
+                    target=self._capture_sts_pids_for_worker,
+                    args=(proc.pid, i),
+                    daemon=True,
+                ).start()
+                _logger.debug(f"Worker {i}: PID capture thread started")
 
-            log_file = ROOT / "logs" / f"worker_{i}_debug.log"
-            tailer = LogTailer(log_file, lambda line, n=tab_name: self._append_log(n, line))
-            tailer.start()
-            self.tailers.append(tailer)
+                log_file = ROOT / "logs" / f"worker_{i}_debug.log"
+                tailer = LogTailer(log_file, lambda line, n=tab_name: self._append_log(n, line))
+                tailer.start()
+                self.tailers.append(tailer)
 
-            self.root.after(0, lambda idx=i: self.status_var.set(
-                f"Waiting for worker {idx}/{n_workers} to be ready..."))
+                self.root.after(0, lambda idx=i: self.status_var.set(
+                    f"Waiting for worker {idx}/{n_workers} to be ready..."))
 
-            # Wait for this worker to actually connect before overwriting
-            # the config for the next one
-            if i < n_workers:
-                self._wait_for_ready(log_file, tab_name, timeout=120)
+                if i < n_workers:
+                    ready = self._wait_for_ready(log_file, tab_name, timeout=120)
+                    _logger.info(f"Worker {i} ready={ready}, proceeding to next worker")
 
-        if self.running:
-            suffix = "workers + trainer" if with_trainer else "collectors (no trainer)"
-            self.root.after(0, lambda: self.status_var.set(
-                f"Running ({n_workers} {suffix})"))
+            if self.running:
+                suffix = "workers + trainer" if with_trainer else "collectors (no trainer)"
+                _logger.info(f"All {n_workers} workers launched ({suffix})")
+                _logger.info(f"Launcher PIDs: {self.worker_launcher_pids}")
+                _logger.info(f"STS PIDs (captured so far): {dict(self.worker_sts_pids)}")
+                self.root.after(0, lambda: self.status_var.set(
+                    f"Running ({n_workers} {suffix})"))
+        except Exception as e:
+            _logger.error(f"_launch_parallel FAILED: {traceback.format_exc()}")
+            self._append_log("All", f"ERROR in parallel launch: {e}")
 
     def _graceful_stop(self):
         """Wait for all current games to finish, save transitions, then stop."""
         if self._graceful_stopping:
+            _logger.debug("_graceful_stop: already in progress, ignoring")
             return
         self._graceful_stopping = True
         self.graceful_btn.configure(state="disabled")
         self.start_btn.configure(state="disabled")
+        _logger.info("Graceful stop requested")
         self._append_log("All", "Graceful stop requested — waiting for current games to finish...")
         self.status_var.set("Finishing current games...")
         threading.Thread(target=self._wait_games_then_stop, daemon=True).start()
@@ -703,6 +835,7 @@ class AscensionApp:
     def _wait_games_then_stop(self):
         """Background thread: monitor logs for game-end, then call _stop."""
         mode = getattr(self, "_current_mode", "worker")
+        _logger.info(f"_wait_games_then_stop: mode={mode}")
 
         if mode in ("worker", "collect"):
             self._wait_workers_then_stop()
@@ -719,36 +852,51 @@ class AscensionApp:
             "logger":  "logs/game_logger_debug.log",
         }
         log_file = ROOT / log_map.get(mode, "logs/train_debug.log")
+        _logger.info(f"_wait_single_then_stop: mode={mode}, log={log_file}, "
+                     f"exists={log_file.exists()}")
 
         baseline_ended = 0
         if log_file.exists():
             try:
                 text = log_file.read_text(encoding="utf-8", errors="replace")
                 baseline_ended = text.count(" ended")
-            except OSError:
-                pass
+                _logger.info(f"Baseline ' ended' count: {baseline_ended} "
+                             f"(log size={len(text)} bytes)")
+            except OSError as e:
+                _logger.warning(f"Failed to read log for baseline: {e}")
 
         self._append_log("All", "Waiting for current game to finish...")
 
         timeout = 300
         start = time.time()
         finished = False
+        last_poll_log = start
         while time.time() - start < timeout:
             if log_file.exists():
                 try:
                     text = log_file.read_text(encoding="utf-8", errors="replace")
                     current_ended = text.count(" ended")
                     if current_ended > baseline_ended:
+                        elapsed = time.time() - start
+                        _logger.info(f"Game ended detected: count {baseline_ended}->{current_ended} "
+                                     f"after {elapsed:.1f}s")
                         finished = True
                         break
-                except OSError:
-                    pass
+                    now = time.time()
+                    if now - last_poll_log >= 30.0:
+                        _logger.debug(f"Still waiting for game end ({now - start:.0f}s, "
+                                      f"ended_count={current_ended})")
+                        last_poll_log = now
+                except OSError as e:
+                    _logger.warning(f"OSError polling log: {e}")
             time.sleep(2.0)
 
         if finished:
             self._append_log("All", "Game finished — stopping.")
         else:
-            self._append_log("All", "Timed out waiting — stopping anyway.")
+            elapsed = time.time() - start
+            _logger.warning(f"_wait_single_then_stop: TIMED OUT after {elapsed:.1f}s")
+            self._append_log("All", f"Timed out waiting ({elapsed:.0f}s) — stopping anyway.")
 
         self.root.after(0, self._stop)
 
@@ -764,18 +912,23 @@ class AscensionApp:
                     text = log_file.read_text(encoding="utf-8", errors="replace")
                     ended = text.count(" ended:")
                     game_counts[i] = ended
-                except OSError:
-                    pass
+                    _logger.info(f"Worker {i} baseline: {ended} games ended "
+                                 f"(log size={len(text)} bytes)")
+                except OSError as e:
+                    _logger.warning(f"Failed to read worker {i} log: {e}")
 
         if not game_counts:
+            _logger.info("_wait_workers_then_stop: no active worker logs found, stopping immediately")
             self.root.after(0, self._stop)
             return
 
+        _logger.info(f"Monitoring {len(game_counts)} workers: baselines={game_counts}")
         self._append_log("All", f"Monitoring {len(game_counts)} workers for game completion...")
 
         timeout = 300
         start = time.time()
         workers_done = set()
+        last_poll_log = start
 
         while time.time() - start < timeout:
             all_done = True
@@ -788,6 +941,10 @@ class AscensionApp:
                         text = log_file.read_text(encoding="utf-8", errors="replace")
                         current_ended = text.count(" ended:")
                         if current_ended > baseline_ended:
+                            elapsed = time.time() - start
+                            _logger.info(f"Worker {worker_id} game ended: "
+                                         f"count {baseline_ended}->{current_ended} "
+                                         f"after {elapsed:.1f}s")
                             workers_done.add(worker_id)
                             n_killed = self._stop_single_worker(worker_id)
                             if n_killed:
@@ -800,54 +957,59 @@ class AscensionApp:
                                     "All",
                                     f"Worker {worker_id} finished (no processes to close).")
                             continue
-                except OSError:
-                    pass
+                except OSError as e:
+                    _logger.warning(f"OSError polling worker {worker_id}: {e}")
                 all_done = False
 
             if all_done:
                 break
+
+            now = time.time()
+            if now - last_poll_log >= 30.0:
+                still_waiting = [w for w in game_counts if w not in workers_done]
+                _logger.debug(f"Graceful stop: {now - start:.0f}s elapsed, "
+                              f"done={sorted(workers_done)}, waiting={still_waiting}")
+                last_poll_log = now
             time.sleep(2.0)
 
         if not all_done:
             still_running = [w for w in game_counts if w not in workers_done]
+            elapsed = time.time() - start
+            _logger.warning(f"_wait_workers_then_stop: TIMED OUT after {elapsed:.1f}s, "
+                            f"still running: {still_running}")
             self._append_log(
                 "All",
                 f"Timed out waiting for workers {still_running} — stopping anyway.")
         else:
+            elapsed = time.time() - start
+            _logger.info(f"All workers finished gracefully in {elapsed:.1f}s")
             self._append_log("All", "All workers finished their current games.")
 
         self.root.after(0, self._stop)
 
     def _find_pids_for_worker(self, worker_id: int) -> tuple[set[int], set[int]]:
-        """Return (java_pids, python_pids) belonging to a specific worker.
-
-        Communication Mod spawns the bot script (rollout_worker.py --id N)
-        as a child of the STS JVM. So we find python with --id N in its
-        cmdline and walk up to the parent for that worker's java.exe. This
-        beats trying to track parentage from mts-launcher, which detaches
-        STS and breaks the link.
-        """
+        """Return (java_pids, python_pids) belonging to a specific worker."""
         java_pids: set[int] = set()
         py_pids: set[int] = set()
 
         try:
             import psutil
         except ImportError:
+            _logger.warning("_find_pids_for_worker: psutil not available")
             return java_pids, py_pids
 
-        id_token = f"--id {worker_id}"
         worker_script = "rollout_worker.py"
+        scanned = 0
 
         for p in psutil.process_iter(["pid", "name", "cmdline", "ppid"]):
             try:
                 name = (p.info.get("name") or "").lower()
                 if not name.startswith("python"):
                     continue
+                scanned += 1
                 cmdline = " ".join(p.info.get("cmdline") or [])
                 if worker_script not in cmdline:
                     continue
-                # cmdline must contain the exact "--id N" so worker 1
-                # doesn't match worker 10/11/etc.
                 tokens = (p.info.get("cmdline") or [])
                 if "--id" not in tokens:
                     continue
@@ -862,37 +1024,48 @@ class AscensionApp:
                 if ppid:
                     try:
                         parent = psutil.Process(ppid)
-                        if parent.name().lower() in ("java.exe", "javaw.exe"):
+                        parent_name = parent.name().lower()
+                        if parent_name in ("java.exe", "javaw.exe"):
                             java_pids.add(ppid)
+                        else:
+                            _logger.debug(f"Worker {worker_id} python PID {p.info['pid']} "
+                                          f"parent is {parent_name} (PID {ppid}), not java")
                     except (psutil.NoSuchProcess, psutil.AccessDenied):
-                        pass
+                        _logger.debug(f"Worker {worker_id}: parent PID {ppid} inaccessible")
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
 
+        _logger.debug(f"_find_pids_for_worker({worker_id}): scanned {scanned} python procs, "
+                      f"found java={java_pids}, py={py_pids}")
         return java_pids, py_pids
 
     def _capture_sts_pids_for_worker(self, launcher_pid: int, worker_id: int):
-        """Best-effort snapshot of worker N's STS java PID once it's running.
-
-        We poll until --id N's python child shows up under a java parent,
-        then record that java PID so a later kill is fast and exact.
-        """
+        """Best-effort snapshot of worker N's STS java PID once it's running."""
+        _logger.debug(f"_capture_sts_pids: worker {worker_id}, launcher PID {launcher_pid}")
         deadline = time.time() + 180.0
+        polls = 0
         while time.time() < deadline and self.running:
             java_pids, _ = self._find_pids_for_worker(worker_id)
+            polls += 1
             if java_pids:
                 self.worker_sts_pids.setdefault(worker_id, set()).update(java_pids)
+                _logger.info(f"Captured STS PIDs for worker {worker_id}: {java_pids} "
+                             f"(after {polls} polls)")
                 return
             time.sleep(2.0)
+        _logger.warning(f"_capture_sts_pids: worker {worker_id} timed out after {polls} polls "
+                        f"(launcher PID {launcher_pid})")
 
     def _stop_single_worker(self, worker_id: int) -> int:
         """Kill one worker's STS instance(s) + launcher. Returns count killed."""
+        _logger.info(f"_stop_single_worker: worker {worker_id}")
         killed = 0
 
-        # Re-scan at kill time too — handles the case where the capture
-        # thread missed the window (e.g. user took >3min to click Play).
         java_pids, py_pids = self._find_pids_for_worker(worker_id)
-        java_pids |= self.worker_sts_pids.pop(worker_id, set())
+        cached_pids = self.worker_sts_pids.pop(worker_id, set())
+        java_pids |= cached_pids
+        _logger.info(f"Worker {worker_id} PIDs to kill: java={java_pids} "
+                     f"(cached={cached_pids}), py={py_pids}")
 
         try:
             import psutil
@@ -902,54 +1075,64 @@ class AscensionApp:
         if psutil is not None:
             for pid in java_pids:
                 try:
-                    psutil.Process(pid).kill()
+                    proc = psutil.Process(pid)
+                    proc.kill()
+                    _logger.info(f"Killed java PID {pid} (worker {worker_id})")
                     killed += 1
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    pass
+                except psutil.NoSuchProcess:
+                    _logger.debug(f"Java PID {pid} already dead")
+                except psutil.AccessDenied:
+                    _logger.warning(f"Access denied killing java PID {pid}")
             for pid in py_pids:
                 try:
                     psutil.Process(pid).kill()
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    pass
+                    _logger.info(f"Killed python PID {pid} (worker {worker_id})")
+                except psutil.NoSuchProcess:
+                    _logger.debug(f"Python PID {pid} already dead")
+                except psutil.AccessDenied:
+                    _logger.warning(f"Access denied killing python PID {pid}")
 
         launcher_pid = self.worker_launcher_pids.pop(worker_id, None)
-        if launcher_pid and self._kill_process_tree(launcher_pid):
-            killed += 1
+        if launcher_pid:
+            tree_ok = self._kill_process_tree(launcher_pid)
+            _logger.info(f"Worker {worker_id} launcher tree kill "
+                         f"(PID {launcher_pid}): {'ok' if tree_ok else 'failed/dead'}")
+            if tree_ok:
+                killed += 1
 
+        _logger.info(f"_stop_single_worker: worker {worker_id} done, killed {killed} process(es)")
         return killed
 
     def _kill_process_tree(self, pid: int) -> bool:
-        """Forcefully close a Windows process and all its descendants.
-
-        taskkill /F /T walks the whole tree, but only works while the
-        target PID is still alive — see _kill_orphan_sts_instances for
-        the case where the launcher has already exited.
-        """
+        """Forcefully close a Windows process and all its descendants."""
+        _logger.debug(f"_kill_process_tree: PID {pid}")
         try:
             result = subprocess.run(
                 ["taskkill", "/F", "/T", "/PID", str(pid)],
                 timeout=10, capture_output=True,
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
-            return result.returncode == 0
-        except Exception:
+            stdout = result.stdout.decode(errors="replace").strip() if result.stdout else ""
+            stderr = result.stderr.decode(errors="replace").strip() if result.stderr else ""
+            ok = result.returncode == 0
+            _logger.debug(f"taskkill PID {pid}: rc={result.returncode}, "
+                          f"stdout={stdout!r}, stderr={stderr!r}")
+            return ok
+        except Exception as e:
+            _logger.error(f"_kill_process_tree PID {pid} exception: {e}")
             return False
 
     def _kill_orphan_sts_instances(self) -> int:
-        """Sweep for STS java.exe processes our Popen handles no longer cover.
-
-        mts-launcher.jar is a small mod-selector GUI: when the user clicks
-        'Play' it spawns the real STS JVM and exits. So our launcher PID
-        dies before STS does, and taskkill on the dead launcher PID kills
-        nothing. This finds any java.exe whose cwd is the STS install dir
-        or whose cmdline references STS / ModTheSpire jars and kills them.
-        """
+        """Sweep for STS java.exe processes our Popen handles no longer cover."""
+        _logger.info("Sweeping for orphan STS java processes...")
         try:
             import psutil
         except ImportError:
+            _logger.warning("psutil not available for orphan sweep")
             return 0
 
         killed = 0
+        scanned = 0
         sts_dir_lower = str(STS_DIR).lower()
         sts_keywords = ("slaythespire", "desktop-1.0.jar",
                         "mts-launcher", "modthespire")
@@ -959,78 +1142,117 @@ class AscensionApp:
                 name = (p.info.get("name") or "").lower()
                 if name not in ("java.exe", "javaw.exe"):
                     continue
+                scanned += 1
 
                 cwd = (p.info.get("cwd") or "").lower()
                 cmdline = " ".join(p.info.get("cmdline") or []).lower()
+                matched_cwd = sts_dir_lower in cwd
+                matched_kw = any(kw in cmdline for kw in sts_keywords)
 
-                if (sts_dir_lower in cwd
-                        or any(kw in cmdline for kw in sts_keywords)):
+                if matched_cwd or matched_kw:
+                    reason = f"cwd_match={matched_cwd}, kw_match={matched_kw}"
+                    _logger.info(f"Killing orphan java PID {p.info['pid']}: {reason}, "
+                                 f"cmdline={cmdline[:200]}")
                     p.kill()
                     killed += 1
-            except (psutil.NoSuchProcess, psutil.AccessDenied):
-                pass
-            except Exception:
-                pass
+                else:
+                    _logger.debug(f"Skipping java PID {p.info['pid']}: no STS match "
+                                  f"(cwd={cwd[:100]})")
+            except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+                _logger.debug(f"Orphan sweep: PID access issue: {e}")
+            except Exception as e:
+                _logger.warning(f"Orphan sweep unexpected error: {e}")
 
+        _logger.info(f"Orphan sweep done: scanned {scanned} java procs, killed {killed}")
         return killed
 
     def _stop(self):
+        _logger.info("=" * 40)
+        _logger.info("STOP sequence starting")
         self.running = False
         self._graceful_stopping = False
         self.status_var.set("Stopping...")
         self._append_log("All", "Stopping all processes...")
 
+        _logger.info(f"Stopping {len(self.tailers)} log tailer(s)")
         for tailer in self.tailers:
             tailer.stop()
         self.tailers.clear()
 
-        if self.trainer_proc and self.trainer_proc.poll() is None:
-            try:
-                self.trainer_proc.terminate()
-                self.trainer_proc.wait(timeout=5)
-                self._append_log("All", "Trainer stopped")
-            except Exception:
-                self.trainer_proc.kill()
+        if self.trainer_proc:
+            poll = self.trainer_proc.poll()
+            _logger.info(f"Trainer proc PID {self.trainer_proc.pid}: "
+                         f"poll={poll} ({'alive' if poll is None else 'exited'})")
+            if poll is None:
+                try:
+                    self.trainer_proc.terminate()
+                    self.trainer_proc.wait(timeout=5)
+                    _logger.info("Trainer terminated gracefully")
+                    self._append_log("All", "Trainer stopped")
+                except Exception as e:
+                    _logger.warning(f"Trainer terminate failed ({e}), force killing")
+                    self.trainer_proc.kill()
+                    self._append_log("All", "Trainer force-killed")
+        else:
+            _logger.debug("No trainer process to stop")
         self.trainer_proc = None
 
         closed = 0
+        _logger.info(f"Killing {len(self.processes)} tracked launcher process(es)")
         for proc in self.processes:
-            if proc.poll() is None:
+            poll = proc.poll()
+            if poll is None:
+                _logger.info(f"Killing launcher PID {proc.pid} (still alive)")
                 if self._kill_process_tree(proc.pid):
                     closed += 1
+            else:
+                _logger.debug(f"Launcher PID {proc.pid} already exited (rc={poll})")
         self.processes.clear()
 
-        # mts-launcher exits after spawning STS, so the launcher PID is
-        # often dead by now. Sweep for any orphan STS java processes.
-        closed += self._kill_orphan_sts_instances()
+        orphans = self._kill_orphan_sts_instances()
+        closed += orphans
         if closed:
             self._append_log("All", f"Closed {closed} Slay the Spire instance(s).")
+        _logger.info(f"Stop complete: {closed} process(es) closed "
+                     f"({closed - orphans} tracked + {orphans} orphans)")
 
         self.start_btn.configure(state="normal")
         self.stop_btn.configure(state="disabled")
         self.graceful_btn.configure(state="disabled")
         self.status_var.set("Idle")
         self._append_log("All", "All processes stopped.")
+        _logger.info("STOP sequence finished")
 
     # ----- Validation -----
 
     def _validate(self) -> str:
+        _logger.info("Running pre-launch validation...")
         issues = []
+        _logger.debug(f"VENV_PYTHON: {VENV_PYTHON}  exists={VENV_PYTHON.exists()}")
         if not VENV_PYTHON.exists():
             issues.append(f"Python venv not found:\n  {VENV_PYTHON}\n  Run: python -m venv .venv && pip install -r requirements.txt")
+        _logger.debug(f"JAVA_EXE: {JAVA_EXE}  exists={JAVA_EXE.exists()}")
         if not JAVA_EXE.exists():
             issues.append(f"STS Java runtime not found:\n  {JAVA_EXE}\n  Is Slay the Spire installed via Steam?")
+        _logger.debug(f"MTS_LAUNCHER: {MTS_LAUNCHER}  exists={MTS_LAUNCHER.exists()}")
         if not MTS_LAUNCHER.exists():
             issues.append(f"ModTheSpire not found:\n  {MTS_LAUNCHER}\n  Install Mod the Spire via Steam Workshop.")
+        if issues:
+            _logger.warning(f"Validation failed: {len(issues)} issue(s)")
+        else:
+            _logger.info("Validation passed")
         return "\n\n".join(issues)
 
     # ----- Lifecycle -----
 
     def _on_close(self):
+        _logger.info(f"Window close requested (running={self.running})")
         if self.running:
             if not messagebox.askyesno("Quit", "Training is running. Stop all processes and quit?"):
+                _logger.info("User cancelled close")
                 return
             self._stop()
+        _logger.info("AscensionAI Control Panel shutting down")
         self.root.destroy()
 
     def run(self):
