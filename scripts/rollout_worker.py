@@ -415,7 +415,9 @@ class WorkerAgent:
         return StartGameAction(player_class=PlayerClass.IRONCLAD, ascension_level=0)
 
     def on_error(self, err: str) -> Action:
-        log(f"COMMAND ERROR: {err} (screen was probably in an unexpected state)")
+        log(f"COMMAND ERROR: {err}")
+        if "proceed" in err and "choose" in err:
+            return ChooseAction(choice_index=0)
         return Action("state")
 
 

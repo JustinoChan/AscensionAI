@@ -399,6 +399,8 @@ class PPOAgent:
 
     def on_error(self, err: str) -> Action:
         log(f"COMMAND ERROR: {err}")
+        if "proceed" in err and "choose" in err:
+            return ChooseAction(choice_index=0)
         return Action("state")
 
 

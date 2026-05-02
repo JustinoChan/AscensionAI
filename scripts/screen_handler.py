@@ -313,18 +313,20 @@ def auto_handle_screen(
     if screen_name == "HAND_SELECT":
         if scr and getattr(scr, "can_pick_zero", False) and proceed_avail:
             return Action("proceed")
+        selected = list(getattr(scr, "selected_cards", []) or [])
+        num_needed = int(getattr(scr, "num_cards", 1) or 1) if scr else 1
+        if len(selected) >= num_needed:
+            if proceed_avail:
+                return Action("proceed")
+            return Action("state")
         cards = choice_list or [c.name for c in getattr(scr, "cards", []) or []]
         if heuristic_all:
             if cards:
                 return ChooseAction(choice_index=pick_hand_select(cards))
-            if proceed_avail:
-                return Action("proceed")
             if cancel_avail:
                 return Action("leave")
-            return Action("state")
+            return ChooseAction(choice_index=0)
         if not cards:
-            if proceed_avail:
-                return Action("proceed")
             if cancel_avail:
                 return Action("leave")
         return None

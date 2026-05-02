@@ -198,19 +198,28 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
             return (Action("proceed"), _PROCEED) if proceed_avail else (Action("state"), _NOOP)
         return ChooseAction(name="open"), _CHOOSE_START
 
-    # --- Mechanical: HAND_SELECT with can_pick_zero ---
+    # --- Mechanical: HAND_SELECT ---
     if screen == "HAND_SELECT":
         if scr and getattr(scr, "can_pick_zero", False) and proceed_avail:
             return Action("proceed"), _PROCEED
-        cards = choice_list or [c.name for c in getattr(scr, "cards", []) or []]
+        scr_cards = list(getattr(scr, "cards", []) or [])
+        selected = list(getattr(scr, "selected_cards", []) or [])
+        num_needed = int(getattr(scr, "num_cards", 1) or 1) if scr else 1
+        cards = choice_list or [c.name for c in scr_cards]
+        log(f"HAND_SELECT: choice_list={choice_list} scr_cards={len(scr_cards)} "
+            f"selected={len(selected)} num_needed={num_needed} "
+            f"cards={cards} proceed={proceed_avail} cancel={cancel_avail} "
+            f"scr_type={type(scr).__name__ if scr else None}")
+        if len(selected) >= num_needed:
+            if proceed_avail:
+                return Action("proceed"), _PROCEED
+            return Action("state"), _NOOP
         if cards:
             idx = pick_hand_select(cards)
             return ChooseAction(choice_index=idx), _CHOOSE_START + idx
-        if proceed_avail:
-            return Action("proceed"), _PROCEED
         if cancel_avail:
             return Action("leave"), _LEAVE
-        return Action("state"), _NOOP
+        return ChooseAction(choice_index=0), _CHOOSE_START
 
     # --- Mechanical: GRID ---
     if screen == "GRID":
@@ -442,14 +451,19 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
             return Action("end"), _END_TURN
 
     # --- Trivial fallback (mirrors train_ppo auto-handle) ---
+    log(f"FALLBACK: screen={screen} choice_list={choice_list} "
+        f"proceed={proceed_avail} cancel={cancel_avail} "
+        f"scr_type={type(scr).__name__ if scr else None}")
+    scr_cards = list(getattr(scr, "cards", []) or [])
+    all_choices = choice_list or [c.name for c in scr_cards]
+    if all_choices:
+        return ChooseAction(choice_index=0), _CHOOSE_START
     if not choice_list and not cancel_avail:
         if proceed_avail:
             return Action("proceed"), _PROCEED
         return Action("state"), _NOOP
     if not choice_list and cancel_avail and not proceed_avail:
         return Action("leave"), _LEAVE
-    if choice_list:
-        return ChooseAction(choice_index=0), _CHOOSE_START
 
     return Action("state"), _NOOP
 
@@ -524,6 +538,8 @@ class DemoCollector:
 
     def on_error(self, err: str) -> Action:
         log(f"COMMAND ERROR: {err}")
+        if "proceed" in err and "choose" in err:
+            return ChooseAction(choice_index=0)
         return Action("state")
 
 
