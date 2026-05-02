@@ -235,6 +235,7 @@ class WorkerAgent:
 
         self._stuck_key = ""
         self._stuck_count = 0
+        self._stuck_dumped_key = ""
         self._recent_actions: list[str] = []
         self._model_mtime = 0.0
 
@@ -331,10 +332,11 @@ class WorkerAgent:
             self._track_stuck(screen_name, auto.command, in_combat=False)
             self.total_steps += 1
             if self._stuck_count >= 10:
-                _dump_stuck_state(gs, screen_name, self.worker_id,
-                                  self._stuck_count, self._recent_actions)
-                log(f"STUCK (heuristic) on {screen_name} — dumped to bug_debug.log")
-                self._stuck_count = 0
+                if self._stuck_key != self._stuck_dumped_key:
+                    _dump_stuck_state(gs, screen_name, self.worker_id,
+                                      self._stuck_count, self._recent_actions)
+                    log(f"STUCK (heuristic) on {screen_name} — dumped to bug_debug.log")
+                    self._stuck_dumped_key = self._stuck_key
                 proceed_avail = bool(getattr(gs, "proceed_available", False))
                 cancel_avail = bool(getattr(gs, "cancel_available", False))
                 if proceed_avail:
@@ -407,6 +409,7 @@ class WorkerAgent:
         self.prev_mask = None
         self._stuck_key = ""
         self._stuck_count = 0
+        self._stuck_dumped_key = ""
         self._recent_actions.clear()
         self.initialized = False
 

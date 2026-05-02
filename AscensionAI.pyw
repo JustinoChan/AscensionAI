@@ -26,6 +26,7 @@ if not _in_venv and _VENV_PYTHONW.exists():
 
 import csv as _csv
 import logging
+import shutil
 import time
 import traceback
 import platform
@@ -76,6 +77,7 @@ MODES = {
     "Behavior Cloning": "bc",
     "Evaluation (Greedy)": "eval",
     "Game Logger (Passive)": "logger",
+    "Play Game (No AI)": "play",
 }
 
 # (label_text, min, max, default) — None label = spinner hidden for that mode
@@ -87,6 +89,7 @@ SPINNER_CONFIG = {
     "bc":      (None, 0, 0, 0),
     "eval":    ("Games:", 1, 100, 20),
     "logger":  (None, 0, 0, 0),
+    "play":    (None, 0, 0, 0),
 }
 
 
@@ -154,10 +157,13 @@ def escape_properties_path(p: Path) -> str:
     return str(p).replace("\\", "/").replace(":", "\\:")
 
 
-def write_config(command: str):
+def write_config(command: str | None = None):
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%a %b %d %H:%M:%S %z %Y")
-    content = f"#{ts}\nverbose=true\ncommand={command}\nrunAtGameStart=true\n"
+    if command:
+        content = f"#{ts}\nverbose=true\ncommand={command}\nrunAtGameStart=true\n"
+    else:
+        content = f"#{ts}\nverbose=true\n"
     CONFIG_FILE.write_text(content, encoding="ascii")
     _logger.info(f"Config written to {CONFIG_FILE}")
     _logger.debug(f"Config content:\n{content.rstrip()}")
@@ -263,6 +269,7 @@ class AscensionApp:
         self.hw = detect_hardware()
 
         self._build_ui()
+        self._on_mode_change()
         self._refresh_stats()
         _logger.info(f"GUI initialized — hw={self.hw}")
 
@@ -333,6 +340,10 @@ class AscensionApp:
         self.verbose_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(row2, text="Verbose Logs", variable=self.verbose_var).pack(side="left", padx=(0, 10))
 
+        self.use_bc_var = tk.BooleanVar(value=False)
+        self.use_bc_chk = ttk.Checkbutton(row2, text="Use BC Checkpoint", variable=self.use_bc_var)
+        self.use_bc_chk.pack(side="left", padx=(0, 10))
+
         self.status_var = tk.StringVar(value="Idle")
         ttk.Label(row2, textvariable=self.status_var, font=("Segoe UI", 10, "italic")).pack(side="left")
 
@@ -342,10 +353,13 @@ class AscensionApp:
 
         self.stats_vars = {
             "train_line": tk.StringVar(value="Training:  no data yet"),
+            "detail_line": tk.StringVar(value=""),
             "eval_line": tk.StringVar(value="Eval:  no data yet"),
         }
         ttk.Label(stats_frame, textvariable=self.stats_vars["train_line"],
                   font=("Consolas", 10)).pack(anchor="w")
+        ttk.Label(stats_frame, textvariable=self.stats_vars["detail_line"],
+                  font=("Consolas", 10)).pack(anchor="w", pady=(2, 0))
         ttk.Label(stats_frame, textvariable=self.stats_vars["eval_line"],
                   font=("Consolas", 10)).pack(anchor="w", pady=(2, 0))
 
@@ -424,6 +438,13 @@ class AscensionApp:
             self.spin_minus.configure(state="disabled")
             self.spin_plus.configure(state="disabled")
 
+        bc_path = ROOT / "models" / "ppo_sts_bc.pt"
+        if mode in ("worker", "collect", "train", "eval") and bc_path.exists():
+            self.use_bc_chk.pack(side="left", padx=(0, 10))
+        else:
+            self.use_bc_chk.pack_forget()
+            self.use_bc_var.set(False)
+
     # ----- Logging -----
 
     def _append_log(self, tab_name: str, text: str):
@@ -460,14 +481,16 @@ class AscensionApp:
         if not rows:
             return None
 
-        floors, rewards, wins, best, updates = [], [], 0, 0, 0
+        floors, rewards, wins, best_floor, best_act = [], [], 0, 0, 0
+        updates, total_transitions, total_steps = 0, 0, 0
+        acts, victories = [], []
         parse_errors = 0
         for r in rows:
             try:
                 fl = float(r.get("final_floor") or 0)
                 floors.append(fl)
-                if fl > best:
-                    best = fl
+                if fl > best_floor:
+                    best_floor = fl
             except Exception:
                 parse_errors += 1
             try:
@@ -475,7 +498,9 @@ class AscensionApp:
             except Exception:
                 parse_errors += 1
             try:
-                if int(float(r.get("victory") or 0)):
+                v = int(float(r.get("victory") or 0))
+                victories.append(v)
+                if v:
                     wins += 1
             except Exception:
                 parse_errors += 1
@@ -483,20 +508,61 @@ class AscensionApp:
                 updates = int(float(r.get("total_updates") or 0))
             except Exception:
                 parse_errors += 1
+            try:
+                total_transitions += int(float(r.get("transitions") or 0))
+            except Exception:
+                pass
+            try:
+                total_steps += int(float(r.get("steps") or 0))
+            except Exception:
+                pass
+            try:
+                act = int(float(r.get("final_act") or 0))
+                acts.append(act)
+                if act > best_act:
+                    best_act = act
+            except Exception:
+                pass
         if parse_errors:
             _logger.debug(f"training_stats.csv: {parse_errors} field parse error(s) "
                           f"across {len(rows)} rows")
 
-        recent_floors = floors[-25:]
-        recent_rewards = rewards[-25:]
+        recent_n = 25
+        recent_floors = floors[-recent_n:]
+        recent_rewards = rewards[-recent_n:]
+        recent_wins = sum(victories[-recent_n:])
+
+        rollouts_pending = 0
+        rollouts_dir = ROOT / "rollouts_shared"
+        if rollouts_dir.exists():
+            rollouts_pending = len(list(rollouts_dir.glob("*.npz")))
+
+        model_path = ROOT / "models" / "ppo_sts.pt"
+        model_age = ""
+        if model_path.exists():
+            delta = datetime.now() - datetime.fromtimestamp(model_path.stat().st_mtime)
+            mins = int(delta.total_seconds() // 60)
+            if mins < 60:
+                model_age = f"{mins}m ago"
+            elif mins < 1440:
+                model_age = f"{mins // 60}h {mins % 60}m ago"
+            else:
+                model_age = f"{mins // 1440}d {(mins % 1440) // 60}h ago"
+
         return {
             "total": len(rows),
             "wins": wins,
             "win_rate": wins / len(rows) if rows else 0.0,
-            "best_floor": int(best),
+            "recent_win_rate": recent_wins / len(victories[-recent_n:]) if victories[-recent_n:] else 0.0,
+            "best_floor": int(best_floor),
+            "best_act": best_act,
             "avg_floor": sum(recent_floors) / len(recent_floors) if recent_floors else 0.0,
             "avg_reward": sum(recent_rewards) / len(recent_rewards) if recent_rewards else 0.0,
             "updates": updates,
+            "total_transitions": total_transitions,
+            "total_steps": total_steps,
+            "rollouts_pending": rollouts_pending,
+            "model_age": model_age,
         }
 
     def _load_eval_stats(self) -> dict | None:
@@ -533,11 +599,21 @@ class AscensionApp:
                 self.stats_vars["train_line"].set(
                     f"Training:  {ts['total']} games  |  "
                     f"Wins: {ts['wins']} ({ts['win_rate']:.0%})  |  "
-                    f"Best Floor: {ts['best_floor']}  |  "
-                    f"Avg Floor: {ts['avg_floor']:.1f}  |  "
-                    f"Avg Reward: {ts['avg_reward']:.1f}  |  "
-                    f"Updates: {ts['updates']}"
+                    f"Last 25: {ts['recent_win_rate']:.0%}  |  "
+                    f"Best: Floor {ts['best_floor']} Act {ts['best_act']}  |  "
+                    f"Avg Floor: {ts['avg_floor']:.1f}"
                 )
+                detail_parts = [
+                    f"Transitions: {ts['total_transitions']:,}",
+                    f"Steps: {ts['total_steps']:,}",
+                    f"Updates: {ts['updates']}",
+                    f"Avg Reward: {ts['avg_reward']:.1f}",
+                ]
+                if ts['rollouts_pending']:
+                    detail_parts.append(f"Rollouts Queued: {ts['rollouts_pending']}")
+                if ts['model_age']:
+                    detail_parts.append(f"Model: {ts['model_age']}")
+                self.stats_vars["detail_line"].set("  " + "  |  ".join(detail_parts))
 
             es = self._load_eval_stats()
             if es:
@@ -612,6 +688,16 @@ class AscensionApp:
         (ROOT / "models").mkdir(exist_ok=True)
         (ROOT / "logs").mkdir(exist_ok=True)
 
+        if self.use_bc_var.get():
+            bc_path = ROOT / "models" / "ppo_sts_bc.pt"
+            if bc_path.exists():
+                shutil.copy2(str(bc_path), str(model_path))
+                _logger.info(f"Copied BC checkpoint -> {model_path}")
+                self._append_log("All", "Initialized model from BC checkpoint")
+            else:
+                _logger.warning("Use BC checked but ppo_sts_bc.pt not found")
+                self._append_log("All", "WARNING: BC checkpoint not found, starting fresh")
+
         if mode == "worker":
             (ROOT / "rollouts_shared").mkdir(exist_ok=True)
             rollout_count = len(list((ROOT / "rollouts_shared").glob("*.npz")))
@@ -641,6 +727,9 @@ class AscensionApp:
         elif mode == "logger":
             self.status_var.set("Launching passive game logger...")
             threading.Thread(target=self._launch_single, args=("logger",), daemon=True).start()
+        elif mode == "play":
+            self.status_var.set("Launching game (no AI)...")
+            threading.Thread(target=self._launch_play, daemon=True).start()
         _logger.info(f"Launch thread started for mode={mode}")
 
     def _launch_single(self, mode: str, games: int = 20):
@@ -679,6 +768,20 @@ class AscensionApp:
         except Exception as e:
             _logger.error(f"_launch_single FAILED: {traceback.format_exc()}")
             self._append_log("All", f"ERROR launching {mode}: {e}")
+
+    def _launch_play(self):
+        _logger.info("_launch_play: launching game with no AI command")
+        try:
+            write_config(None)
+            self._append_log("All", "Config written (no AI command), launching STS...")
+            proc = launch_sts()
+            self.processes.append(proc)
+            self._append_log("All", f"STS launched (PID {proc.pid}) — play/configure mods freely")
+            self.root.after(0, lambda: self.status_var.set("Running (Play Game)"))
+            _logger.info(f"_launch_play complete: PID {proc.pid}")
+        except Exception as e:
+            _logger.error(f"_launch_play FAILED: {traceback.format_exc()}")
+            self._append_log("All", f"ERROR launching game: {e}")
 
     def _wait_for_ready(self, log_file: Path, tab_name: str, timeout: int = 120) -> bool:
         """Block until a worker's log file contains 'Signaling ready', or timeout."""
@@ -1277,8 +1380,9 @@ class AscensionApp:
     def _validate(self) -> str:
         _logger.info("Running pre-launch validation...")
         issues = []
+        mode = MODES.get(self.mode_var.get(), "worker")
         _logger.debug(f"VENV_PYTHON: {VENV_PYTHON}  exists={VENV_PYTHON.exists()}")
-        if not VENV_PYTHON.exists():
+        if mode != "play" and not VENV_PYTHON.exists():
             issues.append(f"Python venv not found:\n  {VENV_PYTHON}\n  Run: python -m venv .venv && pip install -r requirements.txt")
         _logger.debug(f"JAVA_EXE: {JAVA_EXE}  exists={JAVA_EXE.exists()}")
         if not JAVA_EXE.exists():

@@ -201,6 +201,25 @@ def _pick_grid_match(choice_list: list, scr) -> Optional[int]:
     return None
 
 
+def _pick_from_unselected(unselected: list, scr) -> int:
+    """From (index, card_name) pairs, pick the best card to remove/select."""
+    for_purge = bool(getattr(scr, "for_purge", False)) if scr else False
+    for_upgrade = bool(getattr(scr, "for_upgrade", False)) if scr else False
+    if for_upgrade:
+        for i, c in unselected:
+            if str(c).lower().rstrip("+") in GOOD_CARDS:
+                return i
+        return unselected[0][0]
+    best_idx, best_score = unselected[0][0], -1
+    for i, c in unselected:
+        name = str(c).lower().rstrip("+")
+        for key, score in _PURGE_PRIORITY.items():
+            if key in name and score > best_score:
+                best_score = score
+                best_idx = i
+    return best_idx
+
+
 _MAP_SYMBOL_SCORES = {
     "E": 5, "?": 3, "$": 2, "M": 1, "T": 4, "R": 0,
 }
@@ -336,37 +355,36 @@ def auto_handle_screen(
         if scr and getattr(scr, "confirm_up", False):
             return Action("proceed")
         num_needed = int(getattr(scr, "num_cards", 1) or 1) if scr else 1
-        already = len(getattr(scr, "selected_cards", []) or []) if scr else 0
+        selected = list(getattr(scr, "selected_cards", []) or []) if scr else []
+        already = len(selected)
         if already >= num_needed:
             if proceed_avail:
                 return Action("proceed")
+            return Action("state")
+        selected_names = {getattr(c, "name", "").lower() for c in selected}
         if choice_list:
-            for_purge = bool(getattr(scr, "for_purge", False)) if scr else False
             for_upgrade = bool(getattr(scr, "for_upgrade", False)) if scr else False
             for_transform = bool(getattr(scr, "for_transform", False)) if scr else False
-            if for_purge:
-                return ChooseAction(choice_index=pick_grid_card(choice_list))
+            any_number = bool(getattr(scr, "any_number", False)) if scr else False
             if for_upgrade:
                 return ChooseAction(choice_index=_pick_grid_upgrade(choice_list))
             if for_transform:
                 return ChooseAction(choice_index=0)
-            any_number = bool(getattr(scr, "any_number", False)) if scr else False
             if any_number:
                 if proceed_avail:
                     return Action("proceed")
                 return ChooseAction(choice_index=0)
-            idx = _pick_grid_match(choice_list, scr)
-            if idx is not None:
-                return ChooseAction(choice_index=idx)
-            if cancel_avail:
-                return Action("leave")
-            if proceed_avail:
-                return Action("proceed")
+            unselected = [(i, c) for i, c in enumerate(choice_list)
+                          if str(c).lower() not in selected_names]
+            if not unselected:
+                unselected = list(enumerate(choice_list))
+            best_idx = _pick_from_unselected(unselected, scr)
+            return ChooseAction(choice_index=best_idx)
         if proceed_avail:
             return Action("proceed")
         if cancel_avail:
             return Action("leave")
-        return Action("proceed")
+        return Action("state")
 
     # ---- MAP ----
     if screen_name == "MAP":

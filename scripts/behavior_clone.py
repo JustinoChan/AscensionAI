@@ -85,7 +85,8 @@ from screen_handler import (
     GOOD_CARDS, OK_CARDS, JUNK_CARDS,
     pick_card_reward, pick_combat_reward_obj, pick_combat_reward_str,
     pick_rest, pick_event, pick_boss_relic, pick_hand_select,
-    pick_grid_card, _pick_grid_upgrade, _pick_grid_match, pick_map,
+    pick_grid_card, _pick_grid_upgrade, _pick_grid_match, _pick_from_unselected,
+    pick_map,
     pick_shop_item,
 )
 
@@ -226,39 +227,37 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
         if scr and getattr(scr, "confirm_up", False):
             return Action("proceed"), _PROCEED
         num_needed = int(getattr(scr, "num_cards", 1) or 1) if scr else 1
-        already = len(getattr(scr, "selected_cards", []) or []) if scr else 0
+        selected = list(getattr(scr, "selected_cards", []) or []) if scr else []
+        already = len(selected)
         if already >= num_needed:
             if proceed_avail:
                 return Action("proceed"), _PROCEED
+            return Action("state"), _NOOP
+        selected_names = {getattr(c, "name", "").lower() for c in selected}
         if choice_list:
-            for_purge = bool(getattr(scr, "for_purge", False)) if scr else False
             for_upgrade = bool(getattr(scr, "for_upgrade", False)) if scr else False
             for_transform = bool(getattr(scr, "for_transform", False)) if scr else False
-            if for_purge:
-                idx = pick_grid_card(choice_list)
-                return ChooseAction(choice_index=idx), _CHOOSE_START + idx
+            any_number = bool(getattr(scr, "any_number", False)) if scr else False
             if for_upgrade:
                 idx = _pick_grid_upgrade(choice_list)
                 return ChooseAction(choice_index=idx), _CHOOSE_START + idx
             if for_transform:
                 return ChooseAction(choice_index=0), _CHOOSE_START
-            any_number = bool(getattr(scr, "any_number", False)) if scr else False
             if any_number:
                 if proceed_avail:
                     return Action("proceed"), _PROCEED
                 return ChooseAction(choice_index=0), _CHOOSE_START
-            idx = _pick_grid_match(choice_list, scr)
-            if idx is not None:
-                return ChooseAction(choice_index=idx), _CHOOSE_START + idx
-            if cancel_avail:
-                return Action("leave"), _LEAVE
-            if proceed_avail:
-                return Action("proceed"), _PROCEED
+            unselected = [(i, c) for i, c in enumerate(choice_list)
+                          if str(c).lower() not in selected_names]
+            if not unselected:
+                unselected = list(enumerate(choice_list))
+            idx = _pick_from_unselected(unselected, scr)
+            return ChooseAction(choice_index=idx), _CHOOSE_START + idx
         if proceed_avail:
             return Action("proceed"), _PROCEED
         if cancel_avail:
             return Action("leave"), _LEAVE
-        return Action("proceed"), _PROCEED
+        return Action("state"), _NOOP
 
     # --- Mechanical: MAP boss-only ---
     if screen == "MAP":
