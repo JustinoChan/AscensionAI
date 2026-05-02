@@ -248,6 +248,13 @@ class BCPPOAgent:
     # Phase 1: BC demonstration collection
     # ------------------------------------------------------------------
     def _bc_step(self, gs) -> Action:
+        try:
+            return self._bc_step_inner(gs)
+        except Exception:
+            log(f"CRASH in _bc_step: {traceback.format_exc()}")
+            return Action("state")
+
+    def _bc_step_inner(self, gs) -> Action:
         screen = self._screen_name(gs)
         terminal = screen in {"GAME_OVER", "VICTORY", "COMPLETE", "CREDITS"}
 
@@ -421,6 +428,15 @@ class BCPPOAgent:
     # Phase 2: PPO fine-tuning
     # ------------------------------------------------------------------
     def _ppo_step(self, gs) -> Action:
+        try:
+            return self._ppo_step_inner(gs)
+        except Exception:
+            log(f"CRASH in _ppo_step: {traceback.format_exc()}")
+            if getattr(gs, "proceed_available", False):
+                return Action("proceed")
+            return ChooseAction(choice_index=0)
+
+    def _ppo_step_inner(self, gs) -> Action:
         obs = encode_game_state(gs)
         mask = compute_action_mask(gs)
 
