@@ -322,9 +322,9 @@ class RewardTracker:
                 cur_hp = spawner_hp.get(mid, 0)
                 dmg = max(0, prev_hp - cur_hp)
                 if dmg > 0:
-                    reward += dmg * 0.03
+                    reward += dmg * 0.08
                 if prev_hp > 0 and cur_hp <= 0:
-                    reward += 2.0
+                    reward += 5.0
 
         if terminated:
             if victory:

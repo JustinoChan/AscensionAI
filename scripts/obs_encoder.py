@@ -34,92 +34,93 @@ from game_data import (
 #   type   — 0=Normal, 1=Elite, 2=Boss
 #   act    — 0=exordium(Act1), 1=city(Act2), 2=beyond(Act3), 3=ending(Act4)
 #   n_moves — number of distinct moves
-#   flags  — 6 behavioral booleans:
+#   flags  — 7 behavioral booleans:
 #       [0] enrages_on_skill  (Nob-like: punishes skill cards)
 #       [1] splits_low_hp     (slime boss, large slimes split at ~50% HP)
 #       [2] scales_strength   (Cultist ritual, Demon Form-like buff loops)
 #       [3] multi_attacker    (has a move that hits 2+ times)
 #       [4] retaliates        (thorns, curl-up, reactive damage)
 #       [5] escapes           (gremlin escape, looter flee)
+#       [6] spawns_minions    (Gremlin Leader, Reptomancer, Bronze Automaton)
 # ---------------------------------------------------------------------------
 MONSTER_DB: Dict[str, Tuple[int, int, int, Tuple[int, ...]]] = {
     # --- Act 1 Normal ---
-    "AcidSlime_L":     (0, 0, 4, (0, 1, 0, 0, 0, 0)),
-    "AcidSlime_M":     (0, 0, 3, (0, 0, 0, 0, 0, 0)),
-    "AcidSlime_S":     (0, 0, 2, (0, 0, 0, 0, 0, 0)),
-    "SpikeSlime_L":    (0, 0, 3, (0, 1, 0, 0, 0, 0)),
-    "SpikeSlime_M":    (0, 0, 2, (0, 0, 0, 0, 0, 0)),
-    "SpikeSlime_S":    (0, 0, 1, (0, 0, 0, 0, 0, 0)),
-    "JawWorm":         (0, 0, 3, (0, 0, 1, 0, 0, 0)),
-    "Cultist":         (0, 0, 2, (0, 0, 1, 0, 0, 0)),
-    "FungiBeast":      (0, 0, 2, (0, 0, 1, 0, 0, 0)),
-    "GremlinFat":      (0, 0, 2, (0, 0, 0, 0, 0, 1)),
-    "GremlinWarrior":  (0, 0, 2, (0, 0, 0, 0, 0, 1)),
-    "GremlinThief":    (0, 0, 2, (0, 0, 0, 0, 0, 1)),
-    "GremlinTsundere": (0, 0, 3, (0, 0, 0, 0, 0, 1)),
-    "GremlinWizard":   (0, 0, 3, (0, 0, 0, 0, 0, 1)),
-    "FuzzyLouseNormal":(0, 0, 2, (0, 0, 1, 0, 1, 0)),
-    "FuzzyLouseDefensive":(0, 0, 2, (0, 0, 0, 0, 1, 0)),
-    "SlaverBlue":      (0, 0, 2, (0, 0, 0, 0, 0, 0)),
-    "SlaverRed":       (0, 0, 3, (0, 0, 0, 0, 0, 0)),
-    "Looter":          (0, 0, 2, (0, 0, 0, 0, 0, 1)),
-    "Apology Slime":   (0, 0, 2, (0, 0, 0, 0, 0, 0)),
+    "AcidSlime_L":     (0, 0, 4, (0, 1, 0, 0, 0, 0, 0)),
+    "AcidSlime_M":     (0, 0, 3, (0, 0, 0, 0, 0, 0, 0)),
+    "AcidSlime_S":     (0, 0, 2, (0, 0, 0, 0, 0, 0, 0)),
+    "SpikeSlime_L":    (0, 0, 3, (0, 1, 0, 0, 0, 0, 0)),
+    "SpikeSlime_M":    (0, 0, 2, (0, 0, 0, 0, 0, 0, 0)),
+    "SpikeSlime_S":    (0, 0, 1, (0, 0, 0, 0, 0, 0, 0)),
+    "JawWorm":         (0, 0, 3, (0, 0, 1, 0, 0, 0, 0)),
+    "Cultist":         (0, 0, 2, (0, 0, 1, 0, 0, 0, 0)),
+    "FungiBeast":      (0, 0, 2, (0, 0, 1, 0, 0, 0, 0)),
+    "GremlinFat":      (0, 0, 2, (0, 0, 0, 0, 0, 1, 0)),
+    "GremlinWarrior":  (0, 0, 2, (0, 0, 0, 0, 0, 1, 0)),
+    "GremlinThief":    (0, 0, 2, (0, 0, 0, 0, 0, 1, 0)),
+    "GremlinTsundere": (0, 0, 3, (0, 0, 0, 0, 0, 1, 0)),
+    "GremlinWizard":   (0, 0, 3, (0, 0, 0, 0, 0, 1, 0)),
+    "FuzzyLouseNormal":(0, 0, 2, (0, 0, 1, 0, 1, 0, 0)),
+    "FuzzyLouseDefensive":(0, 0, 2, (0, 0, 0, 0, 1, 0, 0)),
+    "SlaverBlue":      (0, 0, 2, (0, 0, 0, 0, 0, 0, 0)),
+    "SlaverRed":       (0, 0, 3, (0, 0, 0, 0, 0, 0, 0)),
+    "Looter":          (0, 0, 2, (0, 0, 0, 0, 0, 1, 0)),
+    "Apology Slime":   (0, 0, 2, (0, 0, 0, 0, 0, 0, 0)),
     # --- Act 1 Elite ---
-    "GremlinNob":      (1, 0, 3, (1, 0, 1, 0, 0, 0)),
-    "Lagavulin":       (1, 0, 4, (0, 0, 0, 0, 0, 0)),
-    "Sentry":          (1, 0, 2, (0, 0, 0, 0, 0, 0)),
+    "GremlinNob":      (1, 0, 3, (1, 0, 1, 0, 0, 0, 0)),
+    "Lagavulin":       (1, 0, 4, (0, 0, 0, 0, 0, 0, 0)),
+    "Sentry":          (1, 0, 2, (0, 0, 0, 0, 0, 0, 0)),
     # --- Act 1 Boss ---
-    "Hexaghost":       (2, 0, 6, (0, 0, 0, 1, 0, 0)),
-    "TheGuardian":     (2, 0, 7, (0, 0, 0, 1, 1, 0)),
-    "SlimeBoss":       (2, 0, 4, (0, 1, 0, 0, 0, 0)),
+    "Hexaghost":       (2, 0, 6, (0, 0, 0, 1, 0, 0, 0)),
+    "TheGuardian":     (2, 0, 7, (0, 0, 0, 1, 1, 0, 0)),
+    "SlimeBoss":       (2, 0, 4, (0, 1, 0, 0, 0, 0, 0)),
     # --- Act 2 Normal ---
-    "Chosen":          (0, 1, 5, (0, 0, 0, 1, 0, 0)),
-    "Byrd":            (0, 1, 6, (0, 0, 0, 1, 0, 0)),
-    "ShelledParasite":  (0, 1, 4, (0, 0, 0, 1, 1, 0)),
-    "SnakePlant":      (0, 1, 2, (0, 0, 0, 1, 0, 0)),
-    "Centurion":       (0, 1, 3, (0, 0, 0, 1, 0, 0)),
-    "Healer":          (0, 1, 3, (0, 0, 0, 0, 0, 0)),
-    "Snecko":          (0, 1, 3, (0, 0, 0, 0, 0, 0)),
-    "Mugger":          (0, 1, 2, (0, 0, 0, 0, 0, 1)),
-    "SphericGuardian": (0, 1, 4, (0, 0, 0, 1, 0, 0)),
-    "BanditBear":      (0, 1, 1, (0, 0, 0, 0, 0, 0)),
-    "BanditChild":     (0, 1, 1, (0, 0, 0, 1, 0, 0)),
-    "BanditLeader":    (0, 1, 1, (0, 0, 0, 0, 0, 0)),
-    "TorchHead":       (0, 1, 1, (0, 0, 0, 0, 0, 0)),
+    "Chosen":          (0, 1, 5, (0, 0, 0, 1, 0, 0, 0)),
+    "Byrd":            (0, 1, 6, (0, 0, 0, 1, 0, 0, 0)),
+    "ShelledParasite":  (0, 1, 4, (0, 0, 0, 1, 1, 0, 0)),
+    "SnakePlant":      (0, 1, 2, (0, 0, 0, 1, 0, 0, 0)),
+    "Centurion":       (0, 1, 3, (0, 0, 0, 1, 0, 0, 0)),
+    "Healer":          (0, 1, 3, (0, 0, 0, 0, 0, 0, 0)),
+    "Snecko":          (0, 1, 3, (0, 0, 0, 0, 0, 0, 0)),
+    "Mugger":          (0, 1, 2, (0, 0, 0, 0, 0, 1, 0)),
+    "SphericGuardian": (0, 1, 4, (0, 0, 0, 1, 0, 0, 0)),
+    "BanditBear":      (0, 1, 1, (0, 0, 0, 0, 0, 0, 0)),
+    "BanditChild":     (0, 1, 1, (0, 0, 0, 1, 0, 0, 0)),
+    "BanditLeader":    (0, 1, 1, (0, 0, 0, 0, 0, 0, 0)),
+    "TorchHead":       (0, 1, 1, (0, 0, 0, 0, 0, 0, 0)),
     # --- Act 2 Elite ---
-    "GremlinLeader":   (1, 1, 3, (0, 0, 0, 1, 0, 0)),
-    "SlaverBoss":      (1, 1, 1, (0, 0, 0, 0, 0, 0)),
-    "BookOfStabbing":  (1, 1, 2, (0, 0, 1, 0, 0, 0)),
+    "GremlinLeader":   (1, 1, 3, (0, 0, 0, 1, 0, 0, 1)),
+    "SlaverBoss":      (1, 1, 1, (0, 0, 0, 0, 0, 0, 0)),
+    "BookOfStabbing":  (1, 1, 2, (0, 0, 1, 0, 0, 0, 0)),
     # --- Act 2 Boss ---
-    "BronzeAutomaton": (2, 1, 5, (0, 0, 0, 1, 0, 0)),
-    "TheCollector":    (2, 1, 5, (0, 0, 0, 0, 0, 0)),
-    "Champ":           (2, 1, 7, (0, 0, 1, 1, 0, 0)),
+    "BronzeAutomaton": (2, 1, 5, (0, 0, 0, 1, 0, 0, 1)),
+    "TheCollector":    (2, 1, 5, (0, 0, 0, 0, 0, 0, 0)),
+    "Champ":           (2, 1, 7, (0, 0, 1, 1, 0, 0, 0)),
     # --- Act 3 Normal ---
-    "Darkling":        (0, 2, 5, (0, 0, 0, 1, 0, 0)),
-    "OrbWalker":       (0, 2, 2, (0, 0, 0, 0, 0, 0)),
-    "Spiker":          (0, 2, 2, (0, 0, 0, 0, 1, 0)),
-    "Repulsor":        (0, 2, 2, (0, 0, 0, 0, 0, 0)),
-    "Exploder":        (0, 2, 2, (0, 0, 0, 0, 0, 0)),
-    "Maw":             (0, 2, 4, (0, 0, 1, 0, 0, 0)),
-    "Serpent":         (0, 2, 3, (0, 0, 0, 0, 0, 0)),
-    "Dagger":          (0, 2, 2, (0, 0, 0, 0, 0, 0)),
+    "Darkling":        (0, 2, 5, (0, 0, 0, 1, 0, 0, 0)),
+    "OrbWalker":       (0, 2, 2, (0, 0, 0, 0, 0, 0, 0)),
+    "Spiker":          (0, 2, 2, (0, 0, 0, 0, 1, 0, 0)),
+    "Repulsor":        (0, 2, 2, (0, 0, 0, 0, 0, 0, 0)),
+    "Exploder":        (0, 2, 2, (0, 0, 0, 0, 0, 0, 0)),
+    "Maw":             (0, 2, 4, (0, 0, 1, 0, 0, 0, 0)),
+    "Serpent":         (0, 2, 3, (0, 0, 0, 0, 0, 0, 0)),
+    "Dagger":          (0, 2, 2, (0, 0, 0, 0, 0, 0, 0)),
     # --- Act 3 Elite ---
-    "GiantHead":       (1, 2, 3, (0, 0, 1, 0, 0, 0)),
-    "Nemesis":         (1, 2, 3, (0, 0, 0, 1, 0, 0)),
-    "Reptomancer":     (1, 2, 3, (0, 0, 0, 1, 0, 0)),
-    "Transient":       (1, 2, 1, (0, 0, 1, 0, 0, 0)),
-    "WrithingMass":    (1, 2, 5, (0, 0, 0, 1, 0, 0)),
+    "GiantHead":       (1, 2, 3, (0, 0, 1, 0, 0, 0, 0)),
+    "Nemesis":         (1, 2, 3, (0, 0, 0, 1, 0, 0, 0)),
+    "Reptomancer":     (1, 2, 3, (0, 0, 0, 1, 0, 0, 1)),
+    "Transient":       (1, 2, 1, (0, 0, 1, 0, 0, 0, 0)),
+    "WrithingMass":    (1, 2, 5, (0, 0, 0, 1, 0, 0, 0)),
     # --- Act 3 Boss ---
-    "AwakenedOne":     (2, 2, 6, (0, 0, 1, 1, 0, 0)),
-    "Deca":            (2, 2, 2, (0, 0, 0, 1, 0, 0)),
-    "Donu":            (2, 2, 2, (0, 0, 1, 1, 0, 0)),
-    "TimeEater":       (2, 2, 4, (0, 0, 1, 0, 0, 0)),
+    "AwakenedOne":     (2, 2, 6, (0, 0, 1, 1, 0, 0, 0)),
+    "Deca":            (2, 2, 2, (0, 0, 0, 1, 0, 0, 0)),
+    "Donu":            (2, 2, 2, (0, 0, 1, 1, 0, 0, 0)),
+    "TimeEater":       (2, 2, 4, (0, 0, 1, 0, 0, 0, 0)),
     # --- Act 4 (Ending) ---
-    "CorruptHeart":    (2, 3, 4, (0, 0, 1, 1, 1, 0)),
-    "SpireShield":     (1, 3, 3, (0, 0, 0, 0, 0, 0)),
-    "SpireSpear":      (1, 3, 3, (0, 0, 0, 1, 0, 0)),
+    "CorruptHeart":    (2, 3, 4, (0, 0, 1, 1, 1, 0, 0)),
+    "SpireShield":     (1, 3, 3, (0, 0, 0, 0, 0, 0, 0)),
+    "SpireSpear":      (1, 3, 3, (0, 0, 0, 1, 0, 0, 0)),
     # --- Bronze Automaton's minion ---
-    "BronzeOrb":       (1, 1, 3, (0, 0, 0, 0, 0, 0)),
+    "BronzeOrb":       (1, 1, 3, (0, 0, 0, 0, 0, 0, 0)),
 }
 
 # Normalised ID → index mapping (case-insensitive, no spaces/underscores)
@@ -140,9 +141,9 @@ def _monster_id_index(monster_id: str) -> int:
 # Per-monster-slot feature counts
 _MONSTER_ID_EMBED_DIM = 8   # compressed identity embedding
 _MONSTER_MOVE_HIST_DIM = 3  # move_id, last_move_id, second_last_move_id
-_MONSTER_BEHAV_DIM = 6      # behavioral flags from MONSTER_DB
+_MONSTER_BEHAV_DIM = 7      # behavioral flags from MONSTER_DB
 _MONSTER_BASE_DIM = 12      # existing: present, hp_ratio, max_hp, block, intent(5), dmg, hits, spare
-_MONSTER_SLOT_DIM = _MONSTER_BASE_DIM + _MONSTER_ID_EMBED_DIM + _MONSTER_MOVE_HIST_DIM + _MONSTER_BEHAV_DIM  # 29
+_MONSTER_SLOT_DIM = _MONSTER_BASE_DIM + _MONSTER_ID_EMBED_DIM + _MONSTER_MOVE_HIST_DIM + _MONSTER_BEHAV_DIM  # 30
 
 # ---------------------------------------------------------------------------
 # Dimensions
@@ -156,7 +157,7 @@ PLAYER_STATE_DIM = 15
 SCREEN_TYPE_DIM = 14
 HAND_CARD_DIM = 16                            # was 10: +4 identity +1 exhausts +1 upgraded
 HAND_DIM = MAX_HAND * HAND_CARD_DIM           # 160
-MONSTER_DIM = MAX_MONSTERS * _MONSTER_SLOT_DIM  # 5 * 29 = 145
+MONSTER_DIM = MAX_MONSTERS * _MONSTER_SLOT_DIM  # 5 * 30 = 150
 PLAYER_POWER_DIM = 20
 MONSTER_POWER_DIM = MAX_MONSTERS * 8          # 40
 CHOICE_DIM = 7
@@ -214,7 +215,7 @@ OBS_SIZE = (
     + POTION_DIM
     + DECK_PROFILE_DIM
     + MAP_DIM
-)  # 525
+)  # 530
 
 
 # ---------------------------------------------------------------------------
@@ -443,7 +444,7 @@ def _monster_embed(monster_id: str) -> np.ndarray:
 
 
 def _monster_behavior_vec(monster_id: str) -> np.ndarray:
-    """Return 6-dim behavioral flags + 3-dim metadata for a monster."""
+    """Return 7-dim behavioral flags for a monster."""
     idx = _monster_id_index(monster_id)
     if idx < 0:
         return np.zeros(_MONSTER_BEHAV_DIM, dtype=np.float32)

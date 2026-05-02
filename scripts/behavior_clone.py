@@ -77,6 +77,7 @@ from sts_gym_env import (
     _POTION_TARGETED_START, _POTION_UNTARGETED_START,
     _CHOOSE_START, _PROCEED, _LEAVE, _NOOP,
     MAX_HAND, MAX_MONSTERS, MAX_POTIONS,
+    SPAWNER_IDS,
 )
 
 from game_data import POTION_EFFECTS
@@ -153,6 +154,10 @@ def pick_target(monsters, prefer_low_hp=True):
     alive = living_monsters(monsters or [])
     if not alive:
         return None
+    spawners = [m for m in alive
+                if str(getattr(m, "monster_id", "")) in SPAWNER_IDS]
+    if spawners:
+        return spawners[0]
     if prefer_low_hp:
         alive.sort(key=lambda m: int(getattr(m, "current_hp", 999) or 999))
     return alive[0]
@@ -197,14 +202,15 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
     if screen == "HAND_SELECT":
         if scr and getattr(scr, "can_pick_zero", False) and proceed_avail:
             return Action("proceed"), _PROCEED
-        if choice_list:
-            idx = pick_hand_select(choice_list)
+        cards = choice_list or [c.name for c in getattr(scr, "cards", []) or []]
+        if cards:
+            idx = pick_hand_select(cards)
             return ChooseAction(choice_index=idx), _CHOOSE_START + idx
         if proceed_avail:
             return Action("proceed"), _PROCEED
         if cancel_avail:
             return Action("leave"), _LEAVE
-        return Action("proceed"), _PROCEED
+        return Action("state"), _NOOP
 
     # --- Mechanical: GRID ---
     if screen == "GRID":
