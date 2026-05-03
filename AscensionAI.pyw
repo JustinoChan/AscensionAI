@@ -192,8 +192,10 @@ def build_command(mode: str, worker_id: int = 1, games: int = 20,
     return cmd
 
 
-def launch_sts() -> subprocess.Popen:
+def launch_sts(skip_launcher: bool = False) -> subprocess.Popen:
     args = [str(JAVA_EXE), "-jar", str(MTS_LAUNCHER)]
+    if skip_launcher:
+        args.append("--skip-launcher")
     _logger.info(f"Launching STS: {args}  cwd={STS_DIR}")
     proc = subprocess.Popen(
         args,
@@ -266,6 +268,10 @@ class AscensionApp:
         self.running = False
         self.worker_launcher_pids: dict[int, int] = {}
         self.worker_sts_pids: dict[int, set[int]] = {}
+        self._worker_commands: dict[int, str] = {}
+        self._worker_restarts: dict[int, int] = {}
+        self._worker_launch_time: dict[int, float] = {}
+        self._n_workers: int = 0
 
         self.hw = detect_hardware()
 
@@ -998,6 +1004,7 @@ class AscensionApp:
                 time.sleep(0.1)
 
                 cmd = build_command("worker", worker_id=i)
+                self._worker_commands[i] = cmd
                 write_config(cmd)
                 self._append_log(tab_name, f"Config written for worker {i}, launching STS...")
                 self._append_log(tab_name, "Click 'Play' in ModTheSpire when it appears.")
@@ -1006,6 +1013,8 @@ class AscensionApp:
                 self.processes.append(proc)
                 self.worker_launcher_pids[i] = proc.pid
                 self.worker_sts_pids[i] = set()
+                self._worker_restarts[i] = 0
+                self._worker_launch_time[i] = time.time()
                 _logger.info(f"Worker {i}: launcher PID={proc.pid}, "
                              f"total processes tracked={len(self.processes)}")
                 self._append_log(tab_name, f"STS instance launched (PID {proc.pid})")
@@ -1030,15 +1039,79 @@ class AscensionApp:
                     _logger.info(f"Worker {i} ready={ready}, proceeding to next worker")
 
             if self.running:
+                self._n_workers = n_workers
                 suffix = "workers + trainer" if with_trainer else "collectors (no trainer)"
                 _logger.info(f"All {n_workers} workers launched ({suffix})")
                 _logger.info(f"Launcher PIDs: {self.worker_launcher_pids}")
                 _logger.info(f"STS PIDs (captured so far): {dict(self.worker_sts_pids)}")
                 self.root.after(0, lambda: self.status_var.set(
                     f"Running ({n_workers} {suffix})"))
+                threading.Thread(target=self._monitor_workers, daemon=True).start()
+                _logger.info("Worker health monitor started")
         except Exception as e:
             _logger.error(f"_launch_parallel FAILED: {traceback.format_exc()}")
             self._append_log("All", f"ERROR in parallel launch: {e}")
+
+    # ----- Worker health monitor -----
+
+    _MAX_RESTARTS = 5
+
+    def _monitor_workers(self):
+        """Periodically check if worker processes died and relaunch them."""
+        _logger.info("_monitor_workers: starting health check loop")
+        while self.running and not getattr(self, "_graceful_stopping", False):
+            time.sleep(30.0)
+            if not self.running or getattr(self, "_graceful_stopping", False):
+                break
+            for worker_id in list(self._worker_commands.keys()):
+                if not self.running:
+                    break
+                launch_t = self._worker_launch_time.get(worker_id, 0)
+                if time.time() - launch_t < 180:
+                    continue
+                java_pids, py_pids = self._find_pids_for_worker(worker_id)
+                if not java_pids and not py_pids:
+                    restarts = self._worker_restarts.get(worker_id, 0)
+                    if restarts >= self._MAX_RESTARTS:
+                        if restarts == self._MAX_RESTARTS:
+                            _logger.warning(f"Worker {worker_id}: max restarts ({self._MAX_RESTARTS}) reached, giving up")
+                            self._append_log(f"Worker {worker_id}",
+                                             f"Max restarts ({self._MAX_RESTARTS}) reached — not relaunching.")
+                            self._worker_restarts[worker_id] = restarts + 1
+                        continue
+                    _logger.warning(f"Worker {worker_id}: no processes found, relaunching (restart #{restarts + 1})")
+                    self._append_log(f"Worker {worker_id}",
+                                     f"Crash detected — relaunching (restart #{restarts + 1}/{self._MAX_RESTARTS})...")
+                    self._relaunch_worker(worker_id)
+                    time.sleep(15.0)
+        _logger.info("_monitor_workers: loop ended")
+
+    def _relaunch_worker(self, worker_id: int):
+        """Relaunch a single crashed worker using --skip-launcher."""
+        try:
+            cmd = self._worker_commands.get(worker_id)
+            if not cmd:
+                _logger.error(f"_relaunch_worker: no stored command for worker {worker_id}")
+                return
+            write_config(cmd)
+            proc = launch_sts(skip_launcher=True)
+            self.processes.append(proc)
+            self.worker_launcher_pids[worker_id] = proc.pid
+            self.worker_sts_pids[worker_id] = set()
+            self._worker_restarts[worker_id] = self._worker_restarts.get(worker_id, 0) + 1
+            self._worker_launch_time[worker_id] = time.time()
+            _logger.info(f"Worker {worker_id} relaunched: PID {proc.pid}")
+            self._append_log(f"Worker {worker_id}",
+                             f"Relaunched STS instance (PID {proc.pid}, --skip-launcher)")
+
+            threading.Thread(
+                target=self._capture_sts_pids_for_worker,
+                args=(proc.pid, worker_id),
+                daemon=True,
+            ).start()
+        except Exception as e:
+            _logger.error(f"_relaunch_worker {worker_id} FAILED: {e}")
+            self._append_log(f"Worker {worker_id}", f"ERROR relaunching: {e}")
 
     def _graceful_stop(self):
         """Wait for all current games to finish, save transitions, then stop."""

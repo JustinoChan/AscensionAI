@@ -367,6 +367,11 @@ def auto_handle_screen(
             for_transform = bool(getattr(scr, "for_transform", False)) if scr else False
             any_number = bool(getattr(scr, "any_number", False)) if scr else False
             if for_upgrade:
+                unsel = [(i, c) for i, c in enumerate(choice_list)
+                         if str(c).lower() not in selected_names]
+                if unsel:
+                    best_idx = _pick_from_unselected(unsel, scr)
+                    return ChooseAction(choice_index=best_idx)
                 return ChooseAction(choice_index=_pick_grid_upgrade(choice_list))
             if for_transform:
                 return ChooseAction(choice_index=0)
