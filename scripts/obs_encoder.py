@@ -501,15 +501,24 @@ def _relic_lookup(relic_id: str) -> str | None:
     return _RELIC_ID_NORM.get(key)
 
 
+def _safe_int(val: Any, default: int = -1) -> int:
+    if val is None:
+        return default
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return default
+
+
 def _encode_move_history(m: Any) -> np.ndarray:
     """Encode move_id, last_move_id, second_last_move_id as normalised floats."""
     vec = np.zeros(_MONSTER_MOVE_HIST_DIM, dtype=np.float32)
-    mid = int(getattr(m, "move_id", -1) or -1)
-    last = getattr(m, "last_move_id", None)
-    second = getattr(m, "second_last_move_id", None)
+    mid = _safe_int(getattr(m, "move_id", -1))
+    last = _safe_int(getattr(m, "last_move_id", None))
+    second = _safe_int(getattr(m, "second_last_move_id", None))
     vec[0] = (mid + 1) / 10.0
-    vec[1] = ((int(last) + 1) / 10.0) if last is not None else 0.0
-    vec[2] = ((int(second) + 1) / 10.0) if second is not None else 0.0
+    vec[1] = (last + 1) / 10.0 if last >= 0 else 0.0
+    vec[2] = (second + 1) / 10.0 if second >= 0 else 0.0
     return vec
 
 
@@ -816,4 +825,5 @@ def encode_game_state(gs: Any) -> np.ndarray:
         obs[gbase + 2] = floors_remaining / 17.0
     offset += MAP_DIM
 
+    np.nan_to_num(obs, copy=False)
     return obs

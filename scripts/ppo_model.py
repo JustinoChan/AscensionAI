@@ -201,13 +201,15 @@ class PPOTrainer:
 
     def save(self, path: str):
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        tmp = path + ".tmp"
         torch.save({
             "shared": self.shared.state_dict(),
             "policy_head": self.policy_head.state_dict(),
             "value_head": self.value_head.state_dict(),
             "optimizer": self.optimizer.state_dict(),
             "total_updates": self.total_updates,
-        }, path)
+        }, tmp)
+        os.replace(tmp, path)
 
     def load(self, path: str):
         ckpt = torch.load(path, map_location=self.device, weights_only=True)

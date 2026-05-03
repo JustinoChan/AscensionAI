@@ -224,8 +224,9 @@ class TransitionBuffer:
         self.__init__()
 
     def save_npz(self, path: str):
+        tmp = path + ".tmp"
         np.savez_compressed(
-            path,
+            tmp,
             observations=np.array(self.observations, dtype=np.float32),
             actions=np.array(self.actions, dtype=np.int64),
             rewards=np.array(self.rewards, dtype=np.float32),
@@ -234,6 +235,7 @@ class TransitionBuffer:
             log_probs=np.array(self.log_probs, dtype=np.float32),
             values=np.array(self.values, dtype=np.float32),
         )
+        os.replace(tmp, path)
 
 
 # ---------------------------------------------------------------------------
@@ -293,6 +295,8 @@ class WorkerAgent:
                     log(f"Reloaded model (mtime={mtime:.0f})")
         except Exception as e:
             log(f"Model reload failed: {e}")
+
+    _STUCK_HARD_LIMIT = 50
 
     def _track_stuck(self, screen_name: str, action_cmd: str, in_combat: bool):
         key = f"{screen_name}:{action_cmd}"
@@ -452,6 +456,11 @@ class WorkerAgent:
                     return Action("proceed")
                 if cancel_avail:
                     return Action("leave")
+                if self._stuck_count >= self._STUCK_HARD_LIMIT:
+                    log(f"HARD STUCK ({self._stuck_count} iters) on {screen_name} — forcing game end")
+                    self._end_game(final_gs=gs, victory=False)
+                    return StartGameAction(player_class=PlayerClass.IRONCLAD,
+                                           ascension_level=0)
             return auto
 
         action, log_prob, value = self.trainer.predict(obs, mask)
@@ -462,6 +471,16 @@ class WorkerAgent:
         self._recent_actions.append(f"{screen_name}:{spire_action.command}")
         if len(self._recent_actions) > 20:
             self._recent_actions = self._recent_actions[-20:]
+
+        if self._stuck_count >= self._STUCK_HARD_LIMIT:
+            if self._stuck_key != self._stuck_dumped_key:
+                _dump_stuck_state(gs, screen_name, self.worker_id,
+                                  self._stuck_count, self._recent_actions)
+                self._stuck_dumped_key = self._stuck_key
+            log(f"HARD STUCK RL ({self._stuck_count} iters) on {screen_name} — forcing game end")
+            self._end_game(final_gs=gs, victory=False)
+            return StartGameAction(player_class=PlayerClass.IRONCLAD,
+                                   ascension_level=0)
 
         if VERBOSE:
             log(f"  -> RL: action={action} ({spire_action.command}) "
@@ -484,57 +503,60 @@ class WorkerAgent:
         n = len(self.buffer)
         log(f"Game #{self.total_games} ended: {n} transitions, reward={self.episode_reward:.2f}")
 
-        if n >= 5:
-            fname = f"w{self.worker_id}_g{self.total_games}_{int(time.time())}.npz"
-            path = os.path.join(self.out_dir, fname)
-            self.buffer.save_npz(path)
-            log(f"  Saved {n} transitions to {fname}")
+        try:
+            if n >= 5:
+                fname = f"w{self.worker_id}_g{self.total_games}_{int(time.time())}.npz"
+                path = os.path.join(self.out_dir, fname)
+                self.buffer.save_npz(path)
+                log(f"  Saved {n} transitions to {fname}")
 
-        _append_training_stats({
-            "timestamp": datetime.now().isoformat(),
-            "game": self.total_games,
-            "worker": self.worker_id,
-            "steps": self.total_steps,
-            "transitions": n,
-            "total_reward": round(self.episode_reward, 4),
-            "final_hp": int(getattr(final_gs, "current_hp", 0) or 0) if final_gs else "",
-            "final_max_hp": int(getattr(final_gs, "max_hp", 0) or 0) if final_gs else "",
-            "final_floor": int(getattr(final_gs, "floor", 0) or 0) if final_gs else "",
-            "final_act": int(getattr(final_gs, "act", 0) or 0) if final_gs else "",
-            "victory": int(bool(victory)),
-            "terminated": 1,
-            "elites_fought": self._elites_fought,
-            "elites_won": self._elites_won,
-            "bosses_fought": self._bosses_fought,
-            "bosses_won": self._bosses_won,
-        })
+            _append_training_stats({
+                "timestamp": datetime.now().isoformat(),
+                "game": self.total_games,
+                "worker": self.worker_id,
+                "steps": self.total_steps,
+                "transitions": n,
+                "total_reward": round(self.episode_reward, 4),
+                "final_hp": int(getattr(final_gs, "current_hp", 0) or 0) if final_gs else "",
+                "final_max_hp": int(getattr(final_gs, "max_hp", 0) or 0) if final_gs else "",
+                "final_floor": int(getattr(final_gs, "floor", 0) or 0) if final_gs else "",
+                "final_act": int(getattr(final_gs, "act", 0) or 0) if final_gs else "",
+                "victory": int(bool(victory)),
+                "terminated": 1,
+                "elites_fought": self._elites_fought,
+                "elites_won": self._elites_won,
+                "bosses_fought": self._bosses_fought,
+                "bosses_won": self._bosses_won,
+            })
 
-        if self._elites_fought or self._bosses_fought:
-            log(f"  Elites: {self._elites_won}/{self._elites_fought}  "
-                f"Bosses: {self._bosses_won}/{self._bosses_fought}")
+            if self._elites_fought or self._bosses_fought:
+                log(f"  Elites: {self._elites_won}/{self._elites_fought}  "
+                    f"Bosses: {self._bosses_won}/{self._bosses_fought}")
 
-        if self.total_games % self.reload_every == 0:
-            self._maybe_reload_model()
-
-        self.buffer.clear()
-        self.episode_reward = 0.0
-        self.pending_reward = 0.0
-        self.prev_obs = None
-        self.prev_action = None
-        self.prev_log_prob = None
-        self.prev_value = None
-        self.prev_mask = None
-        self._stuck_key = ""
-        self._stuck_count = 0
-        self._stuck_dumped_key = ""
-        self._in_elite = False
-        self._elites_fought = 0
-        self._elites_won = 0
-        self._in_boss = False
-        self._bosses_fought = 0
-        self._bosses_won = 0
-        self._recent_actions.clear()
-        self.initialized = False
+            if self.total_games % self.reload_every == 0:
+                self._maybe_reload_model()
+        except Exception as e:
+            log(f"_end_game error (non-fatal): {e}")
+        finally:
+            self.buffer.clear()
+            self.episode_reward = 0.0
+            self.pending_reward = 0.0
+            self.prev_obs = None
+            self.prev_action = None
+            self.prev_log_prob = None
+            self.prev_value = None
+            self.prev_mask = None
+            self._stuck_key = ""
+            self._stuck_count = 0
+            self._stuck_dumped_key = ""
+            self._in_elite = False
+            self._elites_fought = 0
+            self._elites_won = 0
+            self._in_boss = False
+            self._bosses_fought = 0
+            self._bosses_won = 0
+            self._recent_actions.clear()
+            self.initialized = False
 
     def on_out_of_game(self) -> Action:
         log(f"OUT OF GAME (games: {self.total_games})")

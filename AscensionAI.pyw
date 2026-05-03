@@ -521,6 +521,9 @@ class AscensionApp:
 
     # ----- Logging -----
 
+    _LOG_MAX_LINES = 5000
+    _LOG_TRIM_TO = 4000
+
     def _append_log(self, tab_name: str, text: str):
         def _do():
             for name in (tab_name, "All"):
@@ -530,6 +533,9 @@ class AscensionApp:
                 widget.configure(state="normal")
                 prefix = f"[{tab_name}] " if name == "All" else ""
                 widget.insert("end", prefix + text + "\n")
+                line_count = int(widget.index("end-1c").split(".")[0])
+                if line_count > self._LOG_MAX_LINES:
+                    widget.delete("1.0", f"{line_count - self._LOG_TRIM_TO}.0")
                 widget.see("end")
                 widget.configure(state="disabled")
         self.root.after(0, _do)
@@ -724,6 +730,12 @@ class AscensionApp:
                     f"Win Rate: {es['win_rate']:.0%}  |  "
                     f"Avg Floor: {es['avg_floor']:.1f}"
                 )
+            if self.running and self.trainer_proc is not None:
+                rc = self.trainer_proc.poll()
+                if rc is not None:
+                    _logger.warning(f"Trainer process died (exit code {rc})")
+                    self._append_log("All", f"WARNING: Trainer crashed (exit code {rc}) — no PPO updates are happening!")
+                    self.trainer_proc = None
         except Exception as e:
             _logger.error(f"_refresh_stats error: {e}")
         self.root.after(5000, self._refresh_stats)
@@ -958,6 +970,8 @@ class AscensionApp:
                 _logger.info(f"Trainer command: {trainer_cmd}")
                 self.trainer_proc = subprocess.Popen(
                     trainer_cmd, cwd=str(ROOT),
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
                     creationflags=subprocess.CREATE_NO_WINDOW,
                 )
                 _logger.info(f"Offline trainer started: PID {self.trainer_proc.pid}")

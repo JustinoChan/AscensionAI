@@ -88,9 +88,10 @@ def load_npz_files(data_dir: str, consumed: set) -> List[str]:
     return [f for f in all_files if f not in consumed]
 
 
-def load_transitions(paths: List[str]) -> GameBuffer:
-    """Merge multiple .npz files into one GameBuffer."""
+def load_transitions(paths: List[str]) -> tuple:
+    """Merge multiple .npz files into one GameBuffer. Returns (buf, loaded_paths)."""
     buf = GameBuffer()
+    loaded: List[str] = []
     for p in paths:
         try:
             data = np.load(p, allow_pickle=False)
@@ -104,9 +105,10 @@ def load_transitions(paths: List[str]) -> GameBuffer:
             for i in range(len(obs)):
                 buf.add(obs[i], int(acts[i]), float(rews[i]), bool(dones[i]),
                         masks[i], float(lps[i]), float(vals[i]))
+            loaded.append(p)
         except Exception as e:
             log(f"Failed to load {p}: {e}")
-    return buf
+    return buf, loaded
 
 
 # ---------------------------------------------------------------------------
@@ -167,16 +169,17 @@ def main():
                 time.sleep(args.poll_interval)
                 continue
 
-            batch_files = new_files[:max(args.batch_games, len(new_files))]
+            batch_files = new_files[:args.batch_games]
             log(f"Loading {len(batch_files)} new game files...")
 
-            buf = load_transitions(batch_files)
+            buf, loaded = load_transitions(batch_files)
             n = len(buf)
+
+            for f in loaded:
+                consumed.add(f)
 
             if n < 10:
                 log(f"Too few transitions ({n}), skipping update")
-                for f in batch_files:
-                    consumed.add(f)
                 continue
 
             log(f"Running PPO update on {n} transitions...")
@@ -200,9 +203,8 @@ def main():
 
             trainer.save(model_path)
 
-            for f in batch_files:
-                consumed.add(f)
-                if args.delete_consumed:
+            if args.delete_consumed:
+                for f in loaded:
                     try:
                         os.remove(f)
                     except OSError:
