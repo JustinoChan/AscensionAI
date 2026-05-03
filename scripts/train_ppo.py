@@ -417,6 +417,8 @@ def main():
                         help="Save model every N games")
     parser.add_argument("--games-per-update", type=int, default=4,
                         help="Accumulate N games of transitions per PPO update (default: 4)")
+    parser.add_argument("--ent-coef", type=float, default=0.15,
+                        help="Entropy bonus coefficient (higher = more exploration)")
     args = parser.parse_args()
 
     save_path = os.path.join(_root, args.save)
@@ -431,7 +433,7 @@ def main():
         gamma=0.995,
         gae_lambda=0.95,
         clip_range=0.2,
-        ent_coef=0.05,
+        ent_coef=args.ent_coef,
         vf_coef=0.5,
         n_epochs=4,
         batch_size=64,

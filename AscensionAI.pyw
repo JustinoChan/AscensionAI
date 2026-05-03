@@ -169,15 +169,16 @@ def write_config(command: str | None = None):
     _logger.debug(f"Config content:\n{content.rstrip()}")
 
 
-def build_command(mode: str, worker_id: int = 1, games: int = 20, bc_games: int = 50) -> str:
+def build_command(mode: str, worker_id: int = 1, games: int = 20,
+                  bc_games: int = 50, ent_coef: float = 0.15) -> str:
     py = escape_properties_path(VENV_PYTHON)
     root = escape_properties_path(ROOT)
     if mode == "worker":
         cmd = f"{py} {root}/scripts/rollout_worker.py --model models/ppo_sts.pt --out rollouts_shared --id {worker_id}"
     elif mode == "train":
-        cmd = f"{py} {root}/scripts/train_ppo.py --save models/ppo_sts.pt --resume models/ppo_sts.pt --save-every 5"
+        cmd = f"{py} {root}/scripts/train_ppo.py --save models/ppo_sts.pt --resume models/ppo_sts.pt --save-every 5 --ent-coef {ent_coef}"
     elif mode == "bc_ppo":
-        cmd = f"{py} {root}/scripts/train_bc_ppo.py --bc-games {bc_games} --ppo-games 200 --save models/ppo_sts.pt"
+        cmd = f"{py} {root}/scripts/train_bc_ppo.py --bc-games {bc_games} --ppo-games 200 --save models/ppo_sts.pt --ent-start {ent_coef}"
     elif mode == "bc":
         cmd = f"{py} {root}/scripts/behavior_clone.py --games 50 --save models/ppo_sts.pt"
     elif mode == "eval":
@@ -187,7 +188,7 @@ def build_command(mode: str, worker_id: int = 1, games: int = 20, bc_games: int 
     else:
         _logger.error(f"build_command: unknown mode '{mode}'")
         cmd = ""
-    _logger.info(f"build_command(mode={mode}, worker_id={worker_id}, games={games}, bc_games={bc_games}) -> {cmd}")
+    _logger.info(f"build_command(mode={mode}, worker_id={worker_id}, games={games}, bc_games={bc_games}, ent_coef={ent_coef}) -> {cmd}")
     return cmd
 
 
@@ -347,6 +348,29 @@ class AscensionApp:
         self.status_var = tk.StringVar(value="Idle")
         ttk.Label(row2, textvariable=self.status_var, font=("Segoe UI", 10, "italic")).pack(side="left")
 
+        # Entropy control row (visible only for modes with a trainer)
+        self.ent_row = ttk.Frame(ctrl_frame)
+        self.ent_row.pack(fill="x", pady=(6, 0))
+
+        self.ent_label = ttk.Label(self.ent_row, text="Entropy Coef:")
+        self.ent_label.pack(side="left", padx=(0, 5))
+        self._ent_value = 0.15
+        self.ent_var = tk.StringVar(value="0.15")
+        self.ent_minus = ttk.Button(self.ent_row, text="-", width=3, command=self._dec_ent)
+        self.ent_minus.pack(side="left")
+        self.ent_display = ttk.Label(self.ent_row, textvariable=self.ent_var, width=5,
+                                     anchor="center", font=("Consolas", 11, "bold"))
+        self.ent_display.pack(side="left", padx=2)
+        self.ent_plus = ttk.Button(self.ent_row, text="+", width=3, command=self._inc_ent)
+        self.ent_plus.pack(side="left")
+
+        self.ent_help = ttk.Label(self.ent_row, text="(?)", foreground="gray",
+                                  font=("Segoe UI", 10, "bold"), cursor="hand2")
+        self.ent_help.pack(side="left", padx=(6, 0))
+        self._ent_tooltip = None
+        self.ent_help.bind("<Enter>", self._show_ent_tooltip)
+        self.ent_help.bind("<Leave>", self._hide_ent_tooltip)
+
         # Progress panel
         stats_frame = ttk.LabelFrame(self.root, text="  Progress  ", padding=10)
         stats_frame.pack(fill="x", **pad)
@@ -422,6 +446,51 @@ class AscensionApp:
         if v > max(1, lo):
             self.workers_var.set(v - 1)
 
+    def _inc_ent(self):
+        v = round(self._ent_value + 0.01, 2)
+        if v <= 0.50:
+            self._ent_value = v
+            self.ent_var.set(f"{v:.2f}")
+
+    def _dec_ent(self):
+        v = round(self._ent_value - 0.01, 2)
+        if v >= 0.01:
+            self._ent_value = v
+            self.ent_var.set(f"{v:.2f}")
+
+    _ENT_TOOLTIP_TEXT = (
+        "Controls how much the agent explores vs. exploits.\n"
+        "\n"
+        "Higher (0.15-0.30): More random actions, discovers\n"
+        "new strategies but plays worse short-term.\n"
+        "\n"
+        "Lower (0.01-0.10): More deterministic, exploits what\n"
+        "it already knows but can get stuck in local optima.\n"
+        "\n"
+        "Start higher after BC warm-up to break out of\n"
+        "imitation patterns, then lower once it improves."
+    )
+
+    def _show_ent_tooltip(self, event):
+        if self._ent_tooltip is not None:
+            return
+        x = event.widget.winfo_rootx() + 20
+        y = event.widget.winfo_rooty() + 20
+        tw = tk.Toplevel(self.root)
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry(f"+{x}+{y}")
+        tw.attributes("-topmost", True)
+        lbl = tk.Label(tw, text=self._ENT_TOOLTIP_TEXT, justify="left",
+                       background="#ffffe0", relief="solid", borderwidth=1,
+                       font=("Segoe UI", 9), padx=8, pady=6)
+        lbl.pack()
+        self._ent_tooltip = tw
+
+    def _hide_ent_tooltip(self, event):
+        if self._ent_tooltip is not None:
+            self._ent_tooltip.destroy()
+            self._ent_tooltip = None
+
     def _on_mode_change(self, event=None):
         mode = MODES.get(self.mode_var.get(), "worker")
         label, lo, hi, default = SPINNER_CONFIG.get(mode, (None, 0, 0, 0))
@@ -444,6 +513,11 @@ class AscensionApp:
         else:
             self.use_bc_chk.pack_forget()
             self.use_bc_var.set(False)
+
+        if mode in ("worker", "train", "bc_ppo"):
+            self.ent_row.pack(fill="x", pady=(6, 0))
+        else:
+            self.ent_row.pack_forget()
 
     # ----- Logging -----
 
@@ -763,7 +837,8 @@ class AscensionApp:
     def _launch_single(self, mode: str, games: int = 20):
         _logger.info(f"_launch_single: mode={mode}, games={games}")
         try:
-            cmd = build_command(mode, games=games, bc_games=games)
+            cmd = build_command(mode, games=games, bc_games=games,
+                               ent_coef=self._ent_value)
             write_config(cmd)
 
             _mode_info = {
@@ -878,6 +953,7 @@ class AscensionApp:
                     "--model", str(ROOT / "models" / "ppo_sts.pt"),
                     "--data", str(ROOT / "rollouts_shared"),
                     "--delete-consumed",
+                    "--ent-coef", str(self._ent_value),
                 ]
                 _logger.info(f"Trainer command: {trainer_cmd}")
                 self.trainer_proc = subprocess.Popen(
