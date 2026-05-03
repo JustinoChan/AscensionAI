@@ -146,6 +146,7 @@ _STATS_COLUMNS = [
     "timestamp", "game", "total_updates", "steps", "transitions",
     "total_reward", "final_hp", "final_max_hp", "final_floor", "final_act",
     "victory", "terminated", "pg_loss", "vf_loss", "entropy", "worker",
+    "elites_fought", "elites_won", "bosses_fought", "bosses_won",
 ]
 
 def _init_stats_csv():
@@ -164,6 +165,33 @@ def _append_training_stats(row: dict):
             f.write(",".join(str(row.get(c, "")) for c in _STATS_COLUMNS) + "\n")
     except Exception as e:
         log(f"stats csv append failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# Elite fight tracking
+# ---------------------------------------------------------------------------
+_ELITE_CSV = os.path.join(_root, "logs", "elite_stats.csv")
+_ELITE_COLUMNS = [
+    "timestamp", "worker", "game", "floor", "act", "room_type",
+    "monsters", "hp_before", "hp_after", "max_hp", "won",
+]
+
+def _init_elite_csv():
+    try:
+        os.makedirs(os.path.dirname(_ELITE_CSV), exist_ok=True)
+        if not os.path.exists(_ELITE_CSV):
+            with open(_ELITE_CSV, "w", encoding="utf-8") as f:
+                f.write(",".join(_ELITE_COLUMNS) + "\n")
+    except Exception:
+        pass
+
+def _append_elite_stats(row: dict):
+    try:
+        _init_elite_csv()
+        with open(_ELITE_CSV, "a", encoding="utf-8") as f:
+            f.write(",".join(str(row.get(c, "")) for c in _ELITE_COLUMNS) + "\n")
+    except Exception as e:
+        log(f"elite csv append failed: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -239,6 +267,20 @@ class WorkerAgent:
         self._recent_actions: list[str] = []
         self._model_mtime = 0.0
 
+        self._in_elite = False
+        self._elite_hp_before = 0
+        self._elite_floor = 0
+        self._elite_monsters = ""
+        self._elites_fought = 0
+        self._elites_won = 0
+
+        self._in_boss = False
+        self._boss_hp_before = 0
+        self._boss_floor = 0
+        self._boss_monsters = ""
+        self._bosses_fought = 0
+        self._bosses_won = 0
+
     def _maybe_reload_model(self):
         """Reload model if a newer checkpoint exists."""
         try:
@@ -290,6 +332,72 @@ class WorkerAgent:
                 f"cancel={getattr(gs, 'cancel_available', False)} "
                 f"confirm_up={confirm_up} potions={pot_ids} pot_full={pot_full} "
                 f"mask_sum={int(mask.sum())}")
+
+        room_type = str(getattr(gs, "room_type", "") or "")
+        in_combat = bool(getattr(gs, "in_combat", False))
+        if not self._in_elite and in_combat and "Elite" in room_type:
+            self._in_elite = True
+            self._elite_hp_before = int(getattr(gs, "current_hp", 0) or 0)
+            self._elite_floor = int(getattr(gs, "floor", 0) or 0)
+            monsters = list(getattr(gs, "monsters", []) or [])
+            self._elite_monsters = ";".join(
+                str(getattr(m, "name", "?")) for m in monsters if not getattr(m, "is_gone", False)
+            )
+            log(f"ELITE FIGHT started: {self._elite_monsters} floor={self._elite_floor} hp={self._elite_hp_before}")
+
+        if self._in_elite and not in_combat:
+            won = screen_name == "COMBAT_REWARD"
+            self._elites_fought += 1
+            if won:
+                self._elites_won += 1
+            hp_after = int(getattr(gs, "current_hp", 0) or 0)
+            log(f"ELITE FIGHT ended: won={won} hp={self._elite_hp_before}->{hp_after} ({self._elite_monsters})")
+            _append_elite_stats({
+                "timestamp": datetime.now().isoformat(),
+                "worker": self.worker_id,
+                "game": self.total_games + 1,
+                "floor": self._elite_floor,
+                "act": int(getattr(gs, "act", 0) or 0),
+                "room_type": room_type,
+                "monsters": self._elite_monsters,
+                "hp_before": self._elite_hp_before,
+                "hp_after": hp_after,
+                "max_hp": int(getattr(gs, "max_hp", 0) or 0),
+                "won": int(won),
+            })
+            self._in_elite = False
+
+        if not self._in_boss and in_combat and "Boss" in room_type:
+            self._in_boss = True
+            self._boss_hp_before = int(getattr(gs, "current_hp", 0) or 0)
+            self._boss_floor = int(getattr(gs, "floor", 0) or 0)
+            monsters = list(getattr(gs, "monsters", []) or [])
+            self._boss_monsters = ";".join(
+                str(getattr(m, "name", "?")) for m in monsters if not getattr(m, "is_gone", False)
+            )
+            log(f"BOSS FIGHT started: {self._boss_monsters} floor={self._boss_floor} hp={self._boss_hp_before}")
+
+        if self._in_boss and not in_combat:
+            won = screen_name == "COMBAT_REWARD"
+            self._bosses_fought += 1
+            if won:
+                self._bosses_won += 1
+            hp_after = int(getattr(gs, "current_hp", 0) or 0)
+            log(f"BOSS FIGHT ended: won={won} hp={self._boss_hp_before}->{hp_after} ({self._boss_monsters})")
+            _append_elite_stats({
+                "timestamp": datetime.now().isoformat(),
+                "worker": self.worker_id,
+                "game": self.total_games + 1,
+                "floor": self._boss_floor,
+                "act": int(getattr(gs, "act", 0) or 0),
+                "room_type": room_type,
+                "monsters": self._boss_monsters,
+                "hp_before": self._boss_hp_before,
+                "hp_after": hp_after,
+                "max_hp": int(getattr(gs, "max_hp", 0) or 0),
+                "won": int(won),
+            })
+            self._in_boss = False
 
         victory = False
         if terminal:
@@ -394,7 +502,15 @@ class WorkerAgent:
             "final_act": int(getattr(final_gs, "act", 0) or 0) if final_gs else "",
             "victory": int(bool(victory)),
             "terminated": 1,
+            "elites_fought": self._elites_fought,
+            "elites_won": self._elites_won,
+            "bosses_fought": self._bosses_fought,
+            "bosses_won": self._bosses_won,
         })
+
+        if self._elites_fought or self._bosses_fought:
+            log(f"  Elites: {self._elites_won}/{self._elites_fought}  "
+                f"Bosses: {self._bosses_won}/{self._bosses_fought}")
 
         if self.total_games % self.reload_every == 0:
             self._maybe_reload_model()
@@ -410,6 +526,12 @@ class WorkerAgent:
         self._stuck_key = ""
         self._stuck_count = 0
         self._stuck_dumped_key = ""
+        self._in_elite = False
+        self._elites_fought = 0
+        self._elites_won = 0
+        self._in_boss = False
+        self._bosses_fought = 0
+        self._bosses_won = 0
         self._recent_actions.clear()
         self.initialized = False
 

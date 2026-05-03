@@ -88,6 +88,7 @@ The control panel detects your hardware, recommends how many STS instances to ru
 | **Behavior Cloning** | Heuristic plays 50 games, network learns to imitate |
 | **Evaluation (Greedy)** | Run games with the trained model (no exploration, no updates) |
 | **Game Logger (Passive)** | Record game states while you play manually |
+| **Play Game (No AI)** | Launch STS without any AI command — play normally or configure mods |
 
 ### Recommended workflow
 
@@ -213,7 +214,8 @@ All logs are written to the `logs/` directory:
 | `logs/game_logger_debug.log` | `game_logger.py` — passive game state logging |
 | `logs/bug_debug.log` | Stuck-state detection dumps for debugging freezes |
 | `logs/control_panel_debug.log` | `AscensionAI.pyw` — GUI launch, process PIDs, kill results, errors |
-| `logs/training_stats.csv` | Per-game training metrics (floor, HP, reward, loss) |
+| `logs/training_stats.csv` | Per-game training metrics (floor, HP, reward, loss, elite/boss stats) |
+| `logs/elite_stats.csv` | Per-fight elite and boss encounter details (monsters, HP before/after, win/loss) |
 
 Training stats can be visualized with:
 
@@ -257,6 +259,8 @@ AscensionAI/
 2. **Action space** (`sts_gym_env.py`): 134 discrete actions covering targeted/untargeted card plays (50+10), end turn, targeted/untargeted potions (25+5), choice selection (40), proceed, leave, and no-op. Illegal actions are masked out per game state.
 
 3. **Reward shaping** (`sts_gym_env.py`): Dense per-step rewards for gold, relics, floor progression, combat damage, card management, and act advancement — plus terminal bonuses (+50 victory, -5 defeat). Minion-spawner enemies (Gremlin Leader, Reptomancer, Bronze Automaton) receive bonus damage and kill rewards to encourage the RL to prioritize them.
+
+   **Combat analytics**: Elite and boss fight outcomes are tracked per-game in `training_stats.csv` and per-fight in `elite_stats.csv`, including which monsters were fought, HP before/after, and win/loss. The Control Panel progress panel shows aggregate elite and boss win rates.
 
 4. **Behavior cloning** (`behavior_clone.py`): A hand-coded heuristic plays full games covering every decision surface. The neural network trains on these demonstrations via cross-entropy loss to get a reasonable starting policy.
 

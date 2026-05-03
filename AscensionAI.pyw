@@ -483,6 +483,8 @@ class AscensionApp:
 
         floors, rewards, wins, best_floor, best_act = [], [], 0, 0, 0
         updates, total_transitions, total_steps = 0, 0, 0
+        total_elites_fought, total_elites_won = 0, 0
+        total_bosses_fought, total_bosses_won = 0, 0
         acts, victories = [], []
         parse_errors = 0
         for r in rows:
@@ -521,6 +523,16 @@ class AscensionApp:
                 acts.append(act)
                 if act > best_act:
                     best_act = act
+            except Exception:
+                pass
+            try:
+                total_elites_fought += int(float(r.get("elites_fought") or 0))
+                total_elites_won += int(float(r.get("elites_won") or 0))
+            except Exception:
+                pass
+            try:
+                total_bosses_fought += int(float(r.get("bosses_fought") or 0))
+                total_bosses_won += int(float(r.get("bosses_won") or 0))
             except Exception:
                 pass
         if parse_errors:
@@ -563,6 +575,10 @@ class AscensionApp:
             "total_steps": total_steps,
             "rollouts_pending": rollouts_pending,
             "model_age": model_age,
+            "elites_fought": total_elites_fought,
+            "elites_won": total_elites_won,
+            "bosses_fought": total_bosses_fought,
+            "bosses_won": total_bosses_won,
         }
 
     def _load_eval_stats(self) -> dict | None:
@@ -609,6 +625,16 @@ class AscensionApp:
                     f"Updates: {ts['updates']}",
                     f"Avg Reward: {ts['avg_reward']:.1f}",
                 ]
+                if ts['elites_fought']:
+                    ew = ts['elites_won'] / ts['elites_fought']
+                    detail_parts.append(
+                        f"Elites: {ts['elites_won']}/{ts['elites_fought']} ({ew:.0%})"
+                    )
+                if ts['bosses_fought']:
+                    bw = ts['bosses_won'] / ts['bosses_fought']
+                    detail_parts.append(
+                        f"Bosses: {ts['bosses_won']}/{ts['bosses_fought']} ({bw:.0%})"
+                    )
                 if ts['rollouts_pending']:
                     detail_parts.append(f"Rollouts Queued: {ts['rollouts_pending']}")
                 if ts['model_age']:

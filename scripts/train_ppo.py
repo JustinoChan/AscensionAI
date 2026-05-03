@@ -58,6 +58,7 @@ _STATS_COLUMNS = [
     "timestamp", "game", "total_updates", "steps", "transitions",
     "total_reward", "final_hp", "final_max_hp", "final_floor", "final_act",
     "victory", "terminated", "pg_loss", "vf_loss", "entropy", "worker",
+    "elites_fought", "elites_won", "bosses_fought", "bosses_won",
 ]
 
 
