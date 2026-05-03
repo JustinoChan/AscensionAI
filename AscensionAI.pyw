@@ -507,7 +507,9 @@ class AscensionApp:
             except Exception:
                 parse_errors += 1
             try:
-                updates = int(float(r.get("total_updates") or 0))
+                u = int(float(r.get("total_updates") or 0))
+                if u > updates:
+                    updates = u
             except Exception:
                 parse_errors += 1
             try:

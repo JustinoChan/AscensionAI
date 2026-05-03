@@ -127,6 +127,8 @@ def main():
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--epochs", type=int, default=4)
     parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--ent-coef", type=float, default=0.15,
+                        help="Entropy bonus coefficient (higher = more exploration)")
     args = parser.parse_args()
 
     model_path = os.path.join(_root, args.model)
@@ -137,11 +139,12 @@ def main():
     log("=== OFFLINE TRAINER STARTING ===")
     log(f"Model: {model_path}")
     log(f"Data dir: {data_dir}")
+    log(f"Hyperparams: lr={args.lr}, epochs={args.epochs}, batch_size={args.batch_size}, ent_coef={args.ent_coef}")
 
     trainer = PPOTrainer(
         obs_size=OBS_SIZE, n_actions=NUM_ACTIONS, device="cpu",
         lr=args.lr, n_epochs=args.epochs, batch_size=args.batch_size,
-        net_arch=(256, 256),
+        ent_coef=args.ent_coef, net_arch=(256, 256),
     )
 
     if os.path.isfile(model_path):
