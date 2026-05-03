@@ -25,7 +25,8 @@ import os
 
 # ---- stdout belongs to Communication Mod ----
 _real_stdout = sys.stdout
-sys.stdout = sys.stderr
+sys.stdout = open(os.devnull, "w")
+sys.stderr = open(os.devnull, "w")
 
 import spirecomm.communication.coordinator as _coord_module
 
