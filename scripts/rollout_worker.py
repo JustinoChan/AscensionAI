@@ -224,7 +224,7 @@ class TransitionBuffer:
         self.__init__()
 
     def save_npz(self, path: str):
-        tmp = path + ".tmp"
+        tmp = path.replace(".npz", ".tmp.npz")
         np.savez_compressed(
             tmp,
             observations=np.array(self.observations, dtype=np.float32),
@@ -507,8 +507,11 @@ class WorkerAgent:
             if n >= 5:
                 fname = f"w{self.worker_id}_g{self.total_games}_{int(time.time())}.npz"
                 path = os.path.join(self.out_dir, fname)
-                self.buffer.save_npz(path)
-                log(f"  Saved {n} transitions to {fname}")
+                try:
+                    self.buffer.save_npz(path)
+                    log(f"  Saved {n} transitions to {fname}")
+                except Exception as e:
+                    log(f"save_npz failed (non-fatal): {e}")
 
             _append_training_stats({
                 "timestamp": datetime.now().isoformat(),
