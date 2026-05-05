@@ -9,6 +9,7 @@ Provides:
 """
 from __future__ import annotations
 
+from collections import Counter
 from typing import Optional
 
 from spirecomm.communication.action import Action, ChooseAction
@@ -178,29 +179,141 @@ def _pick_grid_upgrade(choice_list: list) -> int:
     return 0
 
 
-def _pick_grid_match(choice_list: list, scr) -> Optional[int]:
-    """Pick card for a matching event (e.g. Match and Keep).
+_HIDDEN_MATCH_NAMES = frozenset({
+    "", "?", "unknown", "face down", "facedown", "card", "hidden",
+})
+_MATCH_MEMORY: dict[tuple, dict] = {}
 
-    If a card was already selected, find its duplicate in the remaining choices.
-    Otherwise pick the first card that has a duplicate somewhere in the list.
-    Returns None if no match is possible (caller should leave).
+
+def _card_label(card) -> str:
+    return str(getattr(card, "name", card) or "").lower().rstrip("+").strip()
+
+
+def _is_hidden_match_label(name: str) -> bool:
+    return name in _HIDDEN_MATCH_NAMES or name.startswith("unknown")
+
+
+def _is_matching_grid(gs, scr, choice_list: list) -> bool:
+    """Detect Match and Keep-style grids without catching normal card selects."""
+    if scr is None:
+        return False
+    num_needed = int(getattr(scr, "num_cards", 1) or 1)
+    if num_needed != 2:
+        return False
+    if any(bool(getattr(scr, attr, False)) for attr in (
+        "any_number", "for_upgrade", "for_transform", "for_purge",
+    )):
+        return False
+    n_choices = len(choice_list) or len(getattr(scr, "cards", []) or [])
+    if n_choices < 4:
+        return False
+    current_action = str(getattr(gs, "current_action", "") or "").lower()
+    if "match" in current_action or "keep" in current_action:
+        return True
+    # Fallback for CommunicationMod states that omit current_action: most
+    # non-flagged 2-card GRID screens with a large board are matching events.
+    return n_choices >= 6
+
+
+def _match_key(gs, scr, n_choices: int) -> tuple:
+    return (
+        int(getattr(gs, "floor", -1) or -1),
+        str(getattr(gs, "current_action", "") or ""),
+        n_choices,
+    )
+
+
+def _pick_grid_match(choice_list: list, scr, gs=None) -> Optional[int]:
+    """Pick one slot for a matching event (e.g. Match and Keep).
+
+    CommunicationMod exposes this event as a GRID screen. If card names are
+    visible, take known pairs. If they are hidden, rotate through unrevealed
+    slots and remember revealed names from selected_cards instead of clicking
+    the first two slots forever.
     """
+    cards = list(getattr(scr, "cards", []) or []) if scr else []
+    names = [_card_label(c) for c in (choice_list or cards)]
+    n = len(names)
+    if n == 0:
+        return None
+
+    if gs is None:
+        key = ("fallback", n)
+    else:
+        key = _match_key(gs, scr, n)
+    mem = _MATCH_MEMORY.setdefault(key, {
+        "seen": {},
+        "tried": set(),
+        "pending": [],
+    })
+
     selected = list(getattr(scr, "selected_cards", []) or []) if scr else []
-    lower = [str(c).lower().rstrip("+") for c in choice_list]
+    if not selected and len(mem["pending"]) >= 2:
+        mem["pending"] = []
+    for i, card in enumerate(selected):
+        if i >= len(mem["pending"]):
+            break
+        name = _card_label(card)
+        if name and not _is_hidden_match_label(name):
+            mem["seen"][mem["pending"][i]] = name
+
+    available = [i for i in range(n) if i not in mem["pending"]]
+    if not available:
+        return None
 
     if selected:
-        last = selected[-1]
-        target = str(getattr(last, "name", last)).lower().rstrip("+")
-        for i, name in enumerate(lower):
-            if name == target:
-                return i
+        target = _card_label(selected[-1])
+        if target and not _is_hidden_match_label(target):
+            for i in available:
+                if i < len(names) and names[i] == target:
+                    mem["pending"].append(i)
+                    mem["tried"].add(i)
+                    return i
+            for i, name in mem["seen"].items():
+                if i in available and name == target:
+                    mem["pending"].append(i)
+                    mem["tried"].add(i)
+                    return i
 
-    from collections import Counter
-    counts = Counter(lower)
-    for i, name in enumerate(lower):
+        unknown = [i for i in available if i not in mem["tried"]]
+        if not unknown:
+            mem["tried"].difference_update(available)
+            unknown = available
+        idx = unknown[0]
+        mem["pending"].append(idx)
+        mem["tried"].add(idx)
+        return idx
+
+    visible = [
+        (i, name) for i, name in enumerate(names)
+        if name and not _is_hidden_match_label(name)
+    ]
+    counts = Counter(name for _, name in visible)
+    for i, name in visible:
         if counts[name] >= 2:
+            mem["pending"] = [i]
+            mem["tried"].add(i)
             return i
-    return None
+
+    seen_by_name: dict[str, list[int]] = {}
+    for i, name in mem["seen"].items():
+        if 0 <= i < n:
+            seen_by_name.setdefault(name, []).append(i)
+    for indices in seen_by_name.values():
+        if len(indices) >= 2:
+            idx = sorted(indices)[0]
+            mem["pending"] = [idx]
+            mem["tried"].add(idx)
+            return idx
+
+    unknown = [i for i in range(n) if i not in mem["tried"]]
+    if not unknown:
+        mem["tried"].clear()
+        unknown = list(range(n))
+    idx = unknown[0]
+    mem["pending"] = [idx]
+    mem["tried"].add(idx)
+    return idx
 
 
 def _pick_from_unselected(unselected: list, scr) -> int:
@@ -364,27 +477,39 @@ def auto_handle_screen(
                 return Action("proceed")
             return Action("state")
         selected_names = {getattr(c, "name", "").lower() for c in selected}
-        if choice_list:
+        grid_choices = choice_list or [
+            getattr(c, "name", c) for c in getattr(scr, "cards", []) or []
+        ]
+        if grid_choices:
             for_upgrade = bool(getattr(scr, "for_upgrade", False)) if scr else False
             for_transform = bool(getattr(scr, "for_transform", False)) if scr else False
             any_number = bool(getattr(scr, "any_number", False)) if scr else False
+            if _is_matching_grid(gs, scr, grid_choices):
+                idx = _pick_grid_match(grid_choices, scr, gs)
+                if idx is not None:
+                    return ChooseAction(choice_index=idx)
+                if proceed_avail:
+                    return Action("proceed")
+                if cancel_avail:
+                    return Action("leave")
+                return Action("state")
             if for_upgrade:
-                unsel = [(i, c) for i, c in enumerate(choice_list)
+                unsel = [(i, c) for i, c in enumerate(grid_choices)
                          if str(c).lower() not in selected_names]
                 if unsel:
                     best_idx = _pick_from_unselected(unsel, scr)
                     return ChooseAction(choice_index=best_idx)
-                return ChooseAction(choice_index=_pick_grid_upgrade(choice_list))
+                return ChooseAction(choice_index=_pick_grid_upgrade(grid_choices))
             if for_transform:
                 return ChooseAction(choice_index=0)
             if any_number:
                 if proceed_avail:
                     return Action("proceed")
                 return ChooseAction(choice_index=0)
-            unselected = [(i, c) for i, c in enumerate(choice_list)
+            unselected = [(i, c) for i, c in enumerate(grid_choices)
                           if str(c).lower() not in selected_names]
             if not unselected:
-                unselected = list(enumerate(choice_list))
+                unselected = list(enumerate(grid_choices))
             best_idx = _pick_from_unselected(unselected, scr)
             return ChooseAction(choice_index=best_idx)
         if proceed_avail:

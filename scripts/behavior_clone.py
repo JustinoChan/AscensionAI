@@ -87,7 +87,8 @@ from screen_handler import (
     GOOD_CARDS, OK_CARDS, JUNK_CARDS,
     pick_card_reward, pick_combat_reward_obj, pick_combat_reward_str,
     pick_rest, pick_event, pick_boss_relic, pick_hand_select,
-    pick_grid_card, _pick_grid_upgrade, _pick_grid_match, _pick_from_unselected,
+    pick_grid_card, _pick_grid_upgrade, _is_matching_grid, _pick_grid_match,
+    _pick_from_unselected,
     pick_map,
     pick_shop_item,
 )
@@ -236,12 +237,24 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
                 return Action("proceed"), _PROCEED
             return Action("state"), _NOOP
         selected_names = {getattr(c, "name", "").lower() for c in selected}
-        if choice_list:
+        grid_choices = choice_list or [
+            getattr(c, "name", c) for c in getattr(scr, "cards", []) or []
+        ]
+        if grid_choices:
             for_upgrade = bool(getattr(scr, "for_upgrade", False)) if scr else False
             for_transform = bool(getattr(scr, "for_transform", False)) if scr else False
             any_number = bool(getattr(scr, "any_number", False)) if scr else False
+            if _is_matching_grid(gs, scr, grid_choices):
+                idx = _pick_grid_match(grid_choices, scr, gs)
+                if idx is not None:
+                    return ChooseAction(choice_index=idx), _CHOOSE_START + idx
+                if proceed_avail:
+                    return Action("proceed"), _PROCEED
+                if cancel_avail:
+                    return Action("leave"), _LEAVE
+                return Action("state"), _NOOP
             if for_upgrade:
-                idx = _pick_grid_upgrade(choice_list)
+                idx = _pick_grid_upgrade(grid_choices)
                 return ChooseAction(choice_index=idx), _CHOOSE_START + idx
             if for_transform:
                 return ChooseAction(choice_index=0), _CHOOSE_START
@@ -249,10 +262,10 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
                 if proceed_avail:
                     return Action("proceed"), _PROCEED
                 return ChooseAction(choice_index=0), _CHOOSE_START
-            unselected = [(i, c) for i, c in enumerate(choice_list)
+            unselected = [(i, c) for i, c in enumerate(grid_choices)
                           if str(c).lower() not in selected_names]
             if not unselected:
-                unselected = list(enumerate(choice_list))
+                unselected = list(enumerate(grid_choices))
             idx = _pick_from_unselected(unselected, scr)
             return ChooseAction(choice_index=idx), _CHOOSE_START + idx
         if proceed_avail:
