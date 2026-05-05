@@ -270,7 +270,7 @@ AscensionAI/
 
 2. **Action space** (`sts_gym_env.py`): 134 discrete actions covering targeted/untargeted card plays (50+10), end turn, targeted/untargeted potions (25+5), choice selection (40), proceed, leave, and no-op. Illegal actions are masked out per game state.
 
-3. **Reward shaping** (`sts_gym_env.py`): Dense per-step rewards for gold, relics, floor progression, combat damage, card management, and act advancement — plus terminal bonuses (+50 victory, -5 defeat). Minion-spawner enemies (Gremlin Leader, Reptomancer, Bronze Automaton) receive bonus damage and kill rewards to encourage the RL to prioritize them.
+3. **Reward shaping** (`sts_gym_env.py`): Dense per-step rewards for gold, relics, floor progression, combat damage, card management, and act advancement — plus terminal bonuses (+50 victory, -5 defeat). Urgent elite targets such as daggers, Gremlin Wizard, Red Slaver, Exploder, and minion-spawner bosses receive extra damage/kill rewards to teach healthier target priority.
 
    **Combat analytics**: Elite and boss fight outcomes are tracked per-game in `training_stats.csv` and per-fight in `elite_stats.csv`, including which monsters were fought, HP before/after, and win/loss. The Control Panel progress panel shows aggregate elite and boss win rates.
 

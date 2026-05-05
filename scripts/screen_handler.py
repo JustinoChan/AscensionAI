@@ -31,6 +31,8 @@ GOOD_CARDS = frozenset({
     "immolate", "fiend fire", "limit break",
     # Colorless
     "apotheosis",
+    "hand of greed", "master of strategy", "dark shackles", "panic button",
+    "finesse", "flash of steel", "trip",
 })
 OK_CARDS = frozenset({
     # Common attacks
@@ -45,6 +47,19 @@ OK_CARDS = frozenset({
     "sentinel", "seeing red", "warcry", "armaments", "exhume",
     # Powers
     "fire breathing", "brutality", "rage", "juggernaut",
+    "combust", "bloodletting", "flex", "twin strike", "perfected strike",
+})
+PREMIUM_CARDS = frozenset({
+    "offering", "immolate", "feed", "reaper", "impervious",
+    "demon form", "corruption", "barricade", "apotheosis",
+})
+EARLY_ATTACKS = frozenset({
+    "pommel strike", "anger", "cleave", "twin strike", "headbutt",
+    "carnage", "hemokinesis", "uppercut", "immolate", "bludgeon",
+})
+AVOID_CARDS = frozenset({
+    "clash", "berserk", "havoc", "wild strike", "searing blow",
+    "fire breathing", "rupture", "barricade",
 })
 JUNK_CARDS = frozenset({
     "wound", "burn", "dazed", "slimed", "void",
@@ -65,18 +80,47 @@ _PURGE_PRIORITY = {
 # ---------------------------------------------------------------------------
 # Per-screen pick helpers
 # ---------------------------------------------------------------------------
-def pick_card_reward(choice_list: list) -> int:
+def _act_floor_index(gs) -> int:
+    floor = int(getattr(gs, "floor", 0) or 0)
+    act = int(getattr(gs, "act", 1) or 1)
+    return max(1, floor - {1: 0, 2: 17, 3: 34}.get(act, 0))
+
+
+def pick_card_reward(choice_list: list, gs=None) -> int:
     lower = [str(c).lower() for c in choice_list]
-    for i, c in enumerate(lower):
-        if c in GOOD_CARDS:
-            return i
-    for i, c in enumerate(lower):
-        if c in OK_CARDS:
-            return i
+    act = int(getattr(gs, "act", 1) or 1) if gs is not None else 1
+    act_floor = _act_floor_index(gs) if gs is not None else 1
+    best_idx, best_score = 0, -999.0
+    skip_idx = None
     for i, c in enumerate(lower):
         if "skip" in c:
-            return i
-    return 0
+            skip_idx = i
+            continue
+        name = c.rstrip("+").strip()
+        score = 0.0
+        if name in PREMIUM_CARDS:
+            score += 10.0
+        if name in GOOD_CARDS:
+            score += 7.0
+        if name in OK_CARDS:
+            score += 4.0
+        if name in EARLY_ATTACKS:
+            score += 3.0 if act == 1 and act_floor <= 8 else 1.0
+        if name in AVOID_CARDS:
+            score -= 5.0
+        if name in JUNK_CARDS:
+            score -= 20.0
+        if act == 1 and act_floor <= 5 and name in {
+            "shrug it off", "armaments", "true grit", "ghostly armor",
+            "power through",
+        }:
+            score -= 1.5
+        if score > best_score:
+            best_score = score
+            best_idx = i
+    if best_score <= 0.0 and skip_idx is not None:
+        return skip_idx
+    return best_idx
 
 
 def pick_combat_reward_obj(rewards: list, potions_full: bool = False) -> int:
@@ -138,7 +182,18 @@ def pick_event(choice_list: list, gs) -> int:
 
 def pick_boss_relic(choice_list: list) -> int:
     lower = [str(c).lower() for c in choice_list]
-    avoid = {"busted crown", "coffee dripper", "sozu", "runic dome"}
+    avoid = {
+        "busted crown", "coffee dripper", "sozu", "runic dome",
+        "ectoplasm", "snecko eye", "velvet choker",
+    }
+    prefer = {
+        "cursed key", "fusion hammer", "slavers collar", "mark of pain",
+        "black star", "calling bell", "empty cage", "astrolabe",
+        "pandoras box", "runic pyramid",
+    }
+    for i, c in enumerate(lower):
+        if c in prefer:
+            return i
     non_avoid = [i for i, c in enumerate(lower) if c not in avoid]
     return non_avoid[0] if non_avoid else 0
 
@@ -170,6 +225,15 @@ def pick_grid_card(choice_list: list) -> int:
 
 def _pick_grid_upgrade(choice_list: list) -> int:
     """Pick best card to upgrade from GRID."""
+    upgrade_priority = [
+        "bash", "uppercut", "shockwave", "offering", "armaments",
+        "inflame", "demon form", "immolate", "feed", "limit break",
+        "impervious", "corruption", "apotheosis",
+    ]
+    lower = [str(c).lower().rstrip("+") for c in choice_list]
+    for card in upgrade_priority:
+        if card in lower:
+            return lower.index(card)
     for i, c in enumerate(choice_list):
         if str(c).lower().rstrip("+") in GOOD_CARDS:
             return i
@@ -336,7 +400,7 @@ def _pick_from_unselected(unselected: list, scr) -> int:
 
 
 _MAP_SYMBOL_SCORES = {
-    "E": 5, "?": 3, "$": 2, "M": 1, "T": 4, "R": 0,
+    "E": 5, "?": 2, "$": 2, "M": 1, "T": 4, "R": 0,
 }
 
 
@@ -357,7 +421,22 @@ def pick_map(choice_list: list, gs) -> int:
         sym = getattr(next_nodes[i], "symbol", "?")
         score = float(_MAP_SYMBOL_SCORES.get(sym, 1))
 
-        if sym == "E":
+        act_floor = _act_floor_index(gs)
+        easy_budget = 3 if act == 1 else 2
+
+        if sym == "M":
+            if act_floor <= easy_budget:
+                score += 5
+            elif hp_pct < 0.45:
+                score -= 3
+            else:
+                score += 1
+        elif sym == "?":
+            if act_floor <= easy_budget:
+                score -= 3
+            elif hp_pct < 0.45:
+                score += 2
+        elif sym == "E":
             if hp_pct < 0.4:
                 score -= 8
             elif act == 1 and hp_pct > 0.6:
@@ -371,10 +450,6 @@ def pick_map(choice_list: list, gs) -> int:
                 score += 6
             else:
                 score -= 2
-        elif sym == "M":
-            if hp_pct < 0.3:
-                score -= 3
-
         if score > best_score:
             best_score = score
             best_idx = i
@@ -624,7 +699,7 @@ def auto_handle_screen(
 
     if screen_name == "CARD_REWARD":
         if heuristic_all and choice_list:
-            return ChooseAction(choice_index=pick_card_reward(choice_list))
+            return ChooseAction(choice_index=pick_card_reward(choice_list, gs))
         if heuristic_all or not choice_list:
             return Action("proceed") if proceed_avail else Action("state")
         return None

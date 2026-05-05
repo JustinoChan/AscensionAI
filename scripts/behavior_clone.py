@@ -83,6 +83,7 @@ from sts_gym_env import (
 )
 
 from game_data import POTION_EFFECTS
+from game_data import CARD_MECHANICS
 from screen_handler import (
     GOOD_CARDS, OK_CARDS, JUNK_CARDS,
     pick_card_reward, pick_combat_reward_obj, pick_combat_reward_str,
@@ -111,6 +112,71 @@ def _screen_name(gs) -> str:
     return str(name) if name else "NONE"
 
 
+URGENT_MONSTERS = {
+    "SlaverRed", "GremlinWizard", "Exploder", "Mugger", "Looter",
+    "SnakeDagger", "Dagger", "Byrd", "Chosen",
+}
+
+
+def _norm(text: str) -> str:
+    return (
+        str(text or "").lower()
+        .replace(" ", "").replace("_", "").replace("-", "").replace("'", "")
+    )
+
+
+_CARD_MECHANICS_NORM = {
+    _norm(k): v for k, v in CARD_MECHANICS.items()
+}
+_POTION_EFFECTS_NORM = {
+    _norm(k): v for k, v in POTION_EFFECTS.items()
+}
+
+
+def _monster_id(m) -> str:
+    return str(getattr(m, "monster_id", "") or getattr(m, "name", "") or "")
+
+
+def _room_type(gs) -> str:
+    return str(getattr(gs, "room_type", "") or "")
+
+
+def _is_elite_or_boss(gs) -> bool:
+    room = _room_type(gs)
+    if "Elite" in room or "Boss" in room:
+        return True
+    alive = living_monsters(getattr(gs, "monsters", []) or [])
+    return any(_monster_id(m) in {
+        "GremlinNob", "Lagavulin", "GremlinLeader", "SlaverBoss",
+        "BookOfStabbing", "Reptomancer", "Nemesis", "GiantHead",
+    } for m in alive)
+
+
+def _potion_name(pot) -> str:
+    return str(
+        getattr(pot, "name", None)
+        or getattr(pot, "potion_id", None)
+        or ""
+    )
+
+
+def _potion_effects(pot) -> tuple:
+    name = _potion_name(pot)
+    return _POTION_EFFECTS_NORM.get(_norm(name), (0, 0, 0, 0, 0))
+
+
+def _monster_damage(m) -> int:
+    dmg = int(getattr(m, "move_base_damage", 0) or 0)
+    hits = int(getattr(m, "move_hits", 1) or 1)
+    return max(0, dmg) * max(1, hits)
+
+
+def _is_attacking(m) -> bool:
+    intent = str(getattr(getattr(m, "intent", None), "name",
+                         getattr(m, "intent", "")) or "").upper()
+    return "ATTACK" in intent or _monster_damage(m) > 0
+
+
 def estimate_incoming(monsters) -> int:
     total = 0
     for m in (monsters or []):
@@ -125,42 +191,98 @@ def estimate_incoming(monsters) -> int:
     return total
 
 
-def score_card(card, incoming: int) -> float:
+def _card_mechanics(card) -> tuple:
+    cid = str(getattr(card, "card_id", "") or "")
+    name = str(getattr(card, "name", "") or "")
+    return (
+        _CARD_MECHANICS_NORM.get(_norm(cid))
+        or _CARD_MECHANICS_NORM.get(_norm(name))
+        or (0, False, False, 0.0, 0.0)
+    )
+
+
+def score_card(card, incoming: int, gs=None, target=None) -> float:
     name = (getattr(card, "name", "") or "").lower()
     cost = int(getattr(card, "cost", 1) or 1)
     ctype = str(getattr(card, "type", "") or "").upper()
     dmg = int(getattr(card, "damage", 0) or 0)
     blk = int(getattr(card, "block", 0) or 0)
+    draws, is_aoe, is_multi_hit, strength_scale, quality = _card_mechanics(card)
+    alive = living_monsters(getattr(gs, "monsters", []) or []) if gs is not None else []
+    elite_or_boss = _is_elite_or_boss(gs) if gs is not None else False
+    target_id = _monster_id(target) if target is not None else ""
+    has_nob = any(_monster_id(m) == "GremlinNob" for m in alive)
 
     if dmg == 0 and ("strike" in name or "bash" in name):
         dmg = 6 if "strike" in name else 8
     if blk == 0 and "defend" in name:
         blk = 5
 
-    s = 0.0
+    s = quality * 0.6
     if incoming >= 10:
         s += blk * 0.9
     else:
-        s += blk * 0.2
+        s += blk * 0.05
     if dmg > 0:
         s += (dmg / max(1, cost)) * 1.0
+    if is_aoe and len(alive) >= 2:
+        s += 5.0 + len(alive)
+    if is_multi_hit and any(_monster_id(m) in {"Byrd", "Shelled Parasite"} for m in alive):
+        s += 2.5
+    if draws:
+        s += draws * 1.2
     if "bash" in name:
-        s += 4.0
+        s += 5.0 if elite_or_boss else 4.0
+    if name in {"uppercut", "shockwave", "thunderclap", "intimidate", "disarm"}:
+        s += 5.0 if elite_or_boss or incoming >= 12 else 2.5
+    if name in {"feed", "hand of greed"} and target is not None:
+        hp = int(getattr(target, "current_hp", 999) or 999)
+        if dmg >= hp:
+            s += 8.0
+    if name in {"immolate", "whirlwind", "cleave", "reaper"} and len(alive) >= 2:
+        s += 6.0
     if ctype == "POWER":
-        s += 3.0
-        if incoming >= 12:
+        s += 6.0 if elite_or_boss else 3.0
+        if incoming >= 18:
             s -= 3.5
+    if has_nob and ctype == "SKILL":
+        s -= 7.0
+        if incoming >= 18 and blk > 0:
+            s += 4.0
+    if target_id in {"GremlinWizard", "SlaverRed", "SnakeDagger", "Dagger", "Exploder"} and dmg > 0:
+        s += 4.0
     s -= max(0, cost - 1) * 0.3
     return s
 
 
-def pick_target(monsters, prefer_low_hp=True):
+def pick_target(monsters, prefer_low_hp=True, gs=None):
     alive = living_monsters(monsters or [])
     if not alive:
         return None
-    spawners = [m for m in alive
-                if str(getattr(m, "monster_id", "")) in SPAWNER_IDS]
-    if spawners:
+    ids = {_monster_id(m) for m in alive}
+    if "GremlinLeader" in ids:
+        minions = [m for m in alive if _monster_id(m) != "GremlinLeader"]
+        attacking = [m for m in minions if _is_attacking(m)]
+        wizards = [m for m in minions if _monster_id(m) == "GremlinWizard"]
+        if wizards:
+            return min(wizards, key=lambda m: int(getattr(m, "current_hp", 999) or 999))
+        if attacking:
+            return max(attacking, key=_monster_damage)
+        if minions:
+            return min(minions, key=lambda m: int(getattr(m, "current_hp", 999) or 999))
+    if "Reptomancer" in ids:
+        daggers = [m for m in alive if _monster_id(m) in {"SnakeDagger", "Dagger"}]
+        if daggers:
+            attacking = [m for m in daggers if _is_attacking(m)]
+            return max(attacking or daggers, key=lambda m: (_monster_damage(m), -int(getattr(m, "current_hp", 999) or 999)))
+    for urgent in URGENT_MONSTERS:
+        matches = [m for m in alive if _monster_id(m) == urgent]
+        if matches:
+            return min(matches, key=lambda m: int(getattr(m, "current_hp", 999) or 999))
+    if "Sentry" in ids:
+        return min(alive, key=lambda m: int(getattr(m, "current_hp", 999) or 999))
+    spawners = [m for m in alive if _monster_id(m) in SPAWNER_IDS]
+    if spawners and len(alive) == 1:
         return spawners[0]
     if prefer_low_hp:
         alive.sort(key=lambda m: int(getattr(m, "current_hp", 999) or 999))
@@ -302,7 +424,7 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
     # --- CARD_REWARD ---
     if screen == "CARD_REWARD":
         if choice_list:
-            idx = pick_card_reward(choice_list)
+            idx = pick_card_reward(choice_list, gs)
             return ChooseAction(choice_index=idx), _CHOOSE_START + idx
         if proceed_avail:
             return Action("proceed"), _PROCEED
@@ -410,30 +532,51 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
     # --- COMBAT ---
     if in_combat:
         incoming = estimate_incoming(monsters)
+        elite_or_boss = _is_elite_or_boss(gs)
+        potion_avail = bool(getattr(gs, "potion_available", True))
+        target = pick_target(monsters, prefer_low_hp=True, gs=gs)
 
         # -- Use potions when conditions warrant --
         hp = int(getattr(gs, "current_hp", 0) or 0)
         max_hp = max(1, int(getattr(gs, "max_hp", 1) or 1))
         hp_pct = hp / max_hp
+        player_block = int(getattr(getattr(gs, "player", None), "block", 0) or 0)
+        potion_slots_full = bool(getattr(gs, "are_potions_full", lambda: False)())
         for k, pot in enumerate(potions[:MAX_POTIONS]):
-            pot_name = str(getattr(pot, "name", "") or "")
-            if pot_name in ("Potion Slot", "") or not getattr(pot, "can_use", False):
+            pot_name = _potion_name(pot)
+            if _norm(pot_name) in {"", "potionslot"}:
                 continue
-            effects = POTION_EFFECTS.get(pot_name, (0, 0, 0, 0, 0))
+            if not potion_avail or not getattr(pot, "can_use", False):
+                continue
+            effects = _potion_effects(pot)
             deals_damage, gives_block, gives_str, gives_dex, heals = effects
+            pname = _norm(pot_name)
             use = False
-            if heals and hp_pct < 0.35:
+            if heals and (hp_pct < 0.35 or (elite_or_boss and hp_pct < 0.55)):
                 use = True
-            elif gives_block and hp_pct < 0.5 and incoming > 10:
+            elif gives_block and incoming - player_block >= (8 if elite_or_boss else 12):
                 use = True
-            elif (deals_damage or gives_str) and incoming > 15:
+            elif gives_str and (elite_or_boss or incoming > 15):
                 use = True
-            elif gives_dex and incoming > 10:
+            elif gives_dex and (elite_or_boss or incoming > 10):
+                use = True
+            elif deals_damage:
+                tgt_hp = int(getattr(target, "current_hp", 999) or 999) if target else 999
+                if elite_or_boss or incoming > 12 or tgt_hp <= 20:
+                    use = True
+            elif pname in {
+                "fearpotion", "weakpotion", "ancientpotion", "cultistpotion",
+                "powerpotion", "attackpotion", "skillpotion", "duplicationpotion",
+                "energypotion", "distilledchaos", "liquidmemories",
+                "blessingoftheforge", "gamblersbrew",
+            } and (elite_or_boss or incoming > 18 or potion_slots_full):
+                use = True
+            elif pname == "smokebomb" and hp_pct < 0.2 and incoming >= hp:
                 use = True
             if use:
                 requires_target = getattr(pot, "requires_target", False)
                 if requires_target:
-                    tgt = pick_target(monsters, prefer_low_hp=True)
+                    tgt = target or pick_target(monsters, prefer_low_hp=True, gs=gs)
                     if tgt is not None:
                         tgt_idx = alive.index(tgt) if tgt in alive else 0
                         if tgt_idx < MAX_MONSTERS:
@@ -449,7 +592,7 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
             for card in hand:
                 if not getattr(card, "is_playable", False):
                     continue
-                s = score_card(card, incoming)
+                s = score_card(card, incoming, gs=gs, target=target)
                 if s > best_score:
                     best_score = s
                     best_card = card
@@ -458,7 +601,7 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
                 card_idx = hand.index(best_card)
                 if card_idx < MAX_HAND:
                     if getattr(best_card, "has_target", False):
-                        tgt = pick_target(monsters, prefer_low_hp=True)
+                        tgt = target or pick_target(monsters, prefer_low_hp=True, gs=gs)
                         if tgt is not None:
                             tgt_idx = alive.index(tgt) if tgt in alive else 0
                             if tgt_idx < MAX_MONSTERS:

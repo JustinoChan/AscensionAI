@@ -249,6 +249,26 @@ def flat_action_to_spire_action(action_id: int, gs: Any) -> Action:
 SPAWNER_IDS = frozenset({
     "GremlinLeader", "Reptomancer", "BronzeAutomaton",
 })
+PRIORITY_MONSTER_WEIGHTS = {
+    "GremlinWizard": 0.12,
+    "SnakeDagger": 0.12,
+    "Dagger": 0.12,
+    "SlaverRed": 0.10,
+    "Exploder": 0.10,
+    "GremlinLeader": 0.04,
+    "Reptomancer": 0.04,
+    "BronzeAutomaton": 0.03,
+}
+PRIORITY_KILL_BONUS = {
+    "GremlinWizard": 4.0,
+    "SnakeDagger": 4.0,
+    "Dagger": 4.0,
+    "SlaverRed": 4.0,
+    "Exploder": 3.0,
+    "GremlinLeader": 2.0,
+    "Reptomancer": 2.0,
+    "BronzeAutomaton": 1.5,
+}
 
 
 class RewardTracker:
@@ -265,7 +285,7 @@ class RewardTracker:
         self.last_enemy_hp: Optional[int] = None
         self.last_alive = 0
         self._last_act = 0
-        self._last_spawner_hp: Dict[str, int] = {}
+        self._last_priority_hp: Dict[str, int] = {}
 
     def _enemy_stats(self, gs: Any) -> Tuple[Optional[int], int]:
         total_hp = 0
@@ -279,11 +299,11 @@ class RewardTracker:
                 total_hp += max(0, hp)
         return (total_hp if alive else None), alive
 
-    def _spawner_hp_map(self, gs: Any) -> Dict[str, int]:
+    def _priority_hp_map(self, gs: Any) -> Dict[str, int]:
         result: Dict[str, int] = {}
         for m in (getattr(gs, "monsters", []) or []):
             mid = str(getattr(m, "monster_id", "") or "")
-            if mid not in SPAWNER_IDS:
+            if mid not in PRIORITY_MONSTER_WEIGHTS:
                 continue
             if getattr(m, "is_gone", False):
                 result[mid] = 0
@@ -302,10 +322,10 @@ class RewardTracker:
         self._last_act = int(getattr(gs, "act", 0) or 0)
         if self.last_in_combat:
             self.last_enemy_hp, self.last_alive = self._enemy_stats(gs)
-            self._last_spawner_hp = self._spawner_hp_map(gs)
+            self._last_priority_hp = self._priority_hp_map(gs)
         else:
             self.last_enemy_hp, self.last_alive = None, 0
-            self._last_spawner_hp = {}
+            self._last_priority_hp = {}
 
     def compute(self, gs: Any, terminated: bool, victory: bool) -> float:
         reward = 0.0
@@ -332,14 +352,14 @@ class RewardTracker:
                 reward += max(0, self.last_enemy_hp - e_hp) * 0.02
             reward += max(0, self.last_alive - alive) * 0.5
 
-            spawner_hp = self._spawner_hp_map(gs)
-            for mid, prev_hp in self._last_spawner_hp.items():
-                cur_hp = spawner_hp.get(mid, 0)
+            priority_hp = self._priority_hp_map(gs)
+            for mid, prev_hp in self._last_priority_hp.items():
+                cur_hp = priority_hp.get(mid, 0)
                 dmg = max(0, prev_hp - cur_hp)
                 if dmg > 0:
-                    reward += dmg * 0.08
+                    reward += dmg * PRIORITY_MONSTER_WEIGHTS.get(mid, 0.03)
                 if prev_hp > 0 and cur_hp <= 0:
-                    reward += 5.0
+                    reward += PRIORITY_KILL_BONUS.get(mid, 1.0)
 
         if terminated:
             if victory:
@@ -362,10 +382,10 @@ class RewardTracker:
         self.last_in_combat = in_combat
         if in_combat:
             self.last_enemy_hp, self.last_alive = self._enemy_stats(gs)
-            self._last_spawner_hp = self._spawner_hp_map(gs)
+            self._last_priority_hp = self._priority_hp_map(gs)
         else:
             self.last_enemy_hp, self.last_alive = None, 0
-            self._last_spawner_hp = {}
+            self._last_priority_hp = {}
 
         return reward
 
