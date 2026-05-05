@@ -149,8 +149,14 @@ def compute_action_mask(gs: Any) -> np.ndarray:
         n_choices = len(choice_list)
         if st_name == "COMBAT_REWARD" and not n_choices and combat_rewards:
             n_choices = len(combat_rewards)
+        event_options = list(getattr(scr, "options", []) or []) if st_name == "EVENT" and scr else []
+        if st_name == "EVENT" and not n_choices and event_options:
+            n_choices = len(event_options)
 
         for idx in range(min(n_choices, MAX_CHOICES)):
+            if st_name == "EVENT" and idx < len(event_options):
+                if bool(getattr(event_options[idx], "disabled", False)):
+                    continue
             if st_name == "COMBAT_REWARD" and potions_full:
                 is_potion = False
                 if idx < len(combat_rewards):
@@ -217,6 +223,15 @@ def flat_action_to_spire_action(action_id: int, gs: Any) -> Action:
 
     if _CHOOSE_START <= action_id < _PROCEED:
         choice_idx = action_id - _CHOOSE_START
+        screen_type = getattr(gs, "screen_type", None)
+        st_name = getattr(screen_type, "name", "") if screen_type else ""
+        scr = getattr(gs, "screen", None)
+        if st_name == "EVENT" and scr is not None:
+            options = list(getattr(scr, "options", []) or [])
+            if not getattr(gs, "choice_list", None) and choice_idx < len(options):
+                opt_idx = getattr(options[choice_idx], "choice_index", None)
+                if opt_idx is not None:
+                    return ChooseAction(choice_index=opt_idx)
         return ChooseAction(choice_index=choice_idx)
 
     if action_id == _PROCEED:
@@ -358,7 +373,24 @@ class RewardTracker:
 # ---------------------------------------------------------------------------
 # Gymnasium environment
 # ---------------------------------------------------------------------------
-_TERMINAL_SCREENS = {"GAME_OVER", "VICTORY", "COMPLETE", "CREDITS", "GAME_OVER_SCREEN"}
+_TERMINAL_SCREENS = {"GAME_OVER", "GAME_OVER_SCREEN"}
+
+
+def is_terminal_state(gs: Any) -> bool:
+    """Return True only for real run-ending screens.
+
+    CommunicationMod's COMPLETE screen is a transient room/action completion
+    state, not a completed Slay the Spire run.
+    """
+    return _screen_name(gs) in _TERMINAL_SCREENS
+
+
+def is_victory_state(gs: Any) -> bool:
+    """Return True when the real game-over screen reports a victory."""
+    if not is_terminal_state(gs):
+        return False
+    scr_obj = getattr(gs, "screen", None)
+    return bool(getattr(scr_obj, "victory", False))
 
 
 class STSEnv(gym.Env):
@@ -492,12 +524,8 @@ class STSEnv(gym.Env):
 
         self._step_count += 1
         screen = _screen_name(self._game_state)
-        terminated = screen in _TERMINAL_SCREENS
-
-        victory = False
-        if terminated:
-            scr_obj = getattr(self._game_state, "screen", None)
-            victory = bool(getattr(scr_obj, "victory", False)) or screen in {"COMPLETE", "VICTORY"}
+        terminated = is_terminal_state(self._game_state)
+        victory = is_victory_state(self._game_state)
 
         reward = self._reward_tracker.compute(self._game_state, terminated, victory)
         obs = encode_game_state(self._game_state)

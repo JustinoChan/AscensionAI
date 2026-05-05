@@ -123,6 +123,17 @@ def _dump_stuck_state(gs, screen_name: str, stuck_count: int,
         if scr:
             lines.append(f"  screen attrs: confirm_up={getattr(scr, 'confirm_up', None)} "
                          f"can_pick_zero={getattr(scr, 'can_pick_zero', None)}")
+            if screen_name == "EVENT":
+                options = list(getattr(scr, "options", []) or [])
+                opt_info = [
+                    (getattr(o, "label", None), getattr(o, "text", None),
+                     getattr(o, "disabled", None), getattr(o, "choice_index", None))
+                    for o in options[:10]
+                ]
+                lines.append(f"  event: name={getattr(scr, 'event_name', None)} "
+                             f"id={getattr(scr, 'event_id', None)} "
+                             f"body={getattr(scr, 'body_text', None)!r}")
+                lines.append(f"  event options: {opt_info}")
         if hand:
             card_info = [(getattr(c, "name", "?"), getattr(c, "is_playable", "?"),
                           getattr(c, "cost", "?")) for c in hand[:10]]
@@ -154,7 +165,7 @@ from spirecomm.spire.character import PlayerClass
 from obs_encoder import OBS_SIZE, encode_game_state
 from sts_gym_env import (
     NUM_ACTIONS, compute_action_mask, flat_action_to_spire_action,
-    RewardTracker, _NOOP,
+    RewardTracker, _NOOP, is_terminal_state, is_victory_state,
 )
 from ppo_model import PPOTrainer, GameBuffer
 from screen_handler import auto_handle_screen
@@ -220,8 +231,7 @@ class PPOAgent:
 
         screen_type = getattr(gs, "screen_type", None)
         screen_name = str(getattr(screen_type, "name", screen_type) or "NONE")
-        terminal_screens = {"GAME_OVER", "VICTORY", "COMPLETE", "CREDITS"}
-        terminated = screen_name in terminal_screens
+        terminated = is_terminal_state(gs)
 
         if VERBOSE:
             choice_list_v = list(getattr(gs, "choice_list", []) or [])
@@ -237,10 +247,7 @@ class PPOAgent:
                 f"confirm_up={confirm_up_v} potions={pot_ids_v} pot_full={pot_full_v} "
                 f"mask_sum={int(mask.sum())}")
 
-        victory = False
-        if terminated:
-            scr_obj = getattr(gs, "screen", None)
-            victory = bool(getattr(scr_obj, "victory", False)) or screen_name in {"COMPLETE", "VICTORY"}
+        victory = is_victory_state(gs)
 
         # First state of the game
         if not self.initialized:
@@ -401,6 +408,8 @@ class PPOAgent:
 
     def on_error(self, err: str) -> Action:
         log(f"COMMAND ERROR: {err}")
+        if "Possible commands" in err and "wait" in err:
+            return Action("wait")
         if "proceed" in err and "choose" in err:
             return ChooseAction(choice_index=0)
         return Action("state")

@@ -1,6 +1,6 @@
 # AscensionAI
 
-A reinforcement learning agent that learns to play **Slay the Spire** (Ironclad) through self-play, using PPO with behavior cloning warm-start and dense reward shaping.
+A reinforcement learning agent that learns to play **Slay the Spire** (Ironclad) through online RL, using a Gymnasium-style environment wrapper, PPO fine-tuning, behavior cloning warm-start, and dense reward shaping.
 
 ## Architecture
 
@@ -12,10 +12,11 @@ STS Game  <-->  Communication Mod  <-->  Python Agent (stdin/stdout)
                                      PPOTrainer (Actor-Critic MLP)
 ```
 
-- **Decision screens** (combat, card rewards, rest, boss relics, map pathing) are handled by the RL policy network
-- **Heuristic screens** (events, combat rewards, shops, chests, grid select) are auto-handled with fallback logic for edge cases (full potions, multi-select grids, card matching events, empty choice lists)
+- **Decision screens** (combat, events, card rewards, rest, boss relics, map pathing) are handled by the RL policy network
+- **Heuristic screens** (combat rewards, shops, chests, grid select) are auto-handled with fallback logic for edge cases (full potions, multi-select grids, card matching events, empty choice lists)
 - The observation encoder captures player state, hand cards, monster identity/behavior/intent/powers, screen context, and map path lookahead
 - Action masking ensures only legal actions are chosen
+- The Python side exposes the game as a Gymnasium-compatible environment, while Communication Mod handles the live STS process bridge
 
 ### Training Pipeline
 
@@ -43,6 +44,8 @@ This means the agent doesn't need thousands of games to rediscover that Gremlin 
 4. **Communication Mod** — [GitHub](https://github.com/ForgottenArbiter/CommunicationMod)
 5. **Super Fast Mode** (recommended) — [GitHub](https://github.com/Skrelpoid/SuperFastMode) — raises the in-game speed cap well beyond vanilla Fast Mode
 6. **Python 3.10+**
+
+AscensionAI is currently developed and documented for **Windows**. The GUI launcher, PowerShell helper, Steam/ModTheSpire process handling, and `%LOCALAPPDATA%` CommunicationMod config paths assume a Windows setup.
 
 Enable **Fast Mode** in STS game settings (Settings → Fast Mode ON). If you install Super Fast Mode, push the speed slider to 200%+ in its mod config — this alone can 2-3× training throughput on top of Fast Mode.
 
@@ -95,6 +98,8 @@ The control panel detects your hardware, recommends how many STS instances to ru
 1. **BC → PPO** — select "BC → PPO (End-to-End)" mode and click Start. The heuristic plays 50 games, the network imitates, then PPO fine-tunes for 200 games with entropy annealing.
 2. **Parallel Workers** — once you have a baseline model, switch to "Parallel Workers" for faster training. Multiple STS instances collect experience while an offline trainer updates the model.
 3. **Evaluation** — select "Evaluation (Greedy)" to benchmark your model without exploration noise.
+
+During a healthy first run, you should see live output in the Control Panel tabs, new log files appear under `logs/`, and the trained checkpoint saved to `models/ppo_sts.pt`.
 
 ### Stopping a run
 
@@ -222,6 +227,13 @@ Training stats can be visualized with:
 ```bash
 python scripts/plot_training.py --save logs/training_plot.png
 ```
+
+## Current Limitations
+
+- The project currently targets **Ironclad** only.
+- Training assumes normal live STS gameplay through CommunicationMod; it is not a fast headless simulator.
+- Some screens are intentionally heuristic-driven while the RL policy handles the main decision surfaces. This keeps training moving, but means the learned policy is not yet responsible for every possible game choice.
+- The README examples assume a local Windows install at `C:/AscensionAI`; adjust paths if your clone lives elsewhere.
 
 ## Project Structure
 

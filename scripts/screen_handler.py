@@ -123,6 +123,8 @@ def pick_event(choice_list: list, gs) -> int:
     lower = [str(c).lower() for c in choice_list]
     hp_pct = int(getattr(gs, "current_hp", 0) or 0) / max(
         1, int(getattr(gs, "max_hp", 1) or 1))
+    if len(lower) > 3 and any(c.startswith("card") for c in lower):
+        return pick_hand_select(choice_list)
     if hp_pct < 0.35:
         for i, c in enumerate(lower):
             if "leave" in c:
@@ -306,12 +308,12 @@ def auto_handle_screen(
 ) -> Optional[Action]:
     """Handle non-combat STS screens.
 
-    heuristic_all=True:  handle every screen heuristically (rollout workers).
+    heuristic_all=True:  handle every screen heuristically (BC/demo fallback).
     heuristic_all=False: handle only mechanical screens; return None for
                          decision screens so the RL policy can choose.
 
     Decision screens (RL-only when heuristic_all=False):
-      CARD_REWARD, REST, BOSS_REWARD, HAND_SELECT, MAP
+      CARD_REWARD, REST, BOSS_REWARD, HAND_SELECT, MAP, EVENT
     """
     in_combat = bool(getattr(gs, "in_combat", False))
     choice_list = list(getattr(gs, "choice_list", []) or [])
@@ -464,10 +466,24 @@ def auto_handle_screen(
         if choice_list:
             if heuristic_all:
                 return ChooseAction(choice_index=pick_event(choice_list, gs))
-            return ChooseAction(choice_index=0)
+            return None
         options = list(getattr(scr, "options", []) or []) if scr else []
         if options:
-            return ChooseAction(choice_index=0)
+            enabled = [
+                (i, opt) for i, opt in enumerate(options)
+                if not bool(getattr(opt, "disabled", False))
+            ]
+            if not enabled:
+                if proceed_avail:
+                    return Action("proceed")
+                if cancel_avail:
+                    return Action("leave")
+                return Action("state")
+            if heuristic_all:
+                idx, opt = enabled[0]
+                choice_idx = getattr(opt, "choice_index", None)
+                return ChooseAction(choice_index=choice_idx if choice_idx is not None else idx)
+            return None
         if proceed_avail:
             return Action("proceed")
         return Action("state")

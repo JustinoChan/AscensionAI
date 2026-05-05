@@ -79,6 +79,7 @@ from sts_gym_env import (
     _CHOOSE_START, _PROCEED, _LEAVE, _NOOP,
     MAX_HAND, MAX_MONSTERS, MAX_POTIONS,
     SPAWNER_IDS,
+    is_terminal_state,
 )
 
 from game_data import POTION_EFFECTS
@@ -189,7 +190,7 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
     scr = getattr(gs, "screen", None)
 
     # Terminal
-    if screen in {"GAME_OVER", "VICTORY", "COMPLETE", "CREDITS"}:
+    if is_terminal_state(gs):
         if proceed_avail:
             return Action("proceed"), _PROCEED
         return Action("state"), _NOOP
@@ -333,7 +334,14 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
             return ChooseAction(choice_index=idx), _CHOOSE_START + idx
         options = list(getattr(scr, "options", []) or []) if scr else []
         if options:
-            return ChooseAction(choice_index=0), _CHOOSE_START
+            enabled = [
+                (i, opt) for i, opt in enumerate(options)
+                if not bool(getattr(opt, "disabled", False))
+            ]
+            if enabled:
+                idx, opt = enabled[0]
+                choice_idx = getattr(opt, "choice_index", None)
+                return ChooseAction(choice_index=choice_idx if choice_idx is not None else idx), _CHOOSE_START + idx
         if proceed_avail:
             return Action("proceed"), _PROCEED
         return None, None
@@ -492,7 +500,7 @@ class DemoCollector:
 
     def _handle(self, gs) -> Action:
         screen = _screen_name(gs)
-        terminal = screen in {"GAME_OVER", "VICTORY", "COMPLETE", "CREDITS"}
+        terminal = is_terminal_state(gs)
 
         if not self.initialized:
             self.initialized = True
@@ -538,6 +546,8 @@ class DemoCollector:
 
     def on_error(self, err: str) -> Action:
         log(f"COMMAND ERROR: {err}")
+        if "Possible commands" in err and "wait" in err:
+            return Action("wait")
         if "proceed" in err and "choose" in err:
             return ChooseAction(choice_index=0)
         return Action("state")

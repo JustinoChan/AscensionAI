@@ -86,7 +86,7 @@ SPINNER_CONFIG = {
     "collect": ("Workers:", 1, 8, None),
     "train":   (None, 0, 0, 0),
     "bc_ppo":  ("BC Games:", 10, 200, 50),
-    "bc":      (None, 0, 0, 0),
+    "bc":      ("BC Games:", 10, 300, 50),
     "eval":    ("Games:", 1, 100, 20),
     "logger":  (None, 0, 0, 0),
     "play":    (None, 0, 0, 0),
@@ -170,7 +170,8 @@ def write_config(command: str | None = None):
 
 
 def build_command(mode: str, worker_id: int = 1, games: int = 20,
-                  bc_games: int = 50, ent_coef: float = 0.15) -> str:
+                  bc_games: int = 50, ppo_games: int = 200,
+                  ent_coef: float = 0.15) -> str:
     py = escape_properties_path(VENV_PYTHON)
     root = escape_properties_path(ROOT)
     if mode == "worker":
@@ -178,9 +179,9 @@ def build_command(mode: str, worker_id: int = 1, games: int = 20,
     elif mode == "train":
         cmd = f"{py} {root}/scripts/train_ppo.py --save models/ppo_sts.pt --resume models/ppo_sts.pt --save-every 5 --ent-coef {ent_coef}"
     elif mode == "bc_ppo":
-        cmd = f"{py} {root}/scripts/train_bc_ppo.py --bc-games {bc_games} --ppo-games 200 --save models/ppo_sts.pt --ent-start {ent_coef}"
+        cmd = f"{py} {root}/scripts/train_bc_ppo.py --bc-games {bc_games} --ppo-games {ppo_games} --save models/ppo_sts.pt --ent-start {ent_coef}"
     elif mode == "bc":
-        cmd = f"{py} {root}/scripts/behavior_clone.py --games 50 --save models/ppo_sts.pt"
+        cmd = f"{py} {root}/scripts/behavior_clone.py --games {bc_games} --save models/ppo_sts.pt"
     elif mode == "eval":
         cmd = f"{py} {root}/scripts/eval_model.py --model models/ppo_sts.pt --games {games}"
     elif mode == "logger":
@@ -188,7 +189,8 @@ def build_command(mode: str, worker_id: int = 1, games: int = 20,
     else:
         _logger.error(f"build_command: unknown mode '{mode}'")
         cmd = ""
-    _logger.info(f"build_command(mode={mode}, worker_id={worker_id}, games={games}, bc_games={bc_games}, ent_coef={ent_coef}) -> {cmd}")
+    _logger.info(f"build_command(mode={mode}, worker_id={worker_id}, games={games}, "
+                 f"bc_games={bc_games}, ppo_games={ppo_games}, ent_coef={ent_coef}) -> {cmd}")
     return cmd
 
 
@@ -264,6 +266,8 @@ class AscensionApp:
 
         self.processes: list[subprocess.Popen] = []
         self.trainer_proc: subprocess.Popen | None = None
+        self._trainer_cmd: list[str] | None = None
+        self._with_trainer = False
         self.tailers: list[LogTailer] = []
         self.running = False
         self.worker_launcher_pids: dict[int, int] = {}
@@ -377,6 +381,22 @@ class AscensionApp:
         self.ent_help.bind("<Enter>", self._show_ent_tooltip)
         self.ent_help.bind("<Leave>", self._hide_ent_tooltip)
 
+        # BC -> PPO run-length controls.
+        self.ppo_games_row = ttk.Frame(ctrl_frame)
+        self.ppo_games_row.pack(fill="x", pady=(6, 0))
+        ttk.Label(self.ppo_games_row, text="PPO Games After BC:").pack(side="left", padx=(0, 5))
+        self.ppo_games_var = tk.IntVar(value=200)
+        self.ppo_games_spin = ttk.Spinbox(
+            self.ppo_games_row,
+            from_=0,
+            to=5000,
+            increment=25,
+            textvariable=self.ppo_games_var,
+            width=7,
+        )
+        self.ppo_games_spin.pack(side="left")
+        ttk.Label(self.ppo_games_row, text="0 = keep running").pack(side="left", padx=(8, 0))
+
         # Progress panel
         stats_frame = ttk.LabelFrame(self.root, text="  Progress  ", padding=10)
         stats_frame.pack(fill="x", **pad)
@@ -441,16 +461,27 @@ class AscensionApp:
     def _inc_workers(self):
         mode = MODES.get(self.mode_var.get(), "worker")
         _, _, hi, _ = SPINNER_CONFIG.get(mode, (None, 1, 8, None))
+        step = 10 if mode in ("bc_ppo", "bc") else 1
         v = self.workers_var.get()
         if v < hi:
-            self.workers_var.set(v + 1)
+            self.workers_var.set(min(hi, v + step))
 
     def _dec_workers(self):
         mode = MODES.get(self.mode_var.get(), "worker")
         _, lo, _, _ = SPINNER_CONFIG.get(mode, (None, 1, 8, None))
+        step = 10 if mode in ("bc_ppo", "bc") else 1
         v = self.workers_var.get()
         if v > max(1, lo):
-            self.workers_var.set(v - 1)
+            self.workers_var.set(max(max(1, lo), v - step))
+
+    def _get_ppo_games(self) -> int:
+        try:
+            value = int(self.ppo_games_var.get())
+        except (tk.TclError, ValueError):
+            value = 200
+        value = max(0, min(5000, value))
+        self.ppo_games_var.set(value)
+        return value
 
     def _inc_ent(self):
         v = round(self._ent_value + 0.01, 2)
@@ -525,6 +556,11 @@ class AscensionApp:
         else:
             self.ent_row.pack_forget()
 
+        if mode == "bc_ppo":
+            self.ppo_games_row.pack(fill="x", pady=(6, 0))
+        else:
+            self.ppo_games_row.pack_forget()
+
     # ----- Logging -----
 
     _LOG_MAX_LINES = 5000
@@ -567,13 +603,14 @@ class AscensionApp:
         if not rows:
             return None
 
+        game_rows = [r for r in rows if r.get("final_floor") not in (None, "")]
         floors, rewards, wins, best_floor, best_act = [], [], 0, 0, 0
         updates, total_transitions, total_steps = 0, 0, 0
         total_elites_fought, total_elites_won = 0, 0
         total_bosses_fought, total_bosses_won = 0, 0
         acts, victories = [], []
         parse_errors = 0
-        for r in rows:
+        for r in game_rows:
             try:
                 fl = float(r.get("final_floor") or 0)
                 floors.append(fl)
@@ -586,7 +623,13 @@ class AscensionApp:
             except Exception:
                 parse_errors += 1
             try:
-                v = int(float(r.get("victory") or 0))
+                v_raw = int(float(r.get("victory") or 0))
+                fl = float(r.get("final_floor") or 0)
+                act = int(float(r.get("final_act") or 0))
+                # Older logs incorrectly treated CommunicationMod's COMPLETE
+                # screen as a real run victory. A genuine Ironclad win should
+                # be late Act 3/4, so suppress stale impossible win rows.
+                v = 1 if v_raw and (act >= 3 or fl >= 50) else 0
                 victories.append(v)
                 if v:
                     wins += 1
@@ -625,7 +668,7 @@ class AscensionApp:
                 pass
         if parse_errors:
             _logger.debug(f"training_stats.csv: {parse_errors} field parse error(s) "
-                          f"across {len(rows)} rows")
+                          f"across {len(game_rows)} game rows")
 
         recent_n = 25
         recent_floors = floors[-recent_n:]
@@ -650,9 +693,9 @@ class AscensionApp:
                 model_age = f"{mins // 1440}d {(mins % 1440) // 60}h ago"
 
         return {
-            "total": len(rows),
+            "total": len(game_rows),
             "wins": wins,
-            "win_rate": wins / len(rows) if rows else 0.0,
+            "win_rate": wins / len(game_rows) if game_rows else 0.0,
             "recent_win_rate": recent_wins / len(victories[-recent_n:]) if victories[-recent_n:] else 0.0,
             "best_floor": int(best_floor),
             "best_act": best_act,
@@ -836,11 +879,15 @@ class AscensionApp:
             self.status_var.set("Launching single-instance training...")
             threading.Thread(target=self._launch_single, args=("train",), daemon=True).start()
         elif mode == "bc_ppo":
-            self.status_var.set(f"Launching BC\u2192PPO ({n} BC games)...")
-            threading.Thread(target=self._launch_single, args=("bc_ppo", n), daemon=True).start()
+            ppo_games = self._get_ppo_games()
+            ppo_desc = "continuous PPO" if ppo_games == 0 else f"{ppo_games} PPO games"
+            self.status_var.set(f"Launching BC\u2192PPO ({n} BC games, {ppo_desc})...")
+            threading.Thread(target=self._launch_single,
+                             args=("bc_ppo", n, ppo_games),
+                             daemon=True).start()
         elif mode == "bc":
-            self.status_var.set("Launching behavior cloning...")
-            threading.Thread(target=self._launch_single, args=("bc",), daemon=True).start()
+            self.status_var.set(f"Launching behavior cloning ({n} games)...")
+            threading.Thread(target=self._launch_single, args=("bc", n), daemon=True).start()
         elif mode == "eval":
             self.status_var.set(f"Launching evaluation ({n} games)...")
             threading.Thread(target=self._launch_single, args=("eval", n), daemon=True).start()
@@ -852,11 +899,11 @@ class AscensionApp:
             threading.Thread(target=self._launch_play, daemon=True).start()
         _logger.info(f"Launch thread started for mode={mode}")
 
-    def _launch_single(self, mode: str, games: int = 20):
-        _logger.info(f"_launch_single: mode={mode}, games={games}")
+    def _launch_single(self, mode: str, games: int = 20, ppo_games: int = 200):
+        _logger.info(f"_launch_single: mode={mode}, games={games}, ppo_games={ppo_games}")
         try:
             cmd = build_command(mode, games=games, bc_games=games,
-                               ent_coef=self._ent_value)
+                               ppo_games=ppo_games, ent_coef=self._ent_value)
             write_config(cmd)
 
             _mode_info = {
@@ -950,16 +997,26 @@ class AscensionApp:
         try:
             self.worker_launcher_pids.clear()
             self.worker_sts_pids.clear()
+            self._worker_commands.clear()
+            self._worker_restarts.clear()
+            self._worker_launch_time.clear()
+            self._n_workers = 0
+            self._with_trainer = with_trainer
+            self._trainer_cmd = None
 
             for i in range(1, n_workers + 1):
                 log_file = ROOT / "logs" / f"worker_{i}_debug.log"
+                heartbeat_file = self._worker_heartbeat_path(i)
                 try:
                     if log_file.exists():
                         _logger.debug(f"Deleting stale log: {log_file} "
                                       f"(size={log_file.stat().st_size})")
                         log_file.unlink()
+                    if heartbeat_file.exists():
+                        _logger.debug(f"Deleting stale heartbeat: {heartbeat_file}")
+                        heartbeat_file.unlink()
                 except OSError as e:
-                    _logger.warning(f"Failed to delete stale log {log_file}: {e}")
+                    _logger.warning(f"Failed to delete stale worker files for {i}: {e}")
 
             if with_trainer:
                 self._append_log("All", "Starting offline trainer...")
@@ -973,6 +1030,7 @@ class AscensionApp:
                     "--delete-consumed",
                     "--ent-coef", str(self._ent_value),
                 ]
+                self._trainer_cmd = trainer_cmd
                 _logger.info(f"Trainer command: {trainer_cmd}")
                 self.trainer_proc = subprocess.Popen(
                     trainer_cmd, cwd=str(ROOT),
@@ -1007,9 +1065,8 @@ class AscensionApp:
                 self._worker_commands[i] = cmd
                 write_config(cmd)
                 self._append_log(tab_name, f"Config written for worker {i}, launching STS...")
-                self._append_log(tab_name, "Click 'Play' in ModTheSpire when it appears.")
 
-                proc = launch_sts()
+                proc = launch_sts(skip_launcher=True)
                 self.processes.append(proc)
                 self.worker_launcher_pids[i] = proc.pid
                 self.worker_sts_pids[i] = set()
@@ -1054,23 +1111,35 @@ class AscensionApp:
 
     # ----- Worker health monitor -----
 
-    _MAX_RESTARTS = 5
+    _MAX_RESTARTS = 1000
+    _WORKER_BOOT_GRACE_SEC = 180
+    _WORKER_HEARTBEAT_TIMEOUT_SEC = 360
+    _MONITOR_INTERVAL_SEC = 30
 
     def _monitor_workers(self):
-        """Periodically check if worker processes died and relaunch them."""
+        """Periodically check workers/trainer and relaunch unhealthy pieces."""
         _logger.info("_monitor_workers: starting health check loop")
         while self.running and not getattr(self, "_graceful_stopping", False):
-            time.sleep(30.0)
+            time.sleep(self._MONITOR_INTERVAL_SEC)
             if not self.running or getattr(self, "_graceful_stopping", False):
                 break
+            self._monitor_trainer()
             for worker_id in list(self._worker_commands.keys()):
                 if not self.running:
                     break
                 launch_t = self._worker_launch_time.get(worker_id, 0)
-                if time.time() - launch_t < 180:
+                age = time.time() - launch_t
+                if age < self._WORKER_BOOT_GRACE_SEC:
                     continue
                 java_pids, py_pids = self._find_pids_for_worker(worker_id)
-                if not java_pids and not py_pids:
+                java_pids |= self._live_cached_java_pids(worker_id)
+                heartbeat_age = self._worker_heartbeat_age(worker_id)
+                missing_piece = not java_pids or not py_pids
+                stale_heartbeat = (
+                    heartbeat_age is None
+                    or heartbeat_age > self._WORKER_HEARTBEAT_TIMEOUT_SEC
+                )
+                if missing_piece or stale_heartbeat:
                     restarts = self._worker_restarts.get(worker_id, 0)
                     if restarts >= self._MAX_RESTARTS:
                         if restarts == self._MAX_RESTARTS:
@@ -1079,12 +1148,71 @@ class AscensionApp:
                                              f"Max restarts ({self._MAX_RESTARTS}) reached — not relaunching.")
                             self._worker_restarts[worker_id] = restarts + 1
                         continue
-                    _logger.warning(f"Worker {worker_id}: no processes found, relaunching (restart #{restarts + 1})")
+                    reason = (
+                        f"java={sorted(java_pids)} py={sorted(py_pids)} "
+                        f"heartbeat_age={heartbeat_age if heartbeat_age is not None else 'missing'}"
+                    )
+                    _logger.warning(f"Worker {worker_id}: unhealthy ({reason}), relaunching "
+                                    f"(restart #{restarts + 1})")
                     self._append_log(f"Worker {worker_id}",
-                                     f"Crash detected — relaunching (restart #{restarts + 1}/{self._MAX_RESTARTS})...")
+                                     f"Unhealthy worker detected — relaunching "
+                                     f"(restart #{restarts + 1}).")
+                    self._stop_single_worker(worker_id)
                     self._relaunch_worker(worker_id)
                     time.sleep(15.0)
         _logger.info("_monitor_workers: loop ended")
+
+    def _monitor_trainer(self):
+        """Restart the offline trainer if it exits during parallel training."""
+        if not self._with_trainer or self._trainer_cmd is None:
+            return
+        if self.trainer_proc is not None and self.trainer_proc.poll() is None:
+            return
+        rc = self.trainer_proc.poll() if self.trainer_proc is not None else None
+        _logger.warning(f"Offline trainer is not running (rc={rc}); restarting")
+        self._append_log("Trainer", "Offline trainer stopped — restarting...")
+        try:
+            self.trainer_proc = subprocess.Popen(
+                self._trainer_cmd, cwd=str(ROOT),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            _logger.info(f"Offline trainer restarted: PID {self.trainer_proc.pid}")
+            self._append_log("Trainer", f"Offline trainer restarted (PID {self.trainer_proc.pid})")
+        except Exception as e:
+            _logger.error(f"Failed to restart offline trainer: {e}")
+            self._append_log("Trainer", f"ERROR restarting trainer: {e}")
+
+    def _worker_heartbeat_path(self, worker_id: int) -> Path:
+        return ROOT / "logs" / f"worker_{worker_id}_heartbeat.txt"
+
+    def _worker_heartbeat_age(self, worker_id: int) -> float | None:
+        path = self._worker_heartbeat_path(worker_id)
+        try:
+            if not path.exists():
+                return None
+            return max(0.0, time.time() - path.stat().st_mtime)
+        except OSError as e:
+            _logger.warning(f"Could not stat heartbeat for worker {worker_id}: {e}")
+            return None
+
+    def _live_cached_java_pids(self, worker_id: int) -> set[int]:
+        try:
+            import psutil
+        except ImportError:
+            return set()
+        live: set[int] = set()
+        for pid in set(self.worker_sts_pids.get(worker_id, set())):
+            try:
+                p = psutil.Process(pid)
+                if p.is_running() and p.status() != psutil.STATUS_ZOMBIE:
+                    live.add(pid)
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        if live:
+            self.worker_sts_pids[worker_id] = live
+        return live
 
     def _relaunch_worker(self, worker_id: int):
         """Relaunch a single crashed worker using --skip-launcher."""
@@ -1536,6 +1664,8 @@ class AscensionApp:
         else:
             _logger.debug("No trainer process to stop")
         self.trainer_proc = None
+        self._trainer_cmd = None
+        self._with_trainer = False
 
         closed = 0
         _logger.info(f"Killing {len(self.processes)} tracked launcher process(es)")
@@ -1548,6 +1678,10 @@ class AscensionApp:
             else:
                 _logger.debug(f"Launcher PID {proc.pid} already exited (rc={poll})")
         self.processes.clear()
+        self.worker_launcher_pids.clear()
+        self.worker_sts_pids.clear()
+        self._worker_commands.clear()
+        self._worker_launch_time.clear()
 
         java_orphans = self._kill_orphan_sts_instances()
         py_orphans = self._kill_orphan_python_scripts()

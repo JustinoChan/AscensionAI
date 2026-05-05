@@ -62,7 +62,7 @@ from spirecomm.spire.character import PlayerClass
 from obs_encoder import OBS_SIZE, encode_game_state
 from sts_gym_env import (
     NUM_ACTIONS, compute_action_mask, flat_action_to_spire_action,
-    RewardTracker,
+    RewardTracker, is_terminal_state, is_victory_state,
 )
 from ppo_model import PPOTrainer
 from screen_handler import auto_handle_screen
@@ -138,12 +138,9 @@ class EvalAgent:
     def _handle(self, gs) -> Action:
         st = getattr(gs, "screen_type", None)
         screen_name = str(getattr(st, "name", st) or "NONE")
-        terminal = screen_name in {"GAME_OVER", "VICTORY", "COMPLETE", "CREDITS"}
+        terminal = is_terminal_state(gs)
 
-        victory = False
-        if terminal:
-            scr = getattr(gs, "screen", None)
-            victory = bool(getattr(scr, "victory", False)) or screen_name in {"COMPLETE", "VICTORY"}
+        victory = is_victory_state(gs)
 
         if not self.initialized:
             self.reward_tracker.reset(gs)
@@ -219,6 +216,8 @@ class EvalAgent:
 
     def on_error(self, err: str) -> Action:
         log(f"COMMAND ERROR: {err}")
+        if "Possible commands" in err and "wait" in err:
+            return Action("wait")
         if "proceed" in err and "choose" in err:
             return ChooseAction(choice_index=0)
         return Action("state")

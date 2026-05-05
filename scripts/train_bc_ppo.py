@@ -66,7 +66,7 @@ STATS_CSV = os.path.join(_root, "logs", "training_stats.csv")
 _STATS_COLUMNS = [
     "timestamp", "game", "total_updates", "steps", "transitions",
     "total_reward", "final_hp", "final_max_hp", "final_floor", "final_act",
-    "victory", "terminated", "pg_loss", "vf_loss", "entropy",
+    "victory", "terminated", "pg_loss", "vf_loss", "entropy", "worker",
     "elites_fought", "elites_won", "bosses_fought", "bosses_won",
 ]
 
@@ -108,7 +108,7 @@ from spirecomm.spire.character import PlayerClass
 from obs_encoder import OBS_SIZE, encode_game_state
 from sts_gym_env import (
     NUM_ACTIONS, compute_action_mask, flat_action_to_spire_action,
-    RewardTracker, _NOOP,
+    RewardTracker, _NOOP, is_terminal_state, is_victory_state,
 )
 from ppo_model import PPOTrainer, GameBuffer
 from screen_handler import auto_handle_screen
@@ -242,6 +242,8 @@ class BCPPOAgent:
 
     def on_error(self, err: str) -> Action:
         log(f"COMMAND ERROR: {err}")
+        if "Possible commands" in err and "wait" in err:
+            return Action("wait")
         if "proceed" in err and "choose" in err:
             return ChooseAction(choice_index=0)
         return Action("state")
@@ -258,7 +260,7 @@ class BCPPOAgent:
 
     def _bc_step_inner(self, gs) -> Action:
         screen = self._screen_name(gs)
-        terminal = screen in {"GAME_OVER", "VICTORY", "COMPLETE", "CREDITS"}
+        terminal = is_terminal_state(gs)
 
         if not self.bc_initialized:
             self.bc_initialized = True
@@ -270,11 +272,7 @@ class BCPPOAgent:
             self.total_games += 1
             self.bc_initialized = False
 
-            victory = False
-            scr_obj = getattr(gs, "screen", None)
-            if scr_obj:
-                victory = (bool(getattr(scr_obj, "victory", False))
-                           or screen in {"COMPLETE", "VICTORY"})
+            victory = is_victory_state(gs)
 
             log(f"BC game #{self.bc_games_done} ended: "
                 f"floor={getattr(gs, 'floor', '?')} victory={victory} "
@@ -443,13 +441,9 @@ class BCPPOAgent:
         mask = compute_action_mask(gs)
 
         screen = self._screen_name(gs)
-        terminal = screen in {"GAME_OVER", "VICTORY", "COMPLETE", "CREDITS"}
+        terminal = is_terminal_state(gs)
 
-        victory = False
-        if terminal:
-            scr_obj = getattr(gs, "screen", None)
-            victory = (bool(getattr(scr_obj, "victory", False))
-                       or screen in {"COMPLETE", "VICTORY"})
+        victory = is_victory_state(gs)
 
         # First state of the game
         if not self.ppo_initialized:

@@ -85,30 +85,70 @@ def load_npz_files(data_dir: str, consumed: set) -> List[str]:
     """Find new .npz files not yet consumed."""
     pattern = os.path.join(data_dir, "*.npz")
     all_files = sorted(glob.glob(pattern))
-    return [f for f in all_files if f not in consumed]
+    ready: List[str] = []
+    now = time.time()
+    for f in all_files:
+        if f in consumed or f.endswith(".tmp.npz"):
+            continue
+        try:
+            if now - os.path.getmtime(f) < 2.0:
+                continue
+        except OSError:
+            continue
+        ready.append(f)
+    return ready
 
 
 def load_transitions(paths: List[str]) -> tuple:
-    """Merge multiple .npz files into one GameBuffer. Returns (buf, loaded_paths)."""
+    """Merge multiple .npz files into one GameBuffer.
+
+    Returns (buf, loaded_paths, failed_paths).
+    """
     buf = GameBuffer()
     loaded: List[str] = []
+    failed: List[str] = []
     for p in paths:
         try:
-            data = np.load(p, allow_pickle=False)
-            obs = data["observations"]
-            acts = data["actions"]
-            rews = data["rewards"]
-            dones = data["dones"]
-            masks = data["action_masks"]
-            lps = data["log_probs"]
-            vals = data["values"]
-            for i in range(len(obs)):
-                buf.add(obs[i], int(acts[i]), float(rews[i]), bool(dones[i]),
-                        masks[i], float(lps[i]), float(vals[i]))
+            with np.load(p, allow_pickle=False) as data:
+                obs = data["observations"]
+                acts = data["actions"]
+                rews = data["rewards"]
+                dones = data["dones"]
+                masks = data["action_masks"]
+                lps = data["log_probs"]
+                vals = data["values"]
+                n = len(obs)
+                lengths = [len(acts), len(rews), len(dones), len(masks), len(lps), len(vals)]
+                if any(x != n for x in lengths):
+                    raise ValueError(f"array length mismatch: obs={n}, others={lengths}")
+                for i in range(n):
+                    buf.add(obs[i], int(acts[i]), float(rews[i]), bool(dones[i]),
+                            masks[i], float(lps[i]), float(vals[i]))
             loaded.append(p)
         except Exception as e:
             log(f"Failed to load {p}: {e}")
-    return buf, loaded
+            failed.append(p)
+    return buf, loaded, failed
+
+
+def retire_file(path: str, suffix: str) -> None:
+    """Move a rollout out of the trainer glob so it does not block future batches."""
+    try:
+        target = path + suffix
+        if os.path.exists(target):
+            target = f"{path}.{int(time.time())}{suffix}"
+        os.replace(path, target)
+        log(f"Retired {path} -> {target}")
+    except OSError as e:
+        log(f"Failed to retire {path}: {e}")
+
+
+def delete_files(paths: List[str]) -> None:
+    for f in paths:
+        try:
+            os.remove(f)
+        except OSError as e:
+            log(f"Failed to delete {f}: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -157,7 +197,7 @@ def main():
 
     consumed: set = set()
     total_transitions = 0
-    total_updates = 0
+    total_updates = int(getattr(trainer, "total_updates", 0) or 0)
 
     log("Entering training loop (Ctrl+C to stop)...")
 
@@ -172,20 +212,29 @@ def main():
             batch_files = new_files[:args.batch_games]
             log(f"Loading {len(batch_files)} new game files...")
 
-            buf, loaded = load_transitions(batch_files)
+            buf, loaded, failed = load_transitions(batch_files)
             n = len(buf)
+
+            for f in failed:
+                consumed.add(f)
+                retire_file(f, ".bad")
 
             for f in loaded:
                 consumed.add(f)
 
             if n < 10:
                 log(f"Too few transitions ({n}), skipping update")
+                if args.delete_consumed:
+                    delete_files(loaded)
+                else:
+                    for f in loaded:
+                        retire_file(f, ".short")
                 continue
 
             log(f"Running PPO update on {n} transitions...")
             stats = trainer.update(buf)
             total_transitions += n
-            total_updates += 1
+            total_updates = int(getattr(trainer, "total_updates", total_updates + 1) or 0)
 
             if stats:
                 log(f"Update #{total_updates}: pg={stats['pg_loss']:.4f} "
@@ -204,11 +253,7 @@ def main():
             trainer.save(model_path)
 
             if args.delete_consumed:
-                for f in loaded:
-                    try:
-                        os.remove(f)
-                    except OSError:
-                        pass
+                delete_files(loaded)
 
     except KeyboardInterrupt:
         log("Interrupted. Saving final model...")

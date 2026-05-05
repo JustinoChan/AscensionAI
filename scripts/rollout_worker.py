@@ -54,13 +54,16 @@ import torch
 
 _worker_id = "?"
 DEBUG_LOG = None
+HEARTBEAT_FILE = None
+_last_heartbeat = 0.0
 VERBOSE = os.environ.get("ASCENSION_VERBOSE", "0") == "1"
 
 def _init_log(worker_id: str):
-    global DEBUG_LOG, _worker_id
+    global DEBUG_LOG, HEARTBEAT_FILE, _worker_id
     _worker_id = worker_id
     os.makedirs(os.path.join(_root, "logs"), exist_ok=True)
     DEBUG_LOG = os.path.join(_root, "logs", f"worker_{worker_id}_debug.log")
+    HEARTBEAT_FILE = os.path.join(_root, "logs", f"worker_{worker_id}_heartbeat.txt")
 
 def log(msg: str):
     if DEBUG_LOG is None:
@@ -69,6 +72,32 @@ def log(msg: str):
         with open(DEBUG_LOG, "a", encoding="utf-8") as f:
             f.write(f"{datetime.now().isoformat()}  [W{_worker_id}] {msg}\n")
             f.flush()
+    except Exception:
+        pass
+
+
+def heartbeat(gs) -> None:
+    """Write a lightweight liveness marker for the GUI health monitor."""
+    global _last_heartbeat
+    if HEARTBEAT_FILE is None:
+        return
+    now = time.time()
+    if now - _last_heartbeat < 15.0:
+        return
+    _last_heartbeat = now
+    try:
+        st = getattr(gs, "screen_type", None)
+        screen_name = str(getattr(st, "name", st) or "NONE")
+        line = (
+            f"{now:.3f}\t{datetime.now().isoformat()}\t"
+            f"worker={_worker_id}\tscreen={screen_name}\t"
+            f"floor={getattr(gs, 'floor', '?')}\t"
+            f"hp={getattr(gs, 'current_hp', '?')}/{getattr(gs, 'max_hp', '?')}\n"
+        )
+        tmp = HEARTBEAT_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(line)
+        os.replace(tmp, HEARTBEAT_FILE)
     except Exception:
         pass
 
@@ -82,6 +111,7 @@ from obs_encoder import OBS_SIZE, encode_game_state, living_monsters
 from sts_gym_env import (
     NUM_ACTIONS, compute_action_mask, flat_action_to_spire_action,
     RewardTracker, _NOOP, _CHOOSE_START, _PROCEED, _LEAVE,
+    is_terminal_state, is_victory_state,
 )
 from ppo_model import PPOTrainer
 from screen_handler import auto_handle_screen
@@ -121,6 +151,17 @@ def _dump_stuck_state(gs, screen_name: str, worker_id: str, stuck_count: int,
         if scr:
             lines.append(f"  screen attrs: confirm_up={getattr(scr, 'confirm_up', None)} "
                          f"can_pick_zero={getattr(scr, 'can_pick_zero', None)}")
+            if screen_name == "EVENT":
+                options = list(getattr(scr, "options", []) or [])
+                opt_info = [
+                    (getattr(o, "label", None), getattr(o, "text", None),
+                     getattr(o, "disabled", None), getattr(o, "choice_index", None))
+                    for o in options[:10]
+                ]
+                lines.append(f"  event: name={getattr(scr, 'event_name', None)} "
+                             f"id={getattr(scr, 'event_id', None)} "
+                             f"body={getattr(scr, 'body_text', None)!r}")
+                lines.append(f"  event options: {opt_info}")
         if hand:
             card_info = [(getattr(c, "name", "?"), getattr(c, "is_playable", "?"),
                           getattr(c, "cost", "?")) for c in hand[:10]]
@@ -322,7 +363,8 @@ class WorkerAgent:
 
         screen_type = getattr(gs, "screen_type", None)
         screen_name = str(getattr(screen_type, "name", screen_type) or "NONE")
-        terminal = screen_name in {"GAME_OVER", "VICTORY", "COMPLETE", "CREDITS"}
+        terminal = is_terminal_state(gs)
+        heartbeat(gs)
 
         if VERBOSE:
             choice_list = list(getattr(gs, "choice_list", []) or [])
@@ -404,10 +446,7 @@ class WorkerAgent:
             })
             self._in_boss = False
 
-        victory = False
-        if terminal:
-            scr_obj = getattr(gs, "screen", None)
-            victory = bool(getattr(scr_obj, "victory", False)) or screen_name in {"COMPLETE", "VICTORY"}
+        victory = is_victory_state(gs)
 
         if not self.initialized:
             self.reward_tracker.reset(gs)
@@ -457,10 +496,9 @@ class WorkerAgent:
                 if cancel_avail:
                     return Action("leave")
                 if self._stuck_count >= self._STUCK_HARD_LIMIT:
-                    log(f"HARD STUCK ({self._stuck_count} iters) on {screen_name} — forcing game end")
-                    self._end_game(final_gs=gs, victory=False)
-                    return StartGameAction(player_class=PlayerClass.IRONCLAD,
-                                           ascension_level=0)
+                    log(f"HARD STUCK ({self._stuck_count} iters) on {screen_name} — polling state")
+                    self._stuck_count = 0
+                    return Action("state")
             return auto
 
         action, log_prob, value = self.trainer.predict(obs, mask)
@@ -477,10 +515,9 @@ class WorkerAgent:
                 _dump_stuck_state(gs, screen_name, self.worker_id,
                                   self._stuck_count, self._recent_actions)
                 self._stuck_dumped_key = self._stuck_key
-            log(f"HARD STUCK RL ({self._stuck_count} iters) on {screen_name} — forcing game end")
-            self._end_game(final_gs=gs, victory=False)
-            return StartGameAction(player_class=PlayerClass.IRONCLAD,
-                                   ascension_level=0)
+            log(f"HARD STUCK RL ({self._stuck_count} iters) on {screen_name} — polling state")
+            self._stuck_count = 0
+            return Action("state")
 
         if VERBOSE:
             log(f"  -> RL: action={action} ({spire_action.command}) "
@@ -496,7 +533,7 @@ class WorkerAgent:
         return spire_action
 
     def _auto_handle_screen(self, gs, screen_name: str) -> Optional[Action]:
-        return auto_handle_screen(gs, screen_name, heuristic_all=True)
+        return auto_handle_screen(gs, screen_name, heuristic_all=False)
 
     def _end_game(self, final_gs=None, victory: bool = False):
         self.total_games += 1
@@ -567,6 +604,8 @@ class WorkerAgent:
 
     def on_error(self, err: str) -> Action:
         log(f"COMMAND ERROR: {err}")
+        if "Possible commands" in err and "wait" in err:
+            return Action("wait")
         if "proceed" in err and "choose" in err:
             return ChooseAction(choice_index=0)
         return Action("state")

@@ -37,6 +37,7 @@ models/
 
 # Training data & rollouts
 rollouts_shared/
+archives/
 *.jsonl
 *.npz
 *.npy
