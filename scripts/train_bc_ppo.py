@@ -61,6 +61,7 @@ import torch
 os.makedirs(os.path.join(_root, "logs"), exist_ok=True)
 DEBUG_LOG = os.path.join(_root, "logs", "train_bc_ppo_debug.log")
 STATS_CSV = os.path.join(_root, "logs", "training_stats.csv")
+VERBOSE = os.environ.get("ASCENSION_VERBOSE", "0") == "1"
 
 # Same columns as train_ppo.py for plot_training.py compatibility
 _STATS_COLUMNS = [
@@ -78,6 +79,70 @@ def log(msg: str):
             f.flush()
     except Exception:
         pass
+
+
+def _action_desc(action: Action) -> str:
+    command = str(getattr(action, "command", type(action).__name__))
+    parts = [command]
+    for attr in ("choice_index", "name"):
+        if hasattr(action, attr):
+            parts.append(f"{attr}={getattr(action, attr)}")
+    return " ".join(parts)
+
+
+def _state_desc(gs, screen: str | None = None) -> str:
+    screen = screen or _screen_name(gs)
+    choice_list = list(getattr(gs, "choice_list", []) or [])
+    scr = getattr(gs, "screen", None)
+    selected = list(getattr(scr, "selected_cards", []) or []) if scr else []
+    selected_names = [str(getattr(c, "name", c)) for c in selected[:6]]
+    flags = []
+    for flag in ("proceed_available", "cancel_available", "play_available", "end_available"):
+        if bool(getattr(gs, flag, False)):
+            flags.append(flag.replace("_available", ""))
+    details = [
+        f"screen={screen}",
+        f"floor={getattr(gs, 'floor', '?')}",
+        f"act={getattr(gs, 'act', '?')}",
+        f"hp={getattr(gs, 'current_hp', '?')}/{getattr(gs, 'max_hp', '?')}",
+        f"gold={getattr(gs, 'gold', '?')}",
+        f"combat={bool(getattr(gs, 'in_combat', False))}",
+        f"legal_flags={'+'.join(flags) if flags else 'none'}",
+        f"choices={len(choice_list)}",
+    ]
+    current_action = str(getattr(gs, "current_action", "") or "")
+    if current_action:
+        details.append(f"current_action={current_action!r}")
+    if choice_list:
+        details.append(f"choice_list={[str(c) for c in choice_list[:8]]}")
+    if selected_names:
+        details.append(f"selected={selected_names}")
+    if scr is not None and screen in {"GRID", "HAND_SELECT"}:
+        details.append(
+            "grid_flags="
+            f"num={getattr(scr, 'num_cards', None)} "
+            f"any={getattr(scr, 'any_number', None)} "
+            f"confirm={getattr(scr, 'confirm_up', None)} "
+            f"upgrade={getattr(scr, 'for_upgrade', None)} "
+            f"transform={getattr(scr, 'for_transform', None)} "
+            f"purge={getattr(scr, 'for_purge', None)}"
+        )
+    if scr is not None and screen == "EVENT":
+        opts = []
+        for opt in list(getattr(scr, "options", []) or [])[:8]:
+            opts.append({
+                "label": getattr(opt, "label", None),
+                "disabled": getattr(opt, "disabled", None),
+                "choice_index": getattr(opt, "choice_index", None),
+            })
+        details.append(f"event={getattr(scr, 'event_id', None)} options={opts}")
+    return " ".join(details)
+
+
+def _screen_name(gs) -> str:
+    st = getattr(gs, "screen_type", None)
+    name = getattr(st, "name", st) if st is not None else "NONE"
+    return str(name) if name else "NONE"
 
 
 def _init_stats_csv() -> None:
@@ -118,7 +183,7 @@ from behavior_clone import heuristic_action
 # _coord_module.write_stdout with a version that uses stderr)
 _coord_module.write_stdout = _patched_write_stdout
 
-log("Imports done")
+log(f"Imports done (verbose={'on' if VERBOSE else 'off'})")
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +246,7 @@ class BCPPOAgent:
         self.demo_masks: List[np.ndarray] = []
         self.bc_games_done = 0
         self.bc_steps = 0
+        self.bc_skipped_samples = 0
         self.bc_initialized = False
 
         # --- PPO trainer (created after BC, or loaded from checkpoint) ---
@@ -212,6 +278,7 @@ class BCPPOAgent:
         self.prev_mask: Optional[np.ndarray] = None
         self._stuck_floor: int = -1
         self._stuck_count: int = 0
+        self._last_issue_key: str = ""
 
     # ------------------------------------------------------------------
     # Coordinator callbacks
@@ -242,6 +309,8 @@ class BCPPOAgent:
 
     def on_error(self, err: str) -> Action:
         log(f"COMMAND ERROR: {err}")
+        log(f"COMMAND ERROR CONTEXT: phase={self.phase} "
+            f"bc_steps={self.bc_steps} ppo_steps={self.ppo_steps}")
         if "Possible commands" in err and "wait" in err:
             return Action("wait")
         if "proceed" in err and "choose" in err:
@@ -276,7 +345,7 @@ class BCPPOAgent:
 
             log(f"BC game #{self.bc_games_done} ended: "
                 f"floor={getattr(gs, 'floor', '?')} victory={victory} "
-                f"samples={len(self.demo_obs)}")
+                f"samples={len(self.demo_obs)} skipped={self.bc_skipped_samples}")
 
             # Log BC game stats (no PPO losses yet)
             _append_stats_csv({
@@ -303,20 +372,39 @@ class BCPPOAgent:
         # --- Heuristic plays, we record (obs, action, mask) ---
         spire_action, action_id = heuristic_action(gs)
         if spire_action is None or action_id is None:
+            self.bc_steps += 1
+            self.bc_skipped_samples += 1
+            log(f"BC ISSUE no heuristic action: step={self.bc_steps} "
+                f"skipped={self.bc_skipped_samples} {_state_desc(gs, screen)}")
             return Action("state")
 
         obs = encode_game_state(gs)
         mask = compute_action_mask(gs)
 
         # Only record if the heuristic's action is legal under our mask
-        if action_id < NUM_ACTIONS and mask[action_id]:
+        in_range = 0 <= int(action_id) < NUM_ACTIONS
+        legal = bool(mask[action_id]) if in_range else False
+        if legal:
             self.demo_obs.append(obs)
             self.demo_actions.append(action_id)
             self.demo_masks.append(mask)
+        else:
+            self.bc_skipped_samples += 1
+            log(f"BC ISSUE skipped illegal demo sample: step={self.bc_steps + 1} "
+                f"action_id={action_id} in_range={in_range} "
+                f"legal_count={int(mask.sum())} action={_action_desc(spire_action)} "
+                f"{_state_desc(gs, screen)}")
 
         self.bc_steps += 1
-        if self.bc_steps % 100 == 0:
+        if VERBOSE:
+            log(f"BC STEP {self.bc_steps}: game={self.bc_games_done + 1}/{self.bc_games} "
+                f"samples={len(self.demo_obs)} skipped={self.bc_skipped_samples} "
+                f"recorded={int(legal)} action_id={action_id} "
+                f"legal_count={int(mask.sum())} action={_action_desc(spire_action)} "
+                f"{_state_desc(gs, screen)}")
+        elif self.bc_steps % 100 == 0:
             log(f"  BC step={self.bc_steps} samples={len(self.demo_obs)} "
+                f"skipped={self.bc_skipped_samples} "
                 f"games={self.bc_games_done}/{self.bc_games}")
 
         return spire_action
@@ -326,7 +414,8 @@ class BCPPOAgent:
     # ------------------------------------------------------------------
     def _transition_to_ppo(self):
         n = len(self.demo_obs)
-        log(f"=== TRANSITION: BC -> PPO ({n} demos from {self.bc_games_done} games) ===")
+        log(f"=== TRANSITION: BC -> PPO ({n} demos from {self.bc_games_done} games, "
+            f"{self.bc_skipped_samples} skipped samples) ===")
 
         # Create trainer with BC learning rate for supervised phase
         self.trainer = PPOTrainer(
@@ -464,19 +553,30 @@ class BCPPOAgent:
         # Store transition for the PREVIOUS RL action
         if self.prev_action is not None:
             total_reward = self.pending_reward + reward
+            prev_action = self.prev_action
             self.buffer.add(
                 obs=self.prev_obs,
-                action=self.prev_action,
+                action=prev_action,
                 reward=total_reward,
                 done=terminal,
                 mask=self.prev_mask,
                 log_prob=self.prev_log_prob,
                 value=self.prev_value,
             )
+            if VERBOSE:
+                log(f"PPO TRANSITION: game={self.ppo_games_done + 1} "
+                    f"prev_action={prev_action} reward={total_reward:.3f} "
+                    f"done={terminal} buffer={len(self.buffer)} "
+                    f"pending_before={self.pending_reward:.3f} immediate={reward:.3f} "
+                    f"{_state_desc(gs, screen)}")
             self.prev_action = None
             self.pending_reward = 0.0
         else:
             self.pending_reward += reward
+            if VERBOSE and abs(reward) > 1e-6:
+                log(f"PPO PENDING REWARD: game={self.ppo_games_done + 1} "
+                    f"pending={self.pending_reward:.3f} immediate={reward:.3f} "
+                    f"{_state_desc(gs, screen)}")
 
         # Game over — train and dismiss
         if terminal:
@@ -492,6 +592,10 @@ class BCPPOAgent:
         if auto is not None:
             self._stuck_count = 0
             self.ppo_steps += 1
+            if VERBOSE:
+                log(f"PPO AUTO STEP {self.ppo_steps}: game={self.ppo_games_done + 1} "
+                    f"pending_reward={self.pending_reward:.3f} "
+                    f"action={_action_desc(auto)} {_state_desc(gs, screen)}")
             return auto
 
         # Stuck detection
@@ -505,7 +609,8 @@ class BCPPOAgent:
         if self._stuck_count >= 30:
             self._stuck_count = 0
             choice_list = list(getattr(gs, "choice_list", []) or [])
-            log(f"  STUCK on {screen} floor={cur_floor}, forcing action")
+            log(f"PPO ISSUE stuck on {screen} floor={cur_floor}, forcing action: "
+                f"{_state_desc(gs, screen)}")
             if getattr(gs, "proceed_available", False):
                 return Action("proceed")
             if getattr(gs, "cancel_available", False):
@@ -515,6 +620,12 @@ class BCPPOAgent:
             return Action("proceed")
 
         # RL policy picks the action
+        if int(mask.sum()) <= 1 and bool(mask[_NOOP]):
+            issue_key = f"{screen}:{cur_floor}:noop_only"
+            if issue_key != self._last_issue_key:
+                log(f"PPO ISSUE only no-op legal before policy action: "
+                    f"{_state_desc(gs, screen)}")
+                self._last_issue_key = issue_key
         action, log_prob, value = self.trainer.predict(obs, mask)
         spire_action = flat_action_to_spire_action(action, gs)
 
@@ -525,7 +636,7 @@ class BCPPOAgent:
         self.prev_mask = mask
         self.ppo_steps += 1
 
-        if self.ppo_steps % 5 == 1 or self.ppo_steps <= 3:
+        if VERBOSE or self.ppo_steps % 5 == 1 or self.ppo_steps <= 3:
             n_legal = int(mask.sum())
             floor = getattr(gs, "floor", "?")
             hp = getattr(gs, "current_hp", "?")
@@ -533,9 +644,13 @@ class BCPPOAgent:
             action_str = (str(spire_action.command)
                           if hasattr(spire_action, "command")
                           else type(spire_action).__name__)
-            log(f"  step={self.ppo_steps} floor={floor} hp={hp} screen={screen} "
-                f"combat={in_combat} legal={n_legal} "
-                f"action={action}->{action_str} r={reward:.3f}")
+            prefix = "PPO STEP" if VERBOSE else "  step"
+            log(f"{prefix} {self.ppo_steps}: game={self.ppo_games_done + 1} "
+                f"floor={floor} hp={hp} screen={screen} "
+                f"combat={in_combat} legal={n_legal} action={action}->{action_str} "
+                f"log_prob={log_prob:.3f} value={value:.3f} "
+                f"reward_now={reward:.3f} pending={self.pending_reward:.3f} "
+                f"{_state_desc(gs, screen) if VERBOSE else ''}".rstrip())
 
         return spire_action
 
@@ -671,7 +786,7 @@ def main():
     log(f"Config: bc_games={args.bc_games} bc_epochs={args.bc_epochs} "
         f"bc_lr={args.bc_lr} ppo_games={args.ppo_games} ppo_lr={args.ppo_lr} "
         f"ent={args.ent_start}->{args.ent_end} clip={args.clip} "
-        f"resume={args.resume}")
+        f"resume={args.resume} verbose={VERBOSE}")
 
     agent = BCPPOAgent(
         bc_games=args.bc_games,
