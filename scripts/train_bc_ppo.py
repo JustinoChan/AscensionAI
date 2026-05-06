@@ -176,7 +176,7 @@ from sts_gym_env import (
     RewardTracker, _NOOP, is_terminal_state, is_victory_state,
 )
 from ppo_model import PPOTrainer, GameBuffer
-from screen_handler import auto_handle_screen
+from screen_handler import auto_handle_screen, recover_from_command_error
 from behavior_clone import heuristic_action
 
 # Re-patch after behavior_clone import (its module-level code overwrites
@@ -311,11 +311,7 @@ class BCPPOAgent:
         log(f"COMMAND ERROR: {err}")
         log(f"COMMAND ERROR CONTEXT: phase={self.phase} "
             f"bc_steps={self.bc_steps} ppo_steps={self.ppo_steps}")
-        if "Possible commands" in err and "wait" in err:
-            return Action("wait")
-        if "proceed" in err and "choose" in err:
-            return ChooseAction(choice_index=0)
-        return Action("state")
+        return recover_from_command_error(err)
 
     # ------------------------------------------------------------------
     # Phase 1: BC demonstration collection
@@ -740,6 +736,7 @@ class BCPPOAgent:
 # Main
 # ---------------------------------------------------------------------------
 def main():
+    global VERBOSE
     parser = argparse.ArgumentParser(
         description="End-to-end BC warm-start -> PPO fine-tuning for STS")
 
@@ -775,8 +772,11 @@ def main():
                      help="Resume from checkpoint (skips BC phase)")
     gen.add_argument("--games-per-update", type=int, default=4,
                      help="Accumulate N games of PPO transitions per update (default: 4)")
+    gen.add_argument("--verbose", action="store_true",
+                     help="Write detailed per-state/per-action debug logs")
 
     args = parser.parse_args()
+    VERBOSE = VERBOSE or args.verbose
 
     save_path = os.path.join(_root, args.save)
     os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)

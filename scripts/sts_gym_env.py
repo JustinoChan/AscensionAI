@@ -98,6 +98,10 @@ def compute_action_mask(gs: Any) -> np.ndarray:
     potion_avail = bool(getattr(gs, "potion_available", False))
     proceed_avail = bool(getattr(gs, "proceed_available", False))
     cancel_avail = bool(getattr(gs, "cancel_available", False))
+    available_commands = set(getattr(gs, "available_commands", []) or [])
+    if available_commands:
+        proceed_avail = bool({"proceed", "confirm"} & available_commands)
+        cancel_avail = bool({"cancel", "leave", "return", "skip"} & available_commands)
 
     alive = living_monsters(monsters)
     n_alive = len(alive)
@@ -139,6 +143,7 @@ def compute_action_mask(gs: Any) -> np.ndarray:
                       and scr is not None
                       and getattr(scr, "confirm_up", False))
 
+    n_choices = len(choice_list)
     if not grid_confirmed:
         potions_full = bool(getattr(gs, "are_potions_full", lambda: False)())
 
@@ -146,7 +151,6 @@ def compute_action_mask(gs: Any) -> np.ndarray:
         # may be empty even when rewards are available.
         combat_rewards = (list(getattr(scr, "rewards", []) or [])
                           if st_name == "COMBAT_REWARD" and scr else [])
-        n_choices = len(choice_list)
         if st_name == "COMBAT_REWARD" and not n_choices and combat_rewards:
             n_choices = len(combat_rewards)
         event_options = list(getattr(scr, "options", []) or []) if st_name == "EVENT" and scr else []
@@ -168,10 +172,25 @@ def compute_action_mask(gs: Any) -> np.ndarray:
                     continue
             mask[_CHOOSE_START + idx] = True
 
-    if proceed_avail:
+    suppress_proceed = (
+        (st_name == "MAP" and n_choices > 0)
+        or (st_name == "COMBAT_REWARD" and n_choices > 0)
+        or (st_name == "BOSS_REWARD" and n_choices > 0)
+    )
+    suppress_cancel = (
+        # Closing the map after combat bounces back to the reward screen,
+        # creating a proceed -> map -> return loop. Autonomous agents should
+        # choose a node once map choices are present.
+        (st_name == "MAP" and n_choices > 0)
+        # Boss relics are mandatory. Leaving returns to the boss chest, which
+        # reopens the relic screen and can trap the agent forever.
+        or (st_name == "BOSS_REWARD" and n_choices > 0)
+    )
+
+    if proceed_avail and not suppress_proceed:
         mask[_PROCEED] = True
 
-    if cancel_avail:
+    if cancel_avail and not suppress_cancel:
         mask[_LEAVE] = True
 
     if not mask.any():
@@ -228,16 +247,23 @@ def flat_action_to_spire_action(action_id: int, gs: Any) -> Action:
         scr = getattr(gs, "screen", None)
         if st_name == "EVENT" and scr is not None:
             options = list(getattr(scr, "options", []) or [])
-            if not getattr(gs, "choice_list", None) and choice_idx < len(options):
+            if choice_idx < len(options):
                 opt_idx = getattr(options[choice_idx], "choice_index", None)
                 if opt_idx is not None:
                     return ChooseAction(choice_index=opt_idx)
         return ChooseAction(choice_index=choice_idx)
 
     if action_id == _PROCEED:
+        commands = set(getattr(gs, "available_commands", []) or [])
+        if "confirm" in commands and "proceed" not in commands:
+            return Action("confirm")
         return Action("proceed")
 
     if action_id == _LEAVE:
+        commands = set(getattr(gs, "available_commands", []) or [])
+        for cmd in ("cancel", "leave", "return", "skip"):
+            if cmd in commands:
+                return Action(cmd)
         return Action("leave")
 
     return Action("state")

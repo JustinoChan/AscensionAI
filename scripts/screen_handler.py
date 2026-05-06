@@ -9,6 +9,7 @@ Provides:
 """
 from __future__ import annotations
 
+import re
 from collections import Counter
 from typing import Optional
 
@@ -123,28 +124,138 @@ def pick_card_reward(choice_list: list, gs=None) -> int:
     return best_idx
 
 
-def pick_combat_reward_obj(rewards: list, potions_full: bool = False) -> int:
+_CARD_REWARD_OPEN_KEYS: set[tuple[int, int]] = set()
+_SHOP_VISITED_KEYS: set[tuple[int, int]] = set()
+_LAST_SCREEN_POS: tuple[int, int] | None = None
+
+
+def _screen_memory_key(gs) -> tuple[int, int]:
+    return (
+        int(getattr(gs, "act", 0) or 0),
+        int(getattr(gs, "floor", -1) or -1),
+    )
+
+
+def _reset_screen_memory_if_new_run(gs) -> None:
+    """Clear per-run screen memory when a worker starts a new run."""
+    global _LAST_SCREEN_POS
+    pos = _screen_memory_key(gs)
+    if _LAST_SCREEN_POS is not None:
+        last_act, last_floor = _LAST_SCREEN_POS
+        act, floor = pos
+        if floor <= 1 and last_floor > 1:
+            _CARD_REWARD_OPEN_KEYS.clear()
+            _SHOP_VISITED_KEYS.clear()
+            _MATCH_MEMORY.clear()
+        elif act < last_act or (act == last_act and floor < last_floor):
+            _CARD_REWARD_OPEN_KEYS.clear()
+            _SHOP_VISITED_KEYS.clear()
+            _MATCH_MEMORY.clear()
+    _LAST_SCREEN_POS = pos
+
+
+def _reward_type_name(reward) -> str:
+    rt = getattr(reward, "reward_type", None)
+    return str(getattr(rt, "name", rt) or "").upper()
+
+
+def pick_combat_reward_obj(
+    rewards: list,
+    potions_full: bool = False,
+    skip_card: bool = False,
+) -> int:
     """Pick reward from CombatReward objects. Returns -1 if nothing pickable."""
     for p in ("RELIC", "SAPPHIRE_KEY", "EMERALD_KEY",
               "GOLD", "STOLEN_GOLD", "POTION", "CARD"):
         if p == "POTION" and potions_full:
             continue
+        if p == "CARD" and skip_card:
+            continue
         for i, r in enumerate(rewards):
-            rt = getattr(r, "reward_type", None)
-            if rt is not None and rt.name == p:
+            if _reward_type_name(r) == p:
                 return i
     return -1
 
 
-def pick_combat_reward_str(choice_list: list, potions_full: bool = False) -> int:
+def pick_combat_reward_str(
+    choice_list: list,
+    potions_full: bool = False,
+    skip_card: bool = False,
+) -> int:
     """Pick reward from string choice_list. Returns -1 if nothing pickable."""
     for priority in ("relic", "gold", "potion", "card"):
         if priority == "potion" and potions_full:
+            continue
+        if priority == "card" and skip_card:
             continue
         for i, c in enumerate(choice_list):
             if priority in str(c).lower():
                 return i
     return -1
+
+
+def _available_commands(gs) -> set[str]:
+    return set(getattr(gs, "available_commands", []) or [])
+
+
+def _can_choose(gs) -> bool:
+    commands = _available_commands(gs)
+    return not commands or "choose" in commands
+
+
+def _proceed_or_state(gs) -> Action:
+    commands = _available_commands(gs)
+    if "proceed" in commands:
+        return Action("proceed")
+    if "confirm" in commands:
+        return Action("confirm")
+    if not commands and bool(getattr(gs, "proceed_available", False)):
+        return Action("proceed")
+    return Action("state")
+
+
+def _cancel_or_state(gs) -> Action:
+    commands = _available_commands(gs)
+    for cmd in ("cancel", "leave", "return", "skip"):
+        if cmd in commands:
+            return Action(cmd)
+    if not commands and bool(getattr(gs, "cancel_available", False)):
+        return Action("leave")
+    return Action("state")
+
+
+def recover_from_command_error(err: str) -> Action:
+    """Pick a conservative valid command after CommunicationMod rejects one."""
+    lower = str(err).lower()
+    possible: set[str] = set()
+    match = re.search(r"possible commands:\s*\[([^\]]+)\]", lower)
+    if match:
+        possible = {p.strip() for p in match.group(1).split(",") if p.strip()}
+
+    # The common post-combat loop is invalid proceed while map choices are
+    # available. Choosing index 0 advances; returning just reopens the loop.
+    if "choose" in possible and ("invalid command: proceed" in lower or "proceed" in lower):
+        return ChooseAction(choice_index=0)
+    if "state" in possible:
+        return Action("state")
+    if "return" in possible:
+        return Action("return")
+    if "cancel" in possible:
+        return Action("cancel")
+    if "leave" in possible:
+        return Action("leave")
+    if "skip" in possible:
+        return Action("skip")
+    if "choose" in possible:
+        return ChooseAction(choice_index=0)
+
+    # Bare "wait" is not valid for this CommunicationMod build; it requires
+    # an argument, so polling state is the safest no-op fallback.
+    if "wait" in possible:
+        return Action("state")
+    if "proceed" in lower and "choose" in lower:
+        return ChooseAction(choice_index=0)
+    return Action("state")
 
 
 def pick_rest(choice_list: list, gs) -> int:
@@ -508,6 +619,7 @@ def auto_handle_screen(
     proceed_avail = bool(getattr(gs, "proceed_available", False))
     cancel_avail = bool(getattr(gs, "cancel_available", False))
     scr = getattr(gs, "screen", None)
+    _reset_screen_memory_if_new_run(gs)
 
     if in_combat and screen_name == "NONE":
         return None
@@ -600,7 +712,7 @@ def auto_handle_screen(
             return ChooseAction(name="boss")
         if not choice_list:
             if proceed_avail:
-                return Action("proceed")
+                return _proceed_or_state(gs)
             return Action("state")
         if heuristic_all:
             return ChooseAction(choice_index=pick_map(choice_list, gs))
@@ -610,20 +722,38 @@ def auto_handle_screen(
     if screen_name == "COMBAT_REWARD":
         potions_full = bool(getattr(gs, "are_potions_full", lambda: False)())
         rewards = list(getattr(scr, "rewards", []) or []) if scr else []
+        floor_key = _screen_memory_key(gs)
+        skip_card_reward = floor_key in _CARD_REWARD_OPEN_KEYS
         if rewards:
-            idx = pick_combat_reward_obj(rewards, potions_full)
+            idx = pick_combat_reward_obj(rewards, potions_full, skip_card_reward)
             if idx >= 0:
+                if _reward_type_name(rewards[idx]) == "CARD":
+                    _CARD_REWARD_OPEN_KEYS.add(floor_key)
                 return ChooseAction(choice_index=idx)
-            return Action("proceed") if proceed_avail else Action("state")
+            return _proceed_or_state(gs) if proceed_avail else Action("state")
         if choice_list:
-            idx = pick_combat_reward_str(choice_list, potions_full)
+            idx = pick_combat_reward_str(choice_list, potions_full, skip_card_reward)
             if idx >= 0:
+                if "card" in str(choice_list[idx]).lower():
+                    _CARD_REWARD_OPEN_KEYS.add(floor_key)
                 return ChooseAction(choice_index=idx)
-            return Action("proceed") if proceed_avail else Action("state")
-        return Action("proceed") if proceed_avail else Action("state")
+            # After clicking Proceed on the reward screen, CommunicationMod can
+            # expose map node choices while still reporting COMBAT_REWARD. Pick
+            # a node instead of bouncing map -> return -> reward forever.
+            if _can_choose(gs):
+                return ChooseAction(choice_index=pick_map(choice_list, gs))
+            return _proceed_or_state(gs) if proceed_avail else Action("state")
+        return _proceed_or_state(gs) if proceed_avail else Action("state")
 
     # ---- SHOP ----
     if screen_name == "SHOP_ROOM":
+        shop_key = _screen_memory_key(gs)
+        if choice_list and shop_key not in _SHOP_VISITED_KEYS:
+            lower = [str(c).lower() for c in choice_list]
+            for i, c in enumerate(lower):
+                if "shop" in c or "merchant" in c:
+                    _SHOP_VISITED_KEYS.add(shop_key)
+                    return ChooseAction(choice_index=i)
         if proceed_avail:
             return Action("proceed")
         if cancel_avail:
@@ -698,6 +828,8 @@ def auto_handle_screen(
         return None
 
     if screen_name == "CARD_REWARD":
+        if choice_list:
+            _CARD_REWARD_OPEN_KEYS.add(_screen_memory_key(gs))
         if heuristic_all and choice_list:
             return ChooseAction(choice_index=pick_card_reward(choice_list, gs))
         if heuristic_all or not choice_list:

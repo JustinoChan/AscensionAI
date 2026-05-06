@@ -157,13 +157,14 @@ def escape_properties_path(p: Path) -> str:
     return str(p).replace("\\", "/").replace(":", "\\:")
 
 
-def write_config(command: str | None = None):
+def write_config(command: str | None = None, *, verbose: bool = True):
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%a %b %d %H:%M:%S %z %Y")
+    verbose_str = "true" if verbose else "false"
     if command:
-        content = f"#{ts}\nverbose=true\ncommand={command}\nrunAtGameStart=true\n"
+        content = f"#{ts}\nverbose={verbose_str}\ncommand={command}\nrunAtGameStart=true\n"
     else:
-        content = f"#{ts}\nverbose=true\n"
+        content = f"#{ts}\nverbose={verbose_str}\n"
     CONFIG_FILE.write_text(content, encoding="ascii")
     _logger.info(f"Config written to {CONFIG_FILE}")
     _logger.debug(f"Config content:\n{content.rstrip()}")
@@ -171,26 +172,28 @@ def write_config(command: str | None = None):
 
 def build_command(mode: str, worker_id: int = 1, games: int = 20,
                   bc_games: int = 50, ppo_games: int = 200,
-                  ent_coef: float = 0.15) -> str:
+                  ent_coef: float = 0.10, verbose: bool = False) -> str:
     py = escape_properties_path(VENV_PYTHON)
     root = escape_properties_path(ROOT)
+    verbose_flag = " --verbose" if verbose else ""
     if mode == "worker":
-        cmd = f"{py} {root}/scripts/rollout_worker.py --model models/ppo_sts.pt --out rollouts_shared --id {worker_id}"
+        cmd = f"{py} {root}/scripts/rollout_worker.py --model models/ppo_sts.pt --out rollouts_shared --id {worker_id}{verbose_flag}"
     elif mode == "train":
-        cmd = f"{py} {root}/scripts/train_ppo.py --save models/ppo_sts.pt --resume models/ppo_sts.pt --save-every 5 --ent-coef {ent_coef}"
+        cmd = f"{py} {root}/scripts/train_ppo.py --save models/ppo_sts.pt --resume models/ppo_sts.pt --save-every 5 --ent-coef {ent_coef}{verbose_flag}"
     elif mode == "bc_ppo":
-        cmd = f"{py} {root}/scripts/train_bc_ppo.py --bc-games {bc_games} --ppo-games {ppo_games} --save models/ppo_sts.pt --ent-start {ent_coef}"
+        cmd = f"{py} {root}/scripts/train_bc_ppo.py --bc-games {bc_games} --ppo-games {ppo_games} --save models/ppo_sts.pt --ent-start {ent_coef}{verbose_flag}"
     elif mode == "bc":
-        cmd = f"{py} {root}/scripts/behavior_clone.py --games {bc_games} --save models/ppo_sts.pt"
+        cmd = f"{py} {root}/scripts/behavior_clone.py --games {bc_games} --save models/ppo_sts.pt{verbose_flag}"
     elif mode == "eval":
-        cmd = f"{py} {root}/scripts/eval_model.py --model models/ppo_sts.pt --games {games}"
+        cmd = f"{py} {root}/scripts/eval_model.py --model models/ppo_sts.pt --games {games}{verbose_flag}"
     elif mode == "logger":
-        cmd = f"{py} {root}/scripts/game_logger.py"
+        cmd = f"{py} {root}/scripts/game_logger.py{verbose_flag}"
     else:
         _logger.error(f"build_command: unknown mode '{mode}'")
         cmd = ""
     _logger.info(f"build_command(mode={mode}, worker_id={worker_id}, games={games}, "
-                 f"bc_games={bc_games}, ppo_games={ppo_games}, ent_coef={ent_coef}) -> {cmd}")
+                 f"bc_games={bc_games}, ppo_games={ppo_games}, "
+                 f"ent_coef={ent_coef}, verbose={verbose}) -> {cmd}")
     return cmd
 
 
@@ -476,8 +479,8 @@ class AscensionApp:
 
         self.ent_label = ttk.Label(self.ent_row, text="Entropy Coef:")
         self.ent_label.pack(side="left", padx=(0, 5))
-        self._ent_value = 0.15
-        self.ent_var = tk.StringVar(value="0.15")
+        self._ent_value = 0.10
+        self.ent_var = tk.StringVar(value="0.10")
         self.ent_minus = ttk.Button(self.ent_row, text="-", width=3, command=self._dec_ent)
         self.ent_minus.pack(side="left")
         self.ent_display = ttk.Label(self.ent_row, textvariable=self.ent_var, width=5,
@@ -1014,9 +1017,11 @@ class AscensionApp:
     def _launch_single(self, mode: str, games: int = 20, ppo_games: int = 200):
         _logger.info(f"_launch_single: mode={mode}, games={games}, ppo_games={ppo_games}")
         try:
+            verbose = bool(self.verbose_var.get())
             cmd = build_command(mode, games=games, bc_games=games,
-                               ppo_games=ppo_games, ent_coef=self._ent_value)
-            write_config(cmd)
+                                ppo_games=ppo_games, ent_coef=self._ent_value,
+                                verbose=verbose)
+            write_config(cmd, verbose=verbose)
 
             _mode_info = {
                 "train":   ("Training",   "logs/train_debug.log"),
@@ -1052,7 +1057,7 @@ class AscensionApp:
     def _launch_play(self):
         _logger.info("_launch_play: launching game with no AI command")
         try:
-            write_config(None)
+            write_config(None, verbose=bool(self.verbose_var.get()))
             self._append_log("All", "Config written (no AI command), launching STS...")
             proc = launch_sts()
             self.processes.append(proc)
@@ -1142,6 +1147,8 @@ class AscensionApp:
                     "--delete-consumed",
                     "--ent-coef", str(self._ent_value),
                 ]
+                if self.verbose_var.get():
+                    trainer_cmd.append("--verbose")
                 self._trainer_cmd = trainer_cmd
                 _logger.info(f"Trainer command: {trainer_cmd}")
                 self.trainer_proc = subprocess.Popen(
@@ -1173,9 +1180,10 @@ class AscensionApp:
                 self.root.after(0, lambda tn=tab_name: self._add_log_tab(tn))
                 time.sleep(0.1)
 
-                cmd = build_command("worker", worker_id=i)
+                cmd = build_command("worker", worker_id=i,
+                                    verbose=bool(self.verbose_var.get()))
                 self._worker_commands[i] = cmd
-                write_config(cmd)
+                write_config(cmd, verbose=bool(self.verbose_var.get()))
                 self._append_log(tab_name, f"Config written for worker {i}, launching STS...")
 
                 proc = launch_sts(skip_launcher=True)
@@ -1333,7 +1341,7 @@ class AscensionApp:
             if not cmd:
                 _logger.error(f"_relaunch_worker: no stored command for worker {worker_id}")
                 return
-            write_config(cmd)
+            write_config(cmd, verbose=bool(self.verbose_var.get()))
             proc = launch_sts(skip_launcher=True)
             self.processes.append(proc)
             self.worker_launcher_pids[worker_id] = proc.pid

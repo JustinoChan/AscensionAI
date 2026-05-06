@@ -168,7 +168,7 @@ from sts_gym_env import (
     RewardTracker, _NOOP, is_terminal_state, is_victory_state,
 )
 from ppo_model import PPOTrainer, GameBuffer
-from screen_handler import auto_handle_screen
+from screen_handler import auto_handle_screen, recover_from_command_error
 
 log("Imports done")
 
@@ -408,17 +408,14 @@ class PPOAgent:
 
     def on_error(self, err: str) -> Action:
         log(f"COMMAND ERROR: {err}")
-        if "Possible commands" in err and "wait" in err:
-            return Action("wait")
-        if "proceed" in err and "choose" in err:
-            return ChooseAction(choice_index=0)
-        return Action("state")
+        return recover_from_command_error(err)
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 def main():
+    global VERBOSE
     parser = argparse.ArgumentParser()
     parser.add_argument("--save", type=str, default="models/ppo_sts.pt")
     parser.add_argument("--resume", type=str, default=None)
@@ -428,12 +425,18 @@ def main():
                         help="Accumulate N games of transitions per PPO update (default: 4)")
     parser.add_argument("--ent-coef", type=float, default=0.15,
                         help="Entropy bonus coefficient (higher = more exploration)")
+    parser.add_argument("--verbose", action="store_true",
+                        help="Write detailed per-state/per-action debug logs")
     args = parser.parse_args()
+    VERBOSE = VERBOSE or args.verbose
 
     save_path = os.path.join(_root, args.save)
     os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
 
     log("Creating PPO trainer...")
+    log(f"Config: save={args.save} resume={args.resume} "
+        f"games_per_update={args.games_per_update} ent_coef={args.ent_coef} "
+        f"verbose={VERBOSE}")
     trainer = PPOTrainer(
         obs_size=OBS_SIZE,
         n_actions=NUM_ACTIONS,

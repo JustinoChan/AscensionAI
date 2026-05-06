@@ -114,7 +114,7 @@ from sts_gym_env import (
     is_terminal_state, is_victory_state,
 )
 from ppo_model import PPOTrainer
-from screen_handler import auto_handle_screen
+from screen_handler import auto_handle_screen, recover_from_command_error
 
 BUG_DEBUG_LOG = os.path.join(_root, "logs", "bug_debug.log")
 
@@ -604,17 +604,14 @@ class WorkerAgent:
 
     def on_error(self, err: str) -> Action:
         log(f"COMMAND ERROR: {err}")
-        if "Possible commands" in err and "wait" in err:
-            return Action("wait")
-        if "proceed" in err and "choose" in err:
-            return ChooseAction(choice_index=0)
-        return Action("state")
+        return recover_from_command_error(err)
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 def main():
+    global VERBOSE
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default="models/ppo_sts.pt",
                         help="Path to model checkpoint to load")
@@ -624,10 +621,15 @@ def main():
                         help="Worker ID (for logging and filenames)")
     parser.add_argument("--reload-every", type=int, default=5,
                         help="Reload model every N games")
+    parser.add_argument("--verbose", action="store_true",
+                        help="Write detailed per-state/per-action debug logs")
     args = parser.parse_args()
+    VERBOSE = VERBOSE or args.verbose
 
     _init_log(args.id)
     log("=== ROLLOUT WORKER STARTING ===")
+    log(f"Config: model={args.model} out={args.out} id={args.id} "
+        f"reload_every={args.reload_every} verbose={VERBOSE}")
 
     model_path = os.path.join(_root, args.model)
     out_dir = os.path.join(_root, args.out)

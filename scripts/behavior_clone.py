@@ -54,6 +54,7 @@ import torch
 
 os.makedirs(os.path.join(_root, "logs"), exist_ok=True)
 DEBUG_LOG = os.path.join(_root, "logs", "bc_debug.log")
+VERBOSE = os.environ.get("ASCENSION_VERBOSE", "0") == "1"
 
 def log(msg: str):
     try:
@@ -92,6 +93,7 @@ from screen_handler import (
     _pick_from_unselected,
     pick_map,
     pick_shop_item,
+    recover_from_command_error,
 )
 
 log("Imports done")
@@ -101,6 +103,7 @@ log("Imports done")
 # Shop visit tracking (prevents SHOP_ROOM ↔ SHOP_SCREEN infinite loop)
 # ---------------------------------------------------------------------------
 _visited_shop_floors: set = set()
+_skipped_card_reward_keys: set[tuple[int, int]] = set()
 
 
 # ---------------------------------------------------------------------------
@@ -110,6 +113,13 @@ def _screen_name(gs) -> str:
     st = getattr(gs, "screen_type", None)
     name = getattr(st, "name", st) if st is not None else "NONE"
     return str(name) if name else "NONE"
+
+
+def _screen_key(gs) -> tuple[int, int]:
+    return (
+        int(getattr(gs, "act", 0) or 0),
+        int(getattr(gs, "floor", -1) or -1),
+    )
 
 
 URGENT_MONSTERS = {
@@ -425,6 +435,8 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
     if screen == "CARD_REWARD":
         if choice_list:
             idx = pick_card_reward(choice_list, gs)
+            if "skip" in str(choice_list[idx]).lower():
+                _skipped_card_reward_keys.add(_screen_key(gs))
             return ChooseAction(choice_index=idx), _CHOOSE_START + idx
         if proceed_avail:
             return Action("proceed"), _PROCEED
@@ -437,18 +449,23 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
         potions_full = bool(getattr(gs, "are_potions_full", lambda: False)())
         scr_obj = getattr(gs, "screen", None)
         rewards = list(getattr(scr_obj, "rewards", []) or []) if scr_obj else []
+        skip_card_reward = _screen_key(gs) in _skipped_card_reward_keys
         if rewards:
-            idx = pick_combat_reward_obj(rewards, potions_full)
+            idx = pick_combat_reward_obj(rewards, potions_full, skip_card_reward)
             if idx >= 0:
                 return ChooseAction(choice_index=idx), _CHOOSE_START + idx
             if proceed_avail:
                 return Action("proceed"), _PROCEED
         if choice_list:
-            idx = pick_combat_reward_str(choice_list, potions_full=potions_full)
+            idx = pick_combat_reward_str(
+                choice_list,
+                potions_full=potions_full,
+                skip_card=skip_card_reward,
+            )
             if idx >= 0:
                 return ChooseAction(choice_index=idx), _CHOOSE_START + idx
-            if proceed_avail:
-                return Action("proceed"), _PROCEED
+            idx = pick_map(choice_list, gs)
+            return ChooseAction(choice_index=idx), _CHOOSE_START + idx
         if proceed_avail:
             return Action("proceed"), _PROCEED
         return None, None
@@ -632,6 +649,18 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
     return Action("state"), _NOOP
 
 
+def _action_desc(action: Optional[Action]) -> str:
+    if action is None:
+        return "None"
+    command = str(getattr(action, "command", type(action).__name__))
+    parts = [command]
+    for attr in ("choice_index", "name", "card_index", "target_index"):
+        value = getattr(action, attr, None)
+        if value not in (None, -1):
+            parts.append(f"{attr}={value}")
+    return " ".join(parts)
+
+
 # ---------------------------------------------------------------------------
 # Demonstration collector
 # ---------------------------------------------------------------------------
@@ -666,6 +695,7 @@ class DemoCollector:
             self.games_done += 1
             self.initialized = False
             _visited_shop_floors.clear()
+            _skipped_card_reward_keys.clear()
             log(f"Demo game #{self.games_done} ended. "
                 f"Samples so far: {len(self.observations)}, total_steps={self.total_steps}")
             proceed_avail = bool(getattr(gs, "proceed_available", False))
@@ -680,14 +710,26 @@ class DemoCollector:
 
         obs = encode_game_state(gs)
         mask = compute_action_mask(gs)
+        mask_ok = bool(action_id < NUM_ACTIONS and mask[action_id])
 
-        if action_id < NUM_ACTIONS and mask[action_id]:
+        if mask_ok:
             self.observations.append(obs)
             self.actions.append(action_id)
             self.masks.append(mask)
+        elif VERBOSE:
+            log(f"BC VERBOSE skipped sample: screen={screen} action_id={action_id} "
+                f"mask_sum={int(mask.sum())} action={_action_desc(spire_action)}")
 
         self.total_steps += 1
-        if self.total_steps % 100 == 0:
+        if VERBOSE:
+            choice_list = list(getattr(gs, "choice_list", []) or [])
+            log(f"BC STEP {self.total_steps}: game={self.games_done + 1} "
+                f"floor={getattr(gs, 'floor', '?')} "
+                f"hp={getattr(gs, 'current_hp', '?')}/{getattr(gs, 'max_hp', '?')} "
+                f"screen={screen} choices={choice_list[:8]} action_id={action_id} "
+                f"action={_action_desc(spire_action)} mask_ok={mask_ok} "
+                f"samples={len(self.observations)}")
+        elif self.total_steps % 100 == 0:
             log(f"  step={self.total_steps} samples={len(self.observations)} "
                 f"games={self.games_done}/{self.max_games}")
 
@@ -702,11 +744,7 @@ class DemoCollector:
 
     def on_error(self, err: str) -> Action:
         log(f"COMMAND ERROR: {err}")
-        if "Possible commands" in err and "wait" in err:
-            return Action("wait")
-        if "proceed" in err and "choose" in err:
-            return ChooseAction(choice_index=0)
-        return Action("state")
+        return recover_from_command_error(err)
 
 
 # ---------------------------------------------------------------------------
@@ -783,13 +821,17 @@ def train_supervised(obs_list, action_list, mask_list, save_path: str,
 # Main
 # ---------------------------------------------------------------------------
 def main():
+    global VERBOSE
     parser = argparse.ArgumentParser()
     parser.add_argument("--games", type=int, default=50,
                         help="Number of heuristic games to collect")
     parser.add_argument("--save", type=str, default="models/ppo_sts.pt",
                         help="Where to save warm-started model")
     parser.add_argument("--epochs", type=int, default=30)
+    parser.add_argument("--verbose", action="store_true",
+                        help="Write detailed per-state/per-action debug logs")
     args = parser.parse_args()
+    VERBOSE = VERBOSE or args.verbose
 
     save_path = os.path.join(_root, args.save)
     os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
@@ -801,7 +843,8 @@ def main():
     coord.register_out_of_game_callback(collector.on_out_of_game)
     coord.register_command_error_callback(collector.on_error)
 
-    log(f"Starting demo collection: {args.games} games")
+    log(f"Starting demo collection: {args.games} games "
+        f"save={args.save} epochs={args.epochs} verbose={VERBOSE}")
     coord.signal_ready()
 
     try:

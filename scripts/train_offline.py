@@ -37,6 +37,7 @@ from sts_gym_env import NUM_ACTIONS
 
 os.makedirs(os.path.join(_root, "logs"), exist_ok=True)
 DEBUG_LOG = os.path.join(_root, "logs", "train_offline_debug.log")
+VERBOSE = os.environ.get("ASCENSION_VERBOSE", "0") == "1"
 
 def log(msg: str):
     ts = datetime.now().isoformat()
@@ -124,6 +125,8 @@ def load_transitions(paths: List[str]) -> tuple:
                 for i in range(n):
                     buf.add(obs[i], int(acts[i]), float(rews[i]), bool(dones[i]),
                             masks[i], float(lps[i]), float(vals[i]))
+            if VERBOSE:
+                log(f"Loaded rollout {os.path.basename(p)} transitions={n}")
             loaded.append(p)
         except Exception as e:
             log(f"Failed to load {p}: {e}")
@@ -155,6 +158,7 @@ def delete_files(paths: List[str]) -> None:
 # Main training loop
 # ---------------------------------------------------------------------------
 def main():
+    global VERBOSE
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default="models/ppo_sts.pt",
                         help="Model checkpoint path (load + save)")
@@ -166,12 +170,17 @@ def main():
                         help="Seconds between checking for new data")
     parser.add_argument("--delete-consumed", action="store_true",
                         help="Delete .npz files after training on them")
-    parser.add_argument("--lr", type=float, default=3e-4)
+    parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--epochs", type=int, default=4)
     parser.add_argument("--batch-size", type=int, default=64)
-    parser.add_argument("--ent-coef", type=float, default=0.15,
+    parser.add_argument("--ent-coef", type=float, default=0.10,
                         help="Entropy bonus coefficient (higher = more exploration)")
+    parser.add_argument("--clip", type=float, default=0.15,
+                        help="PPO clip range (default: 0.15)")
+    parser.add_argument("--verbose", action="store_true",
+                        help="Write detailed polling and rollout loading logs")
     args = parser.parse_args()
+    VERBOSE = VERBOSE or args.verbose
 
     model_path = os.path.join(_root, args.model)
     data_dir = os.path.join(_root, args.data)
@@ -181,12 +190,14 @@ def main():
     log("=== OFFLINE TRAINER STARTING ===")
     log(f"Model: {model_path}")
     log(f"Data dir: {data_dir}")
-    log(f"Hyperparams: lr={args.lr}, epochs={args.epochs}, batch_size={args.batch_size}, ent_coef={args.ent_coef}")
+    log(f"Hyperparams: lr={args.lr}, epochs={args.epochs}, "
+        f"batch_size={args.batch_size}, ent_coef={args.ent_coef}, "
+        f"clip={args.clip}, batch_games={args.batch_games}, verbose={VERBOSE}")
 
     trainer = PPOTrainer(
         obs_size=OBS_SIZE, n_actions=NUM_ACTIONS, device="cpu",
         lr=args.lr, n_epochs=args.epochs, batch_size=args.batch_size,
-        ent_coef=args.ent_coef, net_arch=(256, 256),
+        ent_coef=args.ent_coef, clip_range=args.clip, net_arch=(256, 256),
     )
 
     if os.path.isfile(model_path):
@@ -206,11 +217,16 @@ def main():
             new_files = load_npz_files(data_dir, consumed)
 
             if len(new_files) < args.batch_games:
+                if VERBOSE:
+                    log(f"Waiting for rollouts: ready={len(new_files)} "
+                        f"need={args.batch_games} consumed={len(consumed)}")
                 time.sleep(args.poll_interval)
                 continue
 
             batch_files = new_files[:args.batch_games]
             log(f"Loading {len(batch_files)} new game files...")
+            if VERBOSE:
+                log("Batch files: " + ", ".join(os.path.basename(f) for f in batch_files))
 
             buf, loaded, failed = load_transitions(batch_files)
             n = len(buf)

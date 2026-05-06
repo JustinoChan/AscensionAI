@@ -45,6 +45,7 @@ if _scripts not in sys.path:
 
 import json
 import time
+import argparse
 from datetime import datetime
 from typing import Any
 
@@ -58,6 +59,7 @@ TRACE_PATH = os.path.join(
     LOG_DIR, f"game_trace_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl"
 )
 DEBUG_LOG = os.path.join(_root, "logs", "game_logger_debug.log")
+VERBOSE = os.environ.get("ASCENSION_VERBOSE", "0") == "1"
 
 POLL_THROTTLE_SEC = 0.1  # cap the passive poll loop at ~10 Hz
 
@@ -182,7 +184,7 @@ class StateLogger:
         try:
             rec = snapshot(gs)
             sig = self._sig(rec)
-            if sig != self.last_sig:
+            if VERBOSE or sig != self.last_sig:
                 self.last_sig = sig
                 self.count += 1
                 self._write(rec)
@@ -225,7 +227,9 @@ class StateLogger:
             rewards = getattr(scr, "rewards", None) or []
             dlog(f"  REWARDS={[_shallow(r, depth=1) for r in rewards]}")
 
-        if screen in ("CARD_REWARD", "BOSS_REWARD", "REST", "EVENT", "HAND_SELECT", "GRID"):
+        if (VERBOSE and scr is not None) or screen in (
+            "CARD_REWARD", "BOSS_REWARD", "REST", "EVENT", "HAND_SELECT", "GRID"
+        ):
             dlog(f"  DETAIL screen_obj={_shallow(scr, depth=2)}")
 
     def on_out_of_game(self) -> Action:
@@ -253,6 +257,14 @@ class StateLogger:
 
 
 def main() -> None:
+    global VERBOSE
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--verbose", action="store_true",
+                        help="Write every observed state, including repeats")
+    args = parser.parse_args()
+    VERBOSE = VERBOSE or args.verbose
+    dlog(f"Config: verbose={VERBOSE} trace={TRACE_PATH}")
+
     logger = StateLogger()
     coord = Coordinator()
     coord.register_state_change_callback(logger.on_state_change)

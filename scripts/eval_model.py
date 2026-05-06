@@ -65,12 +65,13 @@ from sts_gym_env import (
     RewardTracker, is_terminal_state, is_victory_state,
 )
 from ppo_model import PPOTrainer
-from screen_handler import auto_handle_screen
+from screen_handler import auto_handle_screen, recover_from_command_error
 
 
 os.makedirs(os.path.join(_root, "logs"), exist_ok=True)
 DEBUG_LOG = os.path.join(_root, "logs", "eval_debug.log")
 EVAL_CSV = os.path.join(_root, "logs", "eval_stats.csv")
+VERBOSE = os.environ.get("ASCENSION_VERBOSE", "0") == "1"
 
 _EVAL_COLUMNS = [
     "timestamp", "run", "game", "steps", "total_reward",
@@ -103,6 +104,16 @@ def _append_csv(row: dict) -> None:
 
 log("=== EVAL STARTING ===")
 _init_csv()
+
+
+def _action_desc(action: Optional[Action]) -> str:
+    command = str(getattr(action, "command", type(action).__name__))
+    parts = [command]
+    for attr in ("choice_index", "name", "card_index", "target_index"):
+        value = getattr(action, attr, None)
+        if value not in (None, -1):
+            parts.append(f"{attr}={value}")
+    return " ".join(parts)
 
 
 def auto_handle(gs: Any, screen_name: str) -> Optional[Action]:
@@ -173,13 +184,27 @@ class EvalAgent:
         auto = auto_handle(gs, screen_name)
         if auto is not None:
             self.total_steps += 1
+            if VERBOSE:
+                choice_list = list(getattr(gs, "choice_list", []) or [])
+                log(f"EVAL AUTO STEP {self.total_steps}: game={self.games_played + 1} "
+                    f"floor={getattr(gs, 'floor', '?')} screen={screen_name} "
+                    f"choices={choice_list[:8]} action={_action_desc(auto)}")
             return auto
 
         obs = encode_game_state(gs)
         mask = compute_action_mask(gs)
         action, _lp, _v = self.trainer.predict(obs, mask, deterministic=True)
+        spire_action = flat_action_to_spire_action(action, gs)
         self.total_steps += 1
-        return flat_action_to_spire_action(action, gs)
+        if VERBOSE:
+            choice_list = list(getattr(gs, "choice_list", []) or [])
+            log(f"EVAL RL STEP {self.total_steps}: game={self.games_played + 1} "
+                f"floor={getattr(gs, 'floor', '?')} "
+                f"hp={getattr(gs, 'current_hp', '?')}/{getattr(gs, 'max_hp', '?')} "
+                f"screen={screen_name} choices={choice_list[:8]} "
+                f"mask_sum={int(mask.sum())} action_id={action} "
+                f"action={_action_desc(spire_action)}")
+        return spire_action
 
     def _end_game(self, final_gs, victory: bool) -> None:
         self.games_played += 1
@@ -216,22 +241,23 @@ class EvalAgent:
 
     def on_error(self, err: str) -> Action:
         log(f"COMMAND ERROR: {err}")
-        if "Possible commands" in err and "wait" in err:
-            return Action("wait")
-        if "proceed" in err and "choose" in err:
-            return ChooseAction(choice_index=0)
-        return Action("state")
+        return recover_from_command_error(err)
 
 
 def main() -> None:
+    global VERBOSE
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default="models/ppo_sts.pt")
     parser.add_argument("--games", type=int, default=20)
     parser.add_argument("--run-tag", type=str, default=datetime.now().strftime("%Y%m%d_%H%M%S"))
+    parser.add_argument("--verbose", action="store_true",
+                        help="Write detailed per-state/per-action debug logs")
     args = parser.parse_args()
+    VERBOSE = VERBOSE or args.verbose
 
     model_path = os.path.join(_root, args.model) if not os.path.isabs(args.model) else args.model
-    log(f"Loading model from {model_path} for {args.games} greedy games")
+    log(f"Loading model from {model_path} for {args.games} greedy games "
+        f"run_tag={args.run_tag} verbose={VERBOSE}")
 
     trainer = PPOTrainer(
         obs_size=OBS_SIZE,

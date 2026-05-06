@@ -13,7 +13,7 @@ STS Game  <-->  Communication Mod  <-->  Python Agent (stdin/stdout)
 ```
 
 - **Decision screens** (combat, events, card rewards, rest, boss relics, map pathing) are handled by the RL policy network
-- **Heuristic screens** (combat rewards, shops, chests, grid select) are auto-handled with fallback logic for edge cases (full potions, multi-select grids, card matching events, empty choice lists)
+- **Screen plumbing** (combat rewards, shops, chests, grid select, command-error recovery) is auto-handled with fallback logic for edge cases such as full potions, boss relics, map transitions, card matching events, and empty choice lists
 - The observation encoder captures player state, hand cards, monster identity/behavior/intent/powers, screen context, and map path lookahead
 - Action masking ensures only legal actions are chosen
 - The Python side exposes the game as a Gymnasium-compatible environment, while Communication Mod handles the live STS process bridge
@@ -78,7 +78,7 @@ Or from a terminal:
 python AscensionAI.pyw
 ```
 
-The control panel detects your hardware, recommends how many STS instances to run, and lets you start/stop training with one click. Live log output from all workers and the trainer is displayed in tabbed panels.
+The control panel detects your hardware, recommends how many STS instances to run, and lets you start/stop training with one click. Live log output from all workers and the trainer is displayed in tabbed panels. It also exposes the BC game count, PPO game count, entropy coefficient, and a verbose logging toggle so long warm-up or overnight sessions can be inspected without editing scripts.
 
 ### Control Panel modes
 
@@ -100,6 +100,20 @@ The control panel detects your hardware, recommends how many STS instances to ru
 3. **Evaluation** — select "Evaluation (Greedy)" to benchmark your model without exploration noise.
 
 During a healthy first run, you should see live output in the Control Panel tabs, new log files appear under `logs/`, and the trained checkpoint saved to `models/ppo_sts.pt`.
+
+### Long-running reliability
+
+AscensionAI is designed to run multiple live STS instances for many hours, but modded STS can still crash or expose awkward intermediate screens. The launcher and screen handler include guardrails for the common stuck states:
+
+- **Worker relaunch** — parallel workers are monitored and relaunched through ModTheSpire if an instance exits unexpectedly.
+- **Reward screens** — combat reward, card reward, boss relic, chest, and map transitions are guarded against reopen loops.
+- **Boss relics** — boss relic choices are treated as mandatory; the action mask suppresses leave/proceed while relic choices are available.
+- **Events** — event choices use CommunicationMod's real `choice_index`, which matters for events with disabled or hidden options.
+- **Card grids** — grid confirmations, hand-selection screens, and Match and Keep avoid repeated invalid selections.
+- **Shops** — each shop room is entered once per floor so canceling out of the shop does not bounce back into it forever.
+- **Command errors** — rejected commands recover through a conservative state/choose fallback instead of repeatedly sending invalid no-ops.
+
+For the first long run after a patch, enable **Verbose Logs** in the Control Panel. It passes `--verbose` to every launch mode and also sets CommunicationMod `verbose=true`, producing step-by-step logs for BC, PPO, workers, evaluation, and passive logging.
 
 ### Stopping a run
 
@@ -134,7 +148,7 @@ Training an RL agent on Slay the Spire is compute-bound by real-time game simula
 
 - **Batched PPO updates** — the trainer accumulates 4 games of transitions per gradient update (`--games-per-update 4`). Larger batches mean less noisy gradients and less time spent blocked on updates. Raise to `8` if you have plenty of memory; drop to `2` for faster feedback during debugging.
 - **4 PPO epochs per update** — down from a conservative 10. Each update trains ~2.5× faster with minimal quality loss.
-- **Entropy annealing** (0.05 → 0.01) shifts the policy from exploration to exploitation automatically over training.
+- **Conservative exploration defaults** — the Control Panel uses entropy `0.10` by default for PPO-style modes. BC -> PPO anneals the selected start value toward `0.01`, while the parallel offline trainer defaults to `--ent-coef 0.10`, `--lr 1e-4`, and `--clip 0.15` to reduce catastrophic forgetting from the BC warm start.
 
 ### Scaling with hardware
 
@@ -163,7 +177,7 @@ If you prefer the terminal, use `launch_workers.ps1`:
 For parallel mode, start the offline trainer in a separate terminal:
 
 ```bash
-python scripts\train_offline.py --model models\ppo_sts.pt --data rollouts_shared --delete-consumed
+python scripts\train_offline.py --model models\ppo_sts.pt --data rollouts_shared --delete-consumed --ent-coef 0.10 --clip 0.15
 ```
 
 ## Manual Configuration
@@ -175,13 +189,13 @@ If you prefer not to use the launcher, edit the CommunicationMod config directly
 ### BC → PPO end-to-end
 
 ```properties
-command=C\:/AscensionAI/.venv/Scripts/python.exe C\:/AscensionAI/scripts/train_bc_ppo.py --bc-games 50 --ppo-games 200 --save models/ppo_sts.pt
+command=C\:/AscensionAI/.venv/Scripts/python.exe C\:/AscensionAI/scripts/train_bc_ppo.py --bc-games 50 --ppo-games 200 --save models/ppo_sts.pt --ent-start 0.10
 ```
 
 ### Single-instance PPO training
 
 ```properties
-command=C\:/AscensionAI/.venv/Scripts/python.exe C\:/AscensionAI/scripts/train_ppo.py --save models/ppo_sts.pt --resume models/ppo_sts.pt --save-every 5
+command=C\:/AscensionAI/.venv/Scripts/python.exe C\:/AscensionAI/scripts/train_ppo.py --save models/ppo_sts.pt --resume models/ppo_sts.pt --save-every 5 --ent-coef 0.10
 ```
 
 ### Behavior cloning only
@@ -201,12 +215,16 @@ command=C\:/AscensionAI/.venv/Scripts/python.exe C\:/AscensionAI/scripts/rollout
 Then run the offline trainer separately:
 
 ```bash
-python scripts/train_offline.py --model models/ppo_sts.pt --data rollouts_shared --delete-consumed
+python scripts/train_offline.py --model models/ppo_sts.pt --data rollouts_shared --delete-consumed --ent-coef 0.10 --clip 0.15
 ```
+
+Append `--verbose` to any manual command when you want step-by-step decision logging.
 
 ## Log Files
 
 All logs are written to the `logs/` directory:
+
+When **Verbose Logs** is enabled in the Control Panel, or when a script is launched with `--verbose`, these files include detailed per-step screen names, choices, selected actions, masks, rollout loading, and recovery events.
 
 | Log file | Source |
 |----------|--------|
@@ -276,7 +294,7 @@ AscensionAI/
 
 4. **Behavior cloning** (`behavior_clone.py`): A hand-coded heuristic plays full games covering every decision surface. The neural network trains on these demonstrations via cross-entropy loss to get a reasonable starting policy.
 
-5. **PPO fine-tuning** (`train_ppo.py` / `train_bc_ppo.py`): The BC-initialized policy improves through online RL. PPO updates use GAE advantages, clipped surrogate loss, and an entropy bonus that anneals from 0.05 to 0.01 to transition from exploration to exploitation.
+5. **PPO fine-tuning** (`train_ppo.py` / `train_bc_ppo.py`): The BC-initialized policy improves through online RL. PPO updates use GAE advantages, clipped surrogate loss, and an entropy bonus that anneals from the selected start value toward 0.01 in BC -> PPO mode.
 
 6. **Parallel scaling** (`rollout_worker.py` + `train_offline.py`): Multiple game instances collect rollouts independently, writing `.npz` files. An offline trainer merges batches and updates the model checkpoint, which workers periodically reload.
 
