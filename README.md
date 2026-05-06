@@ -2,7 +2,7 @@
 
 ## About
 
-Reinforcement learning agent designed to play **Slay the Spire** using self-play, neural networks, and environment simulation.
+AscensionAI is a reinforcement learning project for training an AI agent to play **Slay the Spire** through a Gymnasium-style environment, Communication Mod integration, behavior cloning warm starts, PPO fine-tuning, action masking, dense reward shaping, and parallel rollout workers. The project focuses on long-running autonomous training, combat decision-making, event handling, map/path choices, relic/card rewards, and live progress tracking for improving Ironclad performance over time.
 
 ## Architecture
 
