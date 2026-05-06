@@ -178,6 +178,7 @@ from sts_gym_env import (
 from ppo_model import PPOTrainer, GameBuffer
 from screen_handler import auto_handle_screen, recover_from_command_error
 from behavior_clone import heuristic_action
+from fight_tracker import FightTracker
 
 # Re-patch after behavior_clone import (its module-level code overwrites
 # _coord_module.write_stdout with a version that uses stderr)
@@ -246,6 +247,8 @@ class BCPPOAgent:
         self.demo_masks: List[np.ndarray] = []
         self.bc_games_done = 0
         self.bc_steps = 0
+        self._bc_game_start_steps = 0
+        self._bc_game_start_demo_len = 0
         self.bc_skipped_samples = 0
         self.bc_initialized = False
 
@@ -267,6 +270,7 @@ class BCPPOAgent:
         self.reward_tracker = RewardTracker()
         self.ppo_games_done = 0
         self.ppo_steps = 0
+        self._ppo_game_start_steps = 0
         self.total_games = 0
         self.episode_reward = 0.0
         self.pending_reward = 0.0
@@ -279,6 +283,9 @@ class BCPPOAgent:
         self._stuck_floor: int = -1
         self._stuck_count: int = 0
         self._last_issue_key: str = ""
+        self.fight_tracker = FightTracker(
+            source="bc_ppo", worker="bc_ppo", log=log
+        )
 
     # ------------------------------------------------------------------
     # Coordinator callbacks
@@ -326,9 +333,16 @@ class BCPPOAgent:
     def _bc_step_inner(self, gs) -> Action:
         screen = self._screen_name(gs)
         terminal = is_terminal_state(gs)
+        victory = is_victory_state(gs)
+        self.fight_tracker.observe(
+            gs, game=self.total_games + 1,
+            terminal=terminal, victory=victory,
+        )
 
         if not self.bc_initialized:
             self.bc_initialized = True
+            self._bc_game_start_steps = self.bc_steps
+            self._bc_game_start_demo_len = len(self.demo_obs)
             log(f"BC game #{self.bc_games_done + 1}/{self.bc_games} started, "
                 f"floor={getattr(gs, 'floor', '?')}")
 
@@ -337,24 +351,33 @@ class BCPPOAgent:
             self.total_games += 1
             self.bc_initialized = False
 
-            victory = is_victory_state(gs)
+            fight_stats = self.fight_tracker.finish_game(
+                gs, game=self.total_games, victory=victory
+            )
+            steps_this_game = max(0, self.bc_steps - self._bc_game_start_steps)
+            demos_this_game = max(0, len(self.demo_obs) - self._bc_game_start_demo_len)
 
             log(f"BC game #{self.bc_games_done} ended: "
                 f"floor={getattr(gs, 'floor', '?')} victory={victory} "
-                f"samples={len(self.demo_obs)} skipped={self.bc_skipped_samples}")
+                f"samples={demos_this_game} total_samples={len(self.demo_obs)} "
+                f"skipped={self.bc_skipped_samples}")
 
             # Log BC game stats (no PPO losses yet)
             _append_stats_csv({
                 "timestamp": datetime.now().isoformat(),
                 "game": self.total_games,
-                "steps": self.bc_steps,
-                "transitions": len(self.demo_obs),
+                "steps": steps_this_game,
+                "transitions": demos_this_game,
                 "final_hp": int(getattr(gs, "current_hp", 0) or 0),
                 "final_max_hp": int(getattr(gs, "max_hp", 0) or 0),
                 "final_floor": int(getattr(gs, "floor", 0) or 0),
                 "final_act": int(getattr(gs, "act", 0) or 0),
                 "victory": int(victory),
                 "terminated": 1,
+                "elites_fought": fight_stats["elites_fought"],
+                "elites_won": fight_stats["elites_won"],
+                "bosses_fought": fight_stats["bosses_fought"],
+                "bosses_won": fight_stats["bosses_won"],
             })
 
             # Collected enough demos — train and switch to PPO
@@ -529,6 +552,10 @@ class BCPPOAgent:
         terminal = is_terminal_state(gs)
 
         victory = is_victory_state(gs)
+        self.fight_tracker.observe(
+            gs, game=self.total_games + 1,
+            terminal=terminal, victory=victory,
+        )
 
         # First state of the game
         if not self.ppo_initialized:
@@ -538,6 +565,7 @@ class BCPPOAgent:
             self.prev_obs = obs
             self.prev_mask = mask
             self._game_start_buf_len = len(self.buffer)
+            self._ppo_game_start_steps = self.ppo_steps
             log(f"PPO game #{self.ppo_games_done + 1} started, "
                 f"floor={getattr(gs, 'floor', '?')} "
                 f"ent_coef={self.trainer.ent_coef:.4f}")
@@ -658,9 +686,14 @@ class BCPPOAgent:
         self.ppo_games_done += 1
         self.total_games += 1
         self.games_since_update += 1
+        fight_stats = self.fight_tracker.finish_game(
+            gs, game=self.total_games, victory=victory
+        )
         n_this_game = len(self.buffer) - self._game_start_buf_len
+        steps_this_game = max(0, self.ppo_steps - self._ppo_game_start_steps)
         n_buffered = len(self.buffer)
         log(f"PPO game #{self.ppo_games_done} ended: {n_this_game} this game "
+            f"{steps_this_game} steps this game "
             f"({n_buffered} buffered, {self.games_since_update}/{self.games_per_update}), "
             f"reward={self.episode_reward:.2f}, victory={victory}")
 
@@ -691,7 +724,7 @@ class BCPPOAgent:
             "timestamp": datetime.now().isoformat(),
             "game": self.total_games,
             "total_updates": self.trainer.total_updates,
-            "steps": self.ppo_steps,
+            "steps": steps_this_game,
             "transitions": n_this_game,
             "total_reward": round(self.episode_reward, 4),
             "final_hp": int(getattr(gs, "current_hp", 0) or 0),
@@ -703,8 +736,17 @@ class BCPPOAgent:
             "pg_loss": round(stats.get("pg_loss", 0.0), 6) if stats else "",
             "vf_loss": round(stats.get("vf_loss", 0.0), 6) if stats else "",
             "entropy": round(stats.get("entropy", 0.0), 6) if stats else "",
+            "elites_fought": fight_stats["elites_fought"],
+            "elites_won": fight_stats["elites_won"],
+            "bosses_fought": fight_stats["bosses_fought"],
+            "bosses_won": fight_stats["bosses_won"],
         }
         _append_stats_csv(row)
+        if fight_stats["elites_fought"] or fight_stats["bosses_fought"]:
+            log(f"  Elites: {fight_stats['elites_won']}/"
+                f"{fight_stats['elites_fought']}  "
+                f"Bosses: {fight_stats['bosses_won']}/"
+                f"{fight_stats['bosses_fought']}")
 
         # Periodic save
         if self.ppo_games_done % self.save_every == 0:
@@ -723,6 +765,7 @@ class BCPPOAgent:
         self.prev_mask = None
         self._stuck_floor = -1
         self._stuck_count = 0
+        self.fight_tracker.reset_game()
         self.ppo_initialized = False
 
     @staticmethod

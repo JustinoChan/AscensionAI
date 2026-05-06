@@ -83,7 +83,10 @@ def main() -> None:
         raise SystemExit(f"{csv_path} has no episode rows yet")
 
     episodes = list(range(1, len(episode_rows) + 1))
-    updates = list(range(1, len(update_rows) + 1))
+    updates = [
+        int(_num(r.get("total_updates"), i + 1))
+        for i, r in enumerate(update_rows)
+    ]
 
     floors = [_num(r.get("final_floor")) for r in episode_rows]
     rewards = [_num(r.get("total_reward")) for r in episode_rows]
@@ -111,7 +114,9 @@ def main() -> None:
     last_floor_avg = floor_avg[-1] if floor_avg else float("nan")
 
     print(f"Stats file: {csv_path}")
-    print(f"Rows logged: {len(rows)}  episodes: {n_total}  updates: {len(update_rows)}")
+    print(f"Rows logged: {len(rows)}  episodes: {n_total}  update rows: {len(update_rows)}")
+    if updates:
+        print(f"PPO updates: {updates[0]}..{updates[-1]}")
     print(f"Games logged: {n_total}  wins: {n_wins}  overall win rate: {n_wins / n_total:.1%}")
     print(f"Best floor reached: {best_floor}")
     print(f"Rolling-{w} avg floor (last): {last_floor_avg:.2f}")
@@ -152,20 +157,21 @@ def main() -> None:
     ax = axes[1][1]
     ax.plot(updates, ent_avg, color="#9467bd", lw=2, label=f"entropy avg{w}")
     ax.set_ylabel("Policy entropy")
+    ax.set_xlabel("PPO update #")
     ax.legend(loc="upper left", fontsize=8)
     ax.grid(alpha=0.3)
 
     ax = axes[2][0]
     ax.plot(updates, pg_avg, color="#ff7f0e", lw=2, label=f"pg_loss avg{w}")
     ax.set_ylabel("Policy loss")
-    ax.set_xlabel("Game #")
+    ax.set_xlabel("PPO update #")
     ax.legend(loc="upper left", fontsize=8)
     ax.grid(alpha=0.3)
 
     ax = axes[2][1]
     ax.plot(updates, vf_avg, color="#17becf", lw=2, label=f"vf_loss avg{w}")
     ax.set_ylabel("Value loss")
-    ax.set_xlabel("Game #")
+    ax.set_xlabel("PPO update #")
     ax.legend(loc="upper left", fontsize=8)
     ax.grid(alpha=0.3)
 

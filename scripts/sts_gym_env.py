@@ -79,6 +79,70 @@ assert NUM_ACTIONS == _NOOP + 1, f"action layout mismatch: {NUM_ACTIONS} vs {_NO
 # ---------------------------------------------------------------------------
 # Action mask
 # ---------------------------------------------------------------------------
+def _truthy_disabled(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    return text in {"1", "true", "yes", "disabled", "locked"}
+
+
+def _event_choice_index(opt: Any, fallback: int) -> int:
+    choice_idx = getattr(opt, "choice_index", None)
+    if choice_idx is None:
+        return fallback
+    try:
+        return int(choice_idx)
+    except Exception:
+        return fallback
+
+
+def _event_choice_targets(gs: Any) -> Dict[int, int]:
+    """Map flat choice slots to CommunicationMod event choice indices.
+
+    CommunicationMod may expose event choices two different ways:
+
+    - ``choice_list`` can be compact, containing only enabled labels.
+    - ``screen.options`` can be full, including locked options first.
+
+    Ranwid's "We Meet Again!" can therefore have ``choice_list`` length 2
+    while ``options`` length is 4. In that case action slot 0 must map to the
+    first enabled option's ``choice_index`` instead of being treated as locked.
+    """
+    choice_list = list(getattr(gs, "choice_list", []) or [])
+    scr = getattr(gs, "screen", None)
+    options = list(getattr(scr, "options", []) or []) if scr else []
+
+    if not options:
+        return {i: i for i in range(min(len(choice_list), MAX_CHOICES))}
+
+    enabled = [
+        (i, opt) for i, opt in enumerate(options)
+        if not _truthy_disabled(getattr(opt, "disabled", False))
+    ]
+    if not enabled:
+        return {}
+
+    compact_enabled = bool(choice_list) and len(choice_list) <= len(enabled)
+    targets: Dict[int, int] = {}
+
+    if compact_enabled:
+        for action_slot, (_option_idx, opt) in enumerate(enabled[:len(choice_list)]):
+            if action_slot >= MAX_CHOICES:
+                break
+            targets[action_slot] = _event_choice_index(opt, action_slot)
+        return targets
+
+    for option_idx, opt in enabled:
+        if option_idx >= MAX_CHOICES:
+            continue
+        targets[option_idx] = _event_choice_index(opt, option_idx)
+    return targets
+
+
 def compute_action_mask(gs: Any) -> np.ndarray:
     """Build a boolean mask of legal actions for the current game state."""
     mask = np.zeros(NUM_ACTIONS, dtype=np.bool_)
@@ -106,19 +170,17 @@ def compute_action_mask(gs: Any) -> np.ndarray:
     alive = living_monsters(monsters)
     n_alive = len(alive)
 
-    has_playable = False
     if in_combat and play_avail:
         for i, card in enumerate(hand[:MAX_HAND]):
             if not getattr(card, "is_playable", False):
                 continue
-            has_playable = True
             if getattr(card, "has_target", False):
                 for j in range(min(n_alive, MAX_MONSTERS)):
                     mask[_PLAY_TARGETED_START + i * MAX_MONSTERS + j] = True
             else:
                 mask[_PLAY_UNTARGETED_START + i] = True
 
-    if in_combat and end_avail and not has_playable:
+    if in_combat and end_avail:
         mask[_END_TURN] = True
 
     if in_combat and potion_avail:
@@ -154,13 +216,15 @@ def compute_action_mask(gs: Any) -> np.ndarray:
         if st_name == "COMBAT_REWARD" and not n_choices and combat_rewards:
             n_choices = len(combat_rewards)
         event_options = list(getattr(scr, "options", []) or []) if st_name == "EVENT" and scr else []
-        if st_name == "EVENT" and not n_choices and event_options:
-            n_choices = len(event_options)
+        event_choice_targets: Dict[int, int] = {}
+        if st_name == "EVENT":
+            event_choice_targets = _event_choice_targets(gs)
+            if event_choice_targets:
+                n_choices = max(event_choice_targets) + 1
 
         for idx in range(min(n_choices, MAX_CHOICES)):
-            if st_name == "EVENT" and idx < len(event_options):
-                if bool(getattr(event_options[idx], "disabled", False)):
-                    continue
+            if st_name == "EVENT" and idx not in event_choice_targets:
+                continue
             if st_name == "COMBAT_REWARD" and potions_full:
                 is_potion = False
                 if idx < len(combat_rewards):
@@ -246,11 +310,9 @@ def flat_action_to_spire_action(action_id: int, gs: Any) -> Action:
         st_name = getattr(screen_type, "name", "") if screen_type else ""
         scr = getattr(gs, "screen", None)
         if st_name == "EVENT" and scr is not None:
-            options = list(getattr(scr, "options", []) or [])
-            if choice_idx < len(options):
-                opt_idx = getattr(options[choice_idx], "choice_index", None)
-                if opt_idx is not None:
-                    return ChooseAction(choice_index=opt_idx)
+            event_choice_targets = _event_choice_targets(gs)
+            if choice_idx in event_choice_targets:
+                return ChooseAction(choice_index=event_choice_targets[choice_idx])
         return ChooseAction(choice_index=choice_idx)
 
     if action_id == _PROCEED:
@@ -280,7 +342,17 @@ PRIORITY_MONSTER_WEIGHTS = {
     "SnakeDagger": 0.12,
     "Dagger": 0.12,
     "SlaverRed": 0.10,
+    "SlaverBlue": 0.08,
+    "SlaverBoss": 0.06,
     "Exploder": 0.10,
+    "GremlinNob": 0.06,
+    "BookOfStabbing": 0.05,
+    "Byrd": 0.04,
+    "Chosen": 0.04,
+    "SnakePlant": 0.05,
+    "ShelledParasite": 0.04,
+    "Mugger": 0.04,
+    "Looter": 0.04,
     "GremlinLeader": 0.04,
     "Reptomancer": 0.04,
     "BronzeAutomaton": 0.03,
@@ -290,11 +362,31 @@ PRIORITY_KILL_BONUS = {
     "SnakeDagger": 4.0,
     "Dagger": 4.0,
     "SlaverRed": 4.0,
+    "SlaverBlue": 2.5,
+    "SlaverBoss": 2.5,
     "Exploder": 3.0,
+    "GremlinNob": 2.5,
+    "BookOfStabbing": 2.5,
+    "Byrd": 1.5,
+    "Chosen": 1.5,
+    "SnakePlant": 2.0,
+    "ShelledParasite": 1.5,
+    "Mugger": 1.5,
+    "Looter": 1.5,
     "GremlinLeader": 2.0,
     "Reptomancer": 2.0,
     "BronzeAutomaton": 1.5,
 }
+
+HP_LOSS_PENALTY = 0.08
+ENEMY_DAMAGE_REWARD = 0.015
+MONSTER_KILL_REWARD = 0.75
+FLOOR_ADVANCE_REWARD = 0.75
+ACT_ADVANCE_REWARD = 12.0
+VICTORY_REWARD = 60.0
+DEFEAT_PENALTY = 25.0
+DEFEAT_FLOOR_OFFSET = 0.25
+MAX_HP_GAIN_REWARD = 0.10
 
 
 class RewardTracker:
@@ -327,14 +419,15 @@ class RewardTracker:
 
     def _priority_hp_map(self, gs: Any) -> Dict[str, int]:
         result: Dict[str, int] = {}
-        for m in (getattr(gs, "monsters", []) or []):
+        for idx, m in enumerate(getattr(gs, "monsters", []) or []):
             mid = str(getattr(m, "monster_id", "") or "")
             if mid not in PRIORITY_MONSTER_WEIGHTS:
                 continue
+            key = f"{idx}:{mid}"
             if getattr(m, "is_gone", False):
-                result[mid] = 0
+                result[key] = 0
                 continue
-            result[mid] = max(0, int(getattr(m, "current_hp", 0) or 0))
+            result[key] = max(0, int(getattr(m, "current_hp", 0) or 0))
         return result
 
     def reset(self, gs: Any) -> None:
@@ -365,22 +458,24 @@ class RewardTracker:
 
         reward += (gold - self.last_gold) * 0.01
         reward += (relic_count - self.last_relics) * 1.0
+        reward += max(0, int(getattr(gs, "max_hp", 0) or 0) - self.last_max_hp) * MAX_HP_GAIN_REWARD
         if deck_size < self.last_deck_size:
             reward += (self.last_deck_size - deck_size) * 0.2
 
         if floor_num > self.last_floor:
-            reward += 0.5
+            reward += FLOOR_ADVANCE_REWARD
 
         if in_combat:
-            reward -= max(0, self.last_hp - hp) * 0.05
+            reward -= max(0, self.last_hp - hp) * HP_LOSS_PENALTY
             e_hp, alive = self._enemy_stats(gs)
             if e_hp is not None and self.last_enemy_hp is not None:
-                reward += max(0, self.last_enemy_hp - e_hp) * 0.02
-            reward += max(0, self.last_alive - alive) * 0.5
+                reward += max(0, self.last_enemy_hp - e_hp) * ENEMY_DAMAGE_REWARD
+            reward += max(0, self.last_alive - alive) * MONSTER_KILL_REWARD
 
             priority_hp = self._priority_hp_map(gs)
-            for mid, prev_hp in self._last_priority_hp.items():
-                cur_hp = priority_hp.get(mid, 0)
+            for key, prev_hp in self._last_priority_hp.items():
+                mid = key.split(":", 1)[1] if ":" in key else key
+                cur_hp = priority_hp.get(key, 0)
                 dmg = max(0, prev_hp - cur_hp)
                 if dmg > 0:
                     reward += dmg * PRIORITY_MONSTER_WEIGHTS.get(mid, 0.03)
@@ -389,14 +484,14 @@ class RewardTracker:
 
         if terminated:
             if victory:
-                reward += 50.0
+                reward += VICTORY_REWARD
             else:
-                reward -= 15.0
-                reward += floor_num * 0.3
+                reward -= DEFEAT_PENALTY
+                reward += floor_num * DEFEAT_FLOOR_OFFSET
 
         act = int(getattr(gs, "act", 0) or 0)
         if act > self._last_act and act > 1:
-            reward += 10.0
+            reward += ACT_ADVANCE_REWARD
         self._last_act = act
 
         self.last_gold = gold

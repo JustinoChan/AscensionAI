@@ -1,6 +1,8 @@
 # AscensionAI
 
-A reinforcement learning agent that learns to play **Slay the Spire** (Ironclad) through online RL, using a Gymnasium-style environment wrapper, PPO fine-tuning, behavior cloning warm-start, and dense reward shaping.
+## About
+
+Reinforcement learning agent designed to play **Slay the Spire** using self-play, neural networks, and environment simulation.
 
 ## Architecture
 
@@ -238,7 +240,8 @@ When **Verbose Logs** is enabled in the Control Panel, or when a script is launc
 | `logs/bug_debug.log` | Stuck-state detection dumps for debugging freezes |
 | `logs/control_panel_debug.log` | `AscensionAI.pyw` — GUI launch, process PIDs, kill results, errors |
 | `logs/training_stats.csv` | Per-game training metrics (floor, HP, reward, loss, elite/boss stats) |
-| `logs/elite_stats.csv` | Per-fight elite and boss encounter details (monsters, HP before/after, win/loss) |
+| `logs/fight_stats.csv` | Per-fight elite and boss encounter details (monsters, HP before/after, win/loss, terminal loss handling) |
+| `logs/elite_stats.csv` | Legacy per-fight elite/boss log kept for older tooling compatibility |
 
 Training stats can be visualized with:
 
@@ -288,9 +291,9 @@ AscensionAI/
 
 2. **Action space** (`sts_gym_env.py`): 134 discrete actions covering targeted/untargeted card plays (50+10), end turn, targeted/untargeted potions (25+5), choice selection (40), proceed, leave, and no-op. Illegal actions are masked out per game state.
 
-3. **Reward shaping** (`sts_gym_env.py`): Dense per-step rewards for gold, relics, floor progression, combat damage, card management, and act advancement — plus terminal bonuses (+50 victory, -5 defeat). Urgent elite targets such as daggers, Gremlin Wizard, Red Slaver, Exploder, and minion-spawner bosses receive extra damage/kill rewards to teach healthier target priority.
+3. **Reward shaping** (`sts_gym_env.py`): Dense per-step rewards for gold, relics, max HP, floor progression, combat damage, card management, and act advancement — plus stronger survival incentives (+60 victory, -25 defeat, and higher HP-loss penalty). Urgent targets such as daggers, Gremlin Wizard, Red/Blue Slaver, Gremlin Nob, Book of Stabbing, Exploder, and minion-spawner bosses receive extra damage/kill rewards to teach healthier target priority.
 
-   **Combat analytics**: Elite and boss fight outcomes are tracked per-game in `training_stats.csv` and per-fight in `elite_stats.csv`, including which monsters were fought, HP before/after, and win/loss. The Control Panel progress panel shows aggregate elite and boss win rates.
+   **Combat analytics**: Elite and boss fight outcomes are tracked per-game in `training_stats.csv` and per-fight in `fight_stats.csv`, including which monsters were fought, HP before/after, win/loss, and whether the fight ended through a terminal death state. The Control Panel progress panel shows aggregate elite and boss win rates from the per-fight log.
 
 4. **Behavior cloning** (`behavior_clone.py`): A hand-coded heuristic plays full games covering every decision surface. The neural network trains on these demonstrations via cross-entropy loss to get a reasonable starting policy.
 

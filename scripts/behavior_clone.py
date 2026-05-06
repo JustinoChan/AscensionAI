@@ -122,10 +122,11 @@ def _screen_key(gs) -> tuple[int, int]:
     )
 
 
-URGENT_MONSTERS = {
-    "SlaverRed", "GremlinWizard", "Exploder", "Mugger", "Looter",
-    "SnakeDagger", "Dagger", "Byrd", "Chosen",
-}
+URGENT_MONSTERS = (
+    "GremlinWizard", "SnakeDagger", "Dagger", "SlaverRed", "Exploder",
+    "SlaverBlue", "SlaverBoss", "GremlinNob", "BookOfStabbing",
+    "SnakePlant", "Chosen", "Byrd", "ShelledParasite", "Mugger", "Looter",
+)
 
 
 def _norm(text: str) -> str:
@@ -237,7 +238,7 @@ def score_card(card, incoming: int, gs=None, target=None) -> float:
         s += (dmg / max(1, cost)) * 1.0
     if is_aoe and len(alive) >= 2:
         s += 5.0 + len(alive)
-    if is_multi_hit and any(_monster_id(m) in {"Byrd", "Shelled Parasite"} for m in alive):
+    if is_multi_hit and any(_monster_id(m) in {"Byrd", "ShelledParasite", "Shelled Parasite"} for m in alive):
         s += 2.5
     if draws:
         s += draws * 1.2
@@ -259,7 +260,12 @@ def score_card(card, incoming: int, gs=None, target=None) -> float:
         s -= 7.0
         if incoming >= 18 and blk > 0:
             s += 4.0
-    if target_id in {"GremlinWizard", "SlaverRed", "SnakeDagger", "Dagger", "Exploder"} and dmg > 0:
+    if target_id in {
+        "GremlinWizard", "SlaverRed", "SlaverBlue", "SlaverBoss",
+        "SnakeDagger", "Dagger", "Exploder", "GremlinNob",
+        "BookOfStabbing", "SnakePlant", "Byrd", "Chosen",
+        "ShelledParasite", "Shelled Parasite", "Mugger", "Looter",
+    } and dmg > 0:
         s += 4.0
     s -= max(0, cost - 1) * 0.3
     return s
@@ -615,6 +621,8 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
                     best_card = card
 
             if best_card is not None:
+                if best_score <= 0.0 and end_avail:
+                    return Action("end"), _END_TURN
                 card_idx = hand.index(best_card)
                 if card_idx < MAX_HAND:
                     if getattr(best_card, "has_target", False):

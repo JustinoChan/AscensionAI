@@ -169,6 +169,7 @@ from sts_gym_env import (
 )
 from ppo_model import PPOTrainer, GameBuffer
 from screen_handler import auto_handle_screen, recover_from_command_error
+from fight_tracker import FightTracker
 
 log("Imports done")
 
@@ -193,6 +194,7 @@ class PPOAgent:
         self.total_steps = 0
         self.games_since_update = 0
         self._game_start_buf_len = 0
+        self._game_start_steps = 0
         self.prev_obs: Optional[np.ndarray] = None
         self.prev_action: Optional[int] = None
         self.prev_log_prob: Optional[float] = None
@@ -205,6 +207,7 @@ class PPOAgent:
         self._stuck_key: str = ""
         self._stuck_count: int = 0
         self._recent_actions: list[str] = []
+        self.fight_tracker = FightTracker(source="train", worker="single", log=log)
 
 
     def _track_stuck(self, screen_name: str, action_cmd: str, in_combat: bool):
@@ -232,6 +235,11 @@ class PPOAgent:
         screen_type = getattr(gs, "screen_type", None)
         screen_name = str(getattr(screen_type, "name", screen_type) or "NONE")
         terminated = is_terminal_state(gs)
+        victory = is_victory_state(gs)
+        self.fight_tracker.observe(
+            gs, game=self.total_games + 1,
+            terminal=terminated, victory=victory,
+        )
 
         if VERBOSE:
             choice_list_v = list(getattr(gs, "choice_list", []) or [])
@@ -247,8 +255,6 @@ class PPOAgent:
                 f"confirm_up={confirm_up_v} potions={pot_ids_v} pot_full={pot_full_v} "
                 f"mask_sum={int(mask.sum())}")
 
-        victory = is_victory_state(gs)
-
         # First state of the game
         if not self.initialized:
             self.reward_tracker.reset(gs)
@@ -257,6 +263,7 @@ class PPOAgent:
             self.prev_obs = obs
             self.prev_mask = mask
             self._game_start_buf_len = len(self.buffer)
+            self._game_start_steps = self.total_steps
             log(f"Game #{self.total_games + 1} started, floor={getattr(gs, 'floor', '?')}")
 
         # Compute reward for the previous action
@@ -348,9 +355,14 @@ class PPOAgent:
     def _end_game(self, final_gs=None, victory: bool = False):
         self.total_games += 1
         self.games_since_update += 1
+        fight_stats = self.fight_tracker.finish_game(
+            final_gs, game=self.total_games, victory=victory
+        )
         n_this_game = len(self.buffer) - self._game_start_buf_len
+        steps_this_game = max(0, self.total_steps - self._game_start_steps)
         n_buffered = len(self.buffer)
         log(f"Game #{self.total_games} ended: {n_this_game} transitions this game "
+            f"{steps_this_game} steps this game "
             f"({n_buffered} buffered, {self.games_since_update}/{self.games_per_update}), "
             f"reward={self.episode_reward:.2f}")
 
@@ -370,7 +382,7 @@ class PPOAgent:
             "timestamp": datetime.now().isoformat(),
             "game": self.total_games,
             "total_updates": self.trainer.total_updates,
-            "steps": self.total_steps,
+            "steps": steps_this_game,
             "transitions": n_this_game,
             "total_reward": round(self.episode_reward, 4),
             "final_hp": int(getattr(final_gs, "current_hp", 0) or 0) if final_gs is not None else "",
@@ -382,8 +394,17 @@ class PPOAgent:
             "pg_loss": round(stats.get("pg_loss", 0.0), 6) if stats else "",
             "vf_loss": round(stats.get("vf_loss", 0.0), 6) if stats else "",
             "entropy": round(stats.get("entropy", 0.0), 6) if stats else "",
+            "elites_fought": fight_stats["elites_fought"],
+            "elites_won": fight_stats["elites_won"],
+            "bosses_fought": fight_stats["bosses_fought"],
+            "bosses_won": fight_stats["bosses_won"],
         }
         _append_stats_csv(row)
+        if fight_stats["elites_fought"] or fight_stats["bosses_fought"]:
+            log(f"  Elites: {fight_stats['elites_won']}/"
+                f"{fight_stats['elites_fought']}  "
+                f"Bosses: {fight_stats['bosses_won']}/"
+                f"{fight_stats['bosses_fought']}")
 
         if self.total_games % self.save_every == 0:
             self.trainer.save(self.save_path)
@@ -399,6 +420,7 @@ class PPOAgent:
         self._stuck_key = ""
         self._stuck_count = 0
         self._recent_actions.clear()
+        self.fight_tracker.reset_game()
         self.prev_mask = None
         self.initialized = False
 

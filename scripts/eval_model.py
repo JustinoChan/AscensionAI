@@ -47,6 +47,7 @@ if _scripts not in sys.path:
     sys.path.insert(0, _scripts)
 
 import argparse
+import csv
 import traceback
 from datetime import datetime
 from typing import Any, Optional
@@ -66,6 +67,7 @@ from sts_gym_env import (
 )
 from ppo_model import PPOTrainer
 from screen_handler import auto_handle_screen, recover_from_command_error
+from fight_tracker import FightTracker
 
 
 os.makedirs(os.path.join(_root, "logs"), exist_ok=True)
@@ -76,6 +78,7 @@ VERBOSE = os.environ.get("ASCENSION_VERBOSE", "0") == "1"
 _EVAL_COLUMNS = [
     "timestamp", "run", "game", "steps", "total_reward",
     "final_hp", "final_max_hp", "final_floor", "final_act", "victory",
+    "elites_fought", "elites_won", "bosses_fought", "bosses_won",
 ]
 
 
@@ -90,14 +93,30 @@ def log(msg: str) -> None:
 def _init_csv() -> None:
     os.makedirs(os.path.dirname(EVAL_CSV), exist_ok=True)
     if not os.path.exists(EVAL_CSV):
-        with open(EVAL_CSV, "w", encoding="utf-8") as f:
-            f.write(",".join(_EVAL_COLUMNS) + "\n")
+        with open(EVAL_CSV, "w", encoding="utf-8", newline="") as f:
+            csv.DictWriter(f, fieldnames=_EVAL_COLUMNS).writeheader()
+        return
+
+    try:
+        with open(EVAL_CSV, "r", encoding="utf-8", newline="") as f:
+            reader = csv.DictReader(f)
+            if reader.fieldnames and all(c in reader.fieldnames for c in _EVAL_COLUMNS):
+                return
+            rows = list(reader)
+        with open(EVAL_CSV, "w", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=_EVAL_COLUMNS, extrasaction="ignore")
+            writer.writeheader()
+            writer.writerows(rows)
+    except Exception as e:
+        log(f"eval csv migration failed: {e}")
 
 
 def _append_csv(row: dict) -> None:
     try:
-        with open(EVAL_CSV, "a", encoding="utf-8") as f:
-            f.write(",".join(str(row.get(c, "")) for c in _EVAL_COLUMNS) + "\n")
+        _init_csv()
+        with open(EVAL_CSV, "a", encoding="utf-8", newline="") as f:
+            csv.DictWriter(f, fieldnames=_EVAL_COLUMNS,
+                           extrasaction="ignore").writerow(row)
     except Exception as e:
         log(f"csv append failed: {e}")
 
@@ -137,6 +156,11 @@ class EvalAgent:
         self.wins = 0
         self.sum_floor = 0
         self.sum_reward = 0.0
+        self.elites_fought = 0
+        self.elites_won = 0
+        self.bosses_fought = 0
+        self.bosses_won = 0
+        self.fight_tracker = FightTracker(source="eval", worker="eval", log=log)
 
     def on_state_change(self, gs) -> Action:
         try:
@@ -152,6 +176,10 @@ class EvalAgent:
         terminal = is_terminal_state(gs)
 
         victory = is_victory_state(gs)
+        self.fight_tracker.observe(
+            gs, game=self.games_played + 1,
+            terminal=terminal, victory=victory,
+        )
 
         if not self.initialized:
             self.reward_tracker.reset(gs)
@@ -170,7 +198,9 @@ class EvalAgent:
                     f"EVAL COMPLETE: {self.games_played} games, "
                     f"wins={self.wins} ({self.wins / max(1, self.games_played):.1%}), "
                     f"avg_floor={self.sum_floor / max(1, self.games_played):.2f}, "
-                    f"avg_reward={self.sum_reward / max(1, self.games_played):.2f}"
+                    f"avg_reward={self.sum_reward / max(1, self.games_played):.2f}, "
+                    f"elites={self.elites_won}/{self.elites_fought}, "
+                    f"bosses={self.bosses_won}/{self.bosses_fought}"
                 )
                 log(summary)
                 print(summary, file=sys.stderr)
@@ -209,6 +239,13 @@ class EvalAgent:
     def _end_game(self, final_gs, victory: bool) -> None:
         self.games_played += 1
         floor = int(getattr(final_gs, "floor", 0) or 0)
+        fight_stats = self.fight_tracker.finish_game(
+            final_gs, game=self.games_played, victory=victory
+        )
+        self.elites_fought += fight_stats["elites_fought"]
+        self.elites_won += fight_stats["elites_won"]
+        self.bosses_fought += fight_stats["bosses_fought"]
+        self.bosses_won += fight_stats["bosses_won"]
         self.sum_floor += floor
         self.sum_reward += self.episode_reward
         if victory:
@@ -225,11 +262,17 @@ class EvalAgent:
             "final_floor": floor,
             "final_act": int(getattr(final_gs, "act", 0) or 0),
             "victory": int(bool(victory)),
+            "elites_fought": fight_stats["elites_fought"],
+            "elites_won": fight_stats["elites_won"],
+            "bosses_fought": fight_stats["bosses_fought"],
+            "bosses_won": fight_stats["bosses_won"],
         })
         log(
             f"Game #{self.games_played}: floor={floor} "
             f"hp={getattr(final_gs, 'current_hp', '?')} victory={victory} "
-            f"reward={self.episode_reward:.2f}"
+            f"reward={self.episode_reward:.2f} "
+            f"elites={fight_stats['elites_won']}/{fight_stats['elites_fought']} "
+            f"bosses={fight_stats['bosses_won']}/{fight_stats['bosses_fought']}"
         )
 
         self.episode_reward = 0.0

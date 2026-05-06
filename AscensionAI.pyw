@@ -26,6 +26,7 @@ if not _in_venv and _VENV_PYTHONW.exists():
 
 import csv as _csv
 import logging
+import re
 import shutil
 import time
 import traceback
@@ -519,11 +520,14 @@ class AscensionApp:
         self.stats_vars = {
             "train_line": tk.StringVar(value="Training:  no data yet"),
             "detail_line": tk.StringVar(value=""),
+            "combat_line": tk.StringVar(value=""),
             "eval_line": tk.StringVar(value="Eval:  no data yet"),
         }
         ttk.Label(stats_frame, textvariable=self.stats_vars["train_line"],
                   font=("Consolas", 10)).pack(anchor="w")
         ttk.Label(stats_frame, textvariable=self.stats_vars["detail_line"],
+                  font=("Consolas", 10)).pack(anchor="w", pady=(2, 0))
+        ttk.Label(stats_frame, textvariable=self.stats_vars["combat_line"],
                   font=("Consolas", 10)).pack(anchor="w", pady=(2, 0))
         ttk.Label(stats_frame, textvariable=self.stats_vars["eval_line"],
                   font=("Consolas", 10)).pack(anchor="w", pady=(2, 0))
@@ -705,6 +709,50 @@ class AscensionApp:
 
     # ----- Progress stats -----
 
+    def _load_fight_stats(self, *, include_eval: bool = False) -> dict:
+        csv_path = ROOT / "logs" / "fight_stats.csv"
+        result = {
+            "has_data": False,
+            "elites_fought": 0,
+            "elites_won": 0,
+            "bosses_fought": 0,
+            "bosses_won": 0,
+        }
+        if not csv_path.exists():
+            return result
+        try:
+            with open(csv_path, "r", encoding="utf-8", newline="") as f:
+                rows = list(_csv.DictReader(f))
+        except Exception as e:
+            _logger.warning(f"Failed to parse fight_stats.csv: {e}")
+            return result
+
+        for r in rows:
+            source = str(r.get("source") or "")
+            if not include_eval and source == "eval":
+                continue
+            fight_type = str(r.get("fight_type") or "").lower()
+            room_type = str(r.get("room_type") or "")
+            if not fight_type:
+                if "Boss" in room_type:
+                    fight_type = "boss"
+                elif "Elite" in room_type:
+                    fight_type = "elite"
+            if fight_type not in ("elite", "boss"):
+                continue
+            try:
+                won = int(float(r.get("won") or 0))
+            except Exception:
+                won = 0
+            result["has_data"] = True
+            if fight_type == "elite":
+                result["elites_fought"] += 1
+                result["elites_won"] += won
+            else:
+                result["bosses_fought"] += 1
+                result["bosses_won"] += won
+        return result
+
     def _load_training_stats(self) -> dict | None:
         csv_path = ROOT / "logs" / "training_stats.csv"
         if not csv_path.exists():
@@ -721,8 +769,10 @@ class AscensionApp:
         game_rows = [r for r in rows if r.get("final_floor") not in (None, "")]
         floors, rewards, wins, best_floor, best_act = [], [], 0, 0, 0
         updates, total_transitions, total_steps = 0, 0, 0
-        total_elites_fought, total_elites_won = 0, 0
-        total_bosses_fought, total_bosses_won = 0, 0
+        trainer_transitions = 0
+        trainer_transition_rows = 0
+        prev_cumulative_transitions: dict[str, int] = {}
+        prev_cumulative_steps: dict[str, int] = {}
         acts, victories = [], []
         parse_errors = 0
         for r in game_rows:
@@ -757,11 +807,65 @@ class AscensionApp:
             except Exception:
                 parse_errors += 1
             try:
-                total_transitions += int(float(r.get("transitions") or 0))
+                raw_transitions = int(float(r.get("transitions") or 0))
+                worker = str(r.get("worker") or "single")
+                series_key = worker
+                # Older BC/single rows wrote cumulative demo counts here.
+                # Worker rollout rows are normally per-game and much smaller.
+                looks_cumulative = (
+                    series_key in prev_cumulative_transitions
+                    and raw_transitions >= prev_cumulative_transitions[series_key]
+                    and raw_transitions > 1000
+                ) or (worker == "single" and raw_transitions > 1000)
+                if looks_cumulative:
+                    prev = prev_cumulative_transitions.get(series_key)
+                    if prev is not None and raw_transitions >= prev:
+                        transitions = raw_transitions - prev
+                    else:
+                        transitions = raw_transitions
+                    prev_cumulative_transitions[series_key] = raw_transitions
+                else:
+                    transitions = raw_transitions
+                    if (series_key in prev_cumulative_transitions
+                            and raw_transitions < prev_cumulative_transitions[series_key]):
+                        prev_cumulative_transitions.pop(series_key, None)
+                total_transitions += max(0, transitions)
             except Exception:
                 pass
             try:
-                total_steps += int(float(r.get("steps") or 0))
+                raw_steps = int(float(r.get("steps") or 0))
+                transitions = int(float(r.get("transitions") or 0))
+                worker = str(r.get("worker") or "single")
+                game_no = str(r.get("game") or "")
+                series_key = worker
+                # Older worker/BC rows wrote lifetime step counters while
+                # transitions were per-game. Diff monotonic counters so the
+                # progress panel does not count game 1 + game 2 + ... totals.
+                looks_cumulative = (
+                    raw_steps > max(1000, transitions * 8)
+                    or (
+                        series_key in prev_cumulative_steps
+                        and raw_steps >= prev_cumulative_steps[series_key]
+                        and transitions > 0
+                        and raw_steps > transitions * 3
+                    )
+                )
+                if looks_cumulative:
+                    prev = prev_cumulative_steps.get(series_key)
+                    if prev is not None and raw_steps >= prev:
+                        steps = raw_steps - prev
+                    else:
+                        steps = max(transitions, min(raw_steps, transitions * 3))
+                    prev_cumulative_steps[series_key] = raw_steps
+                    _logger.debug(
+                        f"Corrected cumulative steps row worker={worker} "
+                        f"game={game_no}: raw={raw_steps} -> {steps}"
+                    )
+                else:
+                    steps = raw_steps
+                    if series_key in prev_cumulative_steps and raw_steps < prev_cumulative_steps[series_key]:
+                        prev_cumulative_steps.pop(series_key, None)
+                total_steps += max(0, steps)
             except Exception:
                 pass
             try:
@@ -771,19 +875,20 @@ class AscensionApp:
                     best_act = act
             except Exception:
                 pass
-            try:
-                total_elites_fought += int(float(r.get("elites_fought") or 0))
-                total_elites_won += int(float(r.get("elites_won") or 0))
-            except Exception:
-                pass
-            try:
-                total_bosses_fought += int(float(r.get("bosses_fought") or 0))
-                total_bosses_won += int(float(r.get("bosses_won") or 0))
-            except Exception:
-                pass
         if parse_errors:
             _logger.debug(f"training_stats.csv: {parse_errors} field parse error(s) "
                           f"across {len(game_rows)} game rows")
+
+        for r in rows:
+            if str(r.get("worker") or "") != "trainer":
+                continue
+            try:
+                trainer_transitions += int(float(r.get("transitions") or 0))
+                trainer_transition_rows += 1
+            except Exception:
+                pass
+
+        display_transitions = trainer_transitions if trainer_transitions else total_transitions
 
         recent_n = 25
         recent_floors = floors[-recent_n:]
@@ -807,6 +912,8 @@ class AscensionApp:
             else:
                 model_age = f"{mins // 1440}d {(mins % 1440) // 60}h ago"
 
+        fight_stats = self._load_fight_stats(include_eval=False)
+
         return {
             "total": len(game_rows),
             "wins": wins,
@@ -817,14 +924,17 @@ class AscensionApp:
             "avg_floor": sum(recent_floors) / len(recent_floors) if recent_floors else 0.0,
             "avg_reward": sum(recent_rewards) / len(recent_rewards) if recent_rewards else 0.0,
             "updates": updates,
-            "total_transitions": total_transitions,
+            "total_transitions": display_transitions,
+            "episode_transitions": total_transitions,
+            "trainer_transition_rows": trainer_transition_rows,
             "total_steps": total_steps,
             "rollouts_pending": rollouts_pending,
             "model_age": model_age,
-            "elites_fought": total_elites_fought,
-            "elites_won": total_elites_won,
-            "bosses_fought": total_bosses_fought,
-            "bosses_won": total_bosses_won,
+            "fight_stats_available": fight_stats["has_data"],
+            "elites_fought": fight_stats["elites_fought"],
+            "elites_won": fight_stats["elites_won"],
+            "bosses_fought": fight_stats["bosses_fought"],
+            "bosses_won": fight_stats["bosses_won"],
         }
 
     def _load_eval_stats(self) -> dict | None:
@@ -844,6 +954,10 @@ class AscensionApp:
         try:
             wins = sum(1 for r in run_rows if int(float(r.get("victory") or 0)))
             floors = [float(r.get("final_floor") or 0) for r in run_rows]
+            elites_fought = sum(int(float(r.get("elites_fought") or 0)) for r in run_rows)
+            elites_won = sum(int(float(r.get("elites_won") or 0)) for r in run_rows)
+            bosses_fought = sum(int(float(r.get("bosses_fought") or 0)) for r in run_rows)
+            bosses_won = sum(int(float(r.get("bosses_won") or 0)) for r in run_rows)
         except Exception as e:
             _logger.warning(f"Error parsing eval_stats.csv run '{last_tag}': {e}")
             return None
@@ -852,6 +966,10 @@ class AscensionApp:
             "win_rate": wins / len(run_rows) if run_rows else 0.0,
             "avg_floor": sum(floors) / len(floors) if floors else 0.0,
             "run": last_tag,
+            "elites_fought": elites_fought,
+            "elites_won": elites_won,
+            "bosses_fought": bosses_fought,
+            "bosses_won": bosses_won,
         }
 
     def _refresh_stats(self):
@@ -871,28 +989,53 @@ class AscensionApp:
                     f"Updates: {ts['updates']}",
                     f"Avg Reward: {ts['avg_reward']:.1f}",
                 ]
-                if ts['elites_fought']:
-                    ew = ts['elites_won'] / ts['elites_fought']
-                    detail_parts.append(
-                        f"Elites: {ts['elites_won']}/{ts['elites_fought']} ({ew:.0%})"
-                    )
-                if ts['bosses_fought']:
-                    bw = ts['bosses_won'] / ts['bosses_fought']
-                    detail_parts.append(
-                        f"Bosses: {ts['bosses_won']}/{ts['bosses_fought']} ({bw:.0%})"
-                    )
                 if ts['rollouts_pending']:
                     detail_parts.append(f"Rollouts Queued: {ts['rollouts_pending']}")
                 if ts['model_age']:
                     detail_parts.append(f"Model: {ts['model_age']}")
                 self.stats_vars["detail_line"].set("  " + "  |  ".join(detail_parts))
 
+                combat_parts = []
+                if ts["elites_fought"]:
+                    ew = ts["elites_won"] / ts["elites_fought"]
+                    combat_parts.append(
+                        f"Elites: {ts['elites_won']}/{ts['elites_fought']} ({ew:.0%})"
+                    )
+                if ts["bosses_fought"]:
+                    bw = ts["bosses_won"] / ts["bosses_fought"]
+                    combat_parts.append(
+                        f"Bosses: {ts['bosses_won']}/{ts['bosses_fought']} ({bw:.0%})"
+                    )
+                if combat_parts:
+                    self.stats_vars["combat_line"].set(
+                        "Fights:  " + "  |  ".join(combat_parts)
+                    )
+                elif ts["fight_stats_available"]:
+                    self.stats_vars["combat_line"].set(
+                        "Fights:  no elite/boss fights tracked yet"
+                    )
+                else:
+                    self.stats_vars["combat_line"].set(
+                        "Fights:  waiting for post-fix fight data"
+                    )
+
             es = self._load_eval_stats()
             if es:
+                eval_parts = [
+                    f"Eval ({es['run']}):  {es['games']} games",
+                    f"Win Rate: {es['win_rate']:.0%}",
+                    f"Avg Floor: {es['avg_floor']:.1f}",
+                ]
+                if es["elites_fought"]:
+                    eval_parts.append(
+                        f"Elites: {es['elites_won']}/{es['elites_fought']}"
+                    )
+                if es["bosses_fought"]:
+                    eval_parts.append(
+                        f"Bosses: {es['bosses_won']}/{es['bosses_fought']}"
+                    )
                 self.stats_vars["eval_line"].set(
-                    f"Eval ({es['run']}):  {es['games']} games  |  "
-                    f"Win Rate: {es['win_rate']:.0%}  |  "
-                    f"Avg Floor: {es['avg_floor']:.1f}"
+                    "  |  ".join(eval_parts)
                 )
             if self.running and self.trainer_proc is not None:
                 rc = self.trainer_proc.poll()
@@ -1384,6 +1527,21 @@ class AscensionApp:
         else:
             self._wait_single_then_stop(mode)
 
+    _GAME_END_RE = re.compile(
+        r"(?m)^\d{4}-\d{2}-\d{2}T.*"
+        r"(?:Game #\d+|PPO game #\d+|BC game #\d+|Demo game #\d+) "
+        r"ended\b"
+    )
+    _EVAL_GAME_RE = re.compile(
+        r"(?m)^\d{4}-\d{2}-\d{2}T.*Game #\d+: floor="
+    )
+
+    def _count_completed_games_in_log(self, text: str, mode: str = "") -> int:
+        """Count full-run completions without matching fight/act transitions."""
+        if mode == "eval":
+            return len(self._EVAL_GAME_RE.findall(text))
+        return len(self._GAME_END_RE.findall(text))
+
     def _wait_single_then_stop(self, mode: str):
         """Wait for single-instance mode to finish its current game."""
         log_map = {
@@ -1401,8 +1559,8 @@ class AscensionApp:
         if log_file.exists():
             try:
                 text = log_file.read_text(encoding="utf-8", errors="replace")
-                baseline_ended = text.count(" ended")
-                _logger.info(f"Baseline ' ended' count: {baseline_ended} "
+                baseline_ended = self._count_completed_games_in_log(text, mode)
+                _logger.info(f"Baseline completed-game count: {baseline_ended} "
                              f"(log size={len(text)} bytes)")
             except OSError as e:
                 _logger.warning(f"Failed to read log for baseline: {e}")
@@ -1417,7 +1575,7 @@ class AscensionApp:
             if log_file.exists():
                 try:
                     text = log_file.read_text(encoding="utf-8", errors="replace")
-                    current_ended = text.count(" ended")
+                    current_ended = self._count_completed_games_in_log(text, mode)
                     if current_ended > baseline_ended:
                         elapsed = time.time() - start
                         _logger.info(f"Game ended detected: count {baseline_ended}->{current_ended} "
@@ -1446,13 +1604,16 @@ class AscensionApp:
         """Wait for parallel workers to finish their current games."""
         game_counts: dict[int, int] = {}
         log_dir = ROOT / "logs"
+        worker_ids = sorted(self._worker_commands.keys())
+        if not worker_ids:
+            worker_ids = list(range(1, int(getattr(self, "_n_workers", 0) or 0) + 1))
 
-        for i in range(1, 9):
+        for i in worker_ids:
             log_file = log_dir / f"worker_{i}_debug.log"
             if log_file.exists():
                 try:
                     text = log_file.read_text(encoding="utf-8", errors="replace")
-                    ended = text.count(" ended:")
+                    ended = self._count_completed_games_in_log(text, "worker")
                     game_counts[i] = ended
                     _logger.info(f"Worker {i} baseline: {ended} games ended "
                                  f"(log size={len(text)} bytes)")
@@ -1481,7 +1642,7 @@ class AscensionApp:
                 try:
                     if log_file.exists():
                         text = log_file.read_text(encoding="utf-8", errors="replace")
-                        current_ended = text.count(" ended:")
+                        current_ended = self._count_completed_games_in_log(text, "worker")
                         if current_ended > baseline_ended:
                             elapsed = time.time() - start
                             _logger.info(f"Worker {worker_id} game ended: "
