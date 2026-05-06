@@ -205,7 +205,119 @@ def launch_sts(skip_launcher: bool = False) -> subprocess.Popen:
         creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
     )
     _logger.info(f"STS process spawned: PID {proc.pid}")
+    if skip_launcher:
+        threading.Thread(
+            target=_auto_press_mts_play,
+            args=(proc.pid,),
+            daemon=True,
+        ).start()
     return proc
+
+
+def _get_window_title(user32, hwnd) -> str:
+    """Return a Win32 top-level window title, or an empty string on failure."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        length = user32.GetWindowTextLengthW(wintypes.HWND(hwnd))
+        if length <= 0:
+            return ""
+        buf = ctypes.create_unicode_buffer(length + 1)
+        user32.GetWindowTextW(wintypes.HWND(hwnd), buf, length + 1)
+        return buf.value
+    except Exception:
+        return ""
+
+
+def _find_mts_launcher_windows() -> list[int]:
+    """Find visible ModTheSpire launcher windows for the auto-Play fallback."""
+    if platform.system() != "Windows":
+        return []
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        found: list[int] = []
+
+        @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        def enum_proc(hwnd, lparam):
+            if not user32.IsWindowVisible(hwnd):
+                return True
+            title = _get_window_title(user32, hwnd)
+            if title.startswith("ModTheSpire"):
+                found.append(int(hwnd))
+            return True
+
+        user32.EnumWindows(enum_proc, 0)
+        return found
+    except Exception as e:
+        _logger.debug(f"Could not enumerate ModTheSpire windows: {e}")
+        return []
+
+
+def _click_mts_play(hwnd: int) -> bool:
+    """Press Enter/click the Play button on a visible ModTheSpire launcher."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+        title = _get_window_title(user32, hwnd)
+        if not title.startswith("ModTheSpire") or not user32.IsWindowVisible(wintypes.HWND(hwnd)):
+            return False
+
+        _logger.info(f"ModTheSpire launcher detected ({title}); pressing Play")
+        user32.ShowWindow(wintypes.HWND(hwnd), 9)  # SW_RESTORE
+        user32.SetForegroundWindow(wintypes.HWND(hwnd))
+        time.sleep(0.2)
+
+        # The launcher normally focuses Play by default, so Enter is the least
+        # intrusive path. If focus is elsewhere, fall back to the button area.
+        user32.keybd_event(0x0D, 0, 0, 0)  # VK_RETURN down
+        user32.keybd_event(0x0D, 0, 2, 0)  # KEYEVENTF_KEYUP
+        time.sleep(1.5)
+
+        title = _get_window_title(user32, hwnd)
+        if not title.startswith("ModTheSpire") or not user32.IsWindowVisible(wintypes.HWND(hwnd)):
+            return True
+
+        rect = wintypes.RECT()
+        if not user32.GetWindowRect(wintypes.HWND(hwnd), ctypes.byref(rect)):
+            return False
+
+        width = max(1, rect.right - rect.left)
+        x = rect.left + max(80, min(120, width // 7))
+        y = rect.bottom - 22
+
+        old_pos = wintypes.POINT()
+        have_old_pos = bool(user32.GetCursorPos(ctypes.byref(old_pos)))
+        user32.SetForegroundWindow(wintypes.HWND(hwnd))
+        time.sleep(0.1)
+        user32.SetCursorPos(x, y)
+        time.sleep(0.05)
+        user32.mouse_event(0x0002, 0, 0, 0, 0)  # MOUSEEVENTF_LEFTDOWN
+        user32.mouse_event(0x0004, 0, 0, 0, 0)  # MOUSEEVENTF_LEFTUP
+        if have_old_pos:
+            user32.SetCursorPos(old_pos.x, old_pos.y)
+        return True
+    except Exception as e:
+        _logger.warning(f"Failed to auto-press ModTheSpire Play: {e}")
+        return False
+
+
+def _auto_press_mts_play(proc_pid: int, timeout_sec: float = 45.0):
+    """Click Play if --skip-launcher fails and ModTheSpire shows its launcher."""
+    deadline = time.time() + timeout_sec
+    clicked: set[int] = set()
+    while time.time() < deadline:
+        windows = [hwnd for hwnd in _find_mts_launcher_windows() if hwnd not in clicked]
+        if windows:
+            for hwnd in windows:
+                if _click_mts_play(hwnd):
+                    clicked.add(hwnd)
+            return
+        time.sleep(0.5)
+    _logger.debug(f"No ModTheSpire launcher fallback needed for PID {proc_pid}")
 
 
 # ---------------------------------------------------------------------------

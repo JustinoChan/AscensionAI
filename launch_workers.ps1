@@ -87,8 +87,9 @@ runAtGameStart=true
 }
 
 function Launch-STS {
+    $args = @("-jar", "`"$MtsLauncher`"", "--skip-launcher")
     $proc = Start-Process -FilePath $JavaExe `
-        -ArgumentList "-jar", "`"$MtsLauncher`"" `
+        -ArgumentList $args `
         -WorkingDirectory $StsDir `
         -PassThru
     return $proc
