@@ -12,7 +12,7 @@ and draws rolling-average curves for:
 Usage:
     python scripts/plot_training.py                 # show interactive window
     python scripts/plot_training.py --save out.png   # write PNG instead
-    python scripts/plot_training.py --window 25      # rolling window size
+    python scripts/plot_training.py --window 100     # primary rolling window size
 """
 
 from __future__ import annotations
@@ -63,11 +63,42 @@ def _rolling(values: List[float], window: int) -> List[float]:
     return out
 
 
+def _expanding(values: List[float]) -> List[float]:
+    out = []
+    running = 0.0
+    count = 0
+    for v in values:
+        if v != v:  # NaN
+            out.append(float("nan"))
+            continue
+        running += v
+        count += 1
+        out.append(running / count)
+    return out
+
+
+def _plot_trend(ax, x, values, short_avg, main_avg, lifetime_avg,
+                ylabel: str, color: str, short_color: str,
+                short_window: int, main_window: int, per_label: str = "per game") -> None:
+    ax.plot(x, values, color="#bbb", lw=0.55, alpha=0.7, label=per_label)
+    if short_window > 0 and short_window != main_window:
+        ax.plot(x, short_avg, color=short_color, lw=1.1, alpha=0.65,
+                label=f"avg{short_window}")
+    ax.plot(x, main_avg, color=color, lw=2.3, label=f"avg{main_window}")
+    ax.plot(x, lifetime_avg, color="#222", lw=1.1, ls="--", alpha=0.75,
+            label="lifetime")
+    ax.set_ylabel(ylabel)
+    ax.legend(loc="upper left", fontsize=8)
+    ax.grid(alpha=0.3)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--csv", type=str, default=None)
     parser.add_argument("--save", type=str, default=None, help="Save to PNG instead of showing")
-    parser.add_argument("--window", type=int, default=25, help="Rolling average window")
+    parser.add_argument("--window", type=int, default=100, help="Primary rolling average window")
+    parser.add_argument("--short-window", type=int, default=25,
+                        help="Secondary short-term rolling average window")
     args = parser.parse_args()
 
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -100,18 +131,30 @@ def main() -> None:
     vf = [_num(r.get("vf_loss")) for r in update_rows]
     ent = [_num(r.get("entropy")) for r in update_rows]
 
-    w = args.window
+    w = max(1, args.window)
+    sw = max(0, args.short_window)
     floor_avg = _rolling(floors, w)
+    floor_short = _rolling(floors, sw) if sw else []
+    floor_lifetime = _expanding(floors)
     reward_avg = _rolling(rewards, w)
+    reward_short = _rolling(rewards, sw) if sw else []
+    reward_lifetime = _expanding(rewards)
     win_avg = _rolling(victories, w)
+    win_short = _rolling(victories, sw) if sw else []
+    win_lifetime = _expanding(victories)
     ent_avg = _rolling(ent, w)
+    ent_short = _rolling(ent, sw) if sw else []
     pg_avg = _rolling(pg, w)
+    pg_short = _rolling(pg, sw) if sw else []
     vf_avg = _rolling(vf, w)
+    vf_short = _rolling(vf, sw) if sw else []
 
     n_total = len(episode_rows)
     n_wins = int(sum(v for v in victories if v == v))
     best_floor = max((f for f in floors if f == f), default=float("nan"))
     last_floor_avg = floor_avg[-1] if floor_avg else float("nan")
+    last_floor_short = floor_short[-1] if floor_short else float("nan")
+    last_floor_lifetime = floor_lifetime[-1] if floor_lifetime else float("nan")
 
     print(f"Stats file: {csv_path}")
     print(f"Rows logged: {len(rows)}  episodes: {n_total}  update rows: {len(update_rows)}")
@@ -119,7 +162,10 @@ def main() -> None:
         print(f"PPO updates: {updates[0]}..{updates[-1]}")
     print(f"Games logged: {n_total}  wins: {n_wins}  overall win rate: {n_wins / n_total:.1%}")
     print(f"Best floor reached: {best_floor}")
+    if sw:
+        print(f"Rolling-{sw} avg floor (last): {last_floor_short:.2f}")
     print(f"Rolling-{w} avg floor (last): {last_floor_avg:.2f}")
+    print(f"Lifetime avg floor (last): {last_floor_lifetime:.2f}")
 
     try:
         if args.save:
@@ -130,46 +176,52 @@ def main() -> None:
         print("\nmatplotlib not installed; install with: pip install matplotlib", file=sys.stderr)
         return
 
-    fig, axes = plt.subplots(3, 2, figsize=(12, 9), sharex=True)
-    fig.suptitle(f"AscensionAI training curves (rolling window = {w})")
+    fig, axes = plt.subplots(3, 2, figsize=(12, 9))
+    subtitle = f"primary rolling window = {w}"
+    if sw and sw != w:
+        subtitle += f", short window = {sw}"
+    fig.suptitle(f"AscensionAI training curves ({subtitle})")
 
     ax = axes[0][0]
-    ax.plot(episodes, floors, color="#bbb", lw=0.6, label="per game")
-    ax.plot(episodes, floor_avg, color="#1f77b4", lw=2, label=f"avg{w}")
-    ax.set_ylabel("Final floor")
-    ax.legend(loc="upper left", fontsize=8)
-    ax.grid(alpha=0.3)
+    _plot_trend(ax, episodes, floors, floor_short, floor_avg, floor_lifetime,
+                "Final floor", "#1f77b4", "#74a9cf", sw, w)
 
     ax = axes[0][1]
-    ax.plot(episodes, rewards, color="#bbb", lw=0.6, label="per game")
-    ax.plot(episodes, reward_avg, color="#2ca02c", lw=2, label=f"avg{w}")
-    ax.set_ylabel("Episode reward")
-    ax.legend(loc="upper left", fontsize=8)
-    ax.grid(alpha=0.3)
+    _plot_trend(ax, episodes, rewards, reward_short, reward_avg, reward_lifetime,
+                "Episode reward", "#2ca02c", "#98df8a", sw, w)
 
     ax = axes[1][0]
-    ax.plot(episodes, win_avg, color="#d62728", lw=2, label=f"win rate avg{w}")
+    _plot_trend(ax, episodes, victories, win_short, win_avg, win_lifetime,
+                "Win rate", "#d62728", "#ff9896", sw, w)
     ax.set_ylabel("Win rate")
     ax.set_ylim(-0.02, 1.02)
-    ax.legend(loc="upper left", fontsize=8)
-    ax.grid(alpha=0.3)
+    ax.set_xlabel("Game #")
 
     ax = axes[1][1]
-    ax.plot(updates, ent_avg, color="#9467bd", lw=2, label=f"entropy avg{w}")
+    if sw and sw != w:
+        ax.plot(updates, ent_short, color="#c5b0d5", lw=1.1, alpha=0.65,
+                label=f"entropy avg{sw}")
+    ax.plot(updates, ent_avg, color="#9467bd", lw=2.3, label=f"entropy avg{w}")
     ax.set_ylabel("Policy entropy")
     ax.set_xlabel("PPO update #")
     ax.legend(loc="upper left", fontsize=8)
     ax.grid(alpha=0.3)
 
     ax = axes[2][0]
-    ax.plot(updates, pg_avg, color="#ff7f0e", lw=2, label=f"pg_loss avg{w}")
+    if sw and sw != w:
+        ax.plot(updates, pg_short, color="#ffbb78", lw=1.1, alpha=0.65,
+                label=f"pg_loss avg{sw}")
+    ax.plot(updates, pg_avg, color="#ff7f0e", lw=2.3, label=f"pg_loss avg{w}")
     ax.set_ylabel("Policy loss")
     ax.set_xlabel("PPO update #")
     ax.legend(loc="upper left", fontsize=8)
     ax.grid(alpha=0.3)
 
     ax = axes[2][1]
-    ax.plot(updates, vf_avg, color="#17becf", lw=2, label=f"vf_loss avg{w}")
+    if sw and sw != w:
+        ax.plot(updates, vf_short, color="#9edae5", lw=1.1, alpha=0.65,
+                label=f"vf_loss avg{sw}")
+    ax.plot(updates, vf_avg, color="#17becf", lw=2.3, label=f"vf_loss avg{w}")
     ax.set_ylabel("Value loss")
     ax.set_xlabel("PPO update #")
     ax.legend(loc="upper left", fontsize=8)

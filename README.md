@@ -23,7 +23,7 @@ STS Game  <-->  Communication Mod  <-->  Python Agent (stdin/stdout)
 ### Training Pipeline
 
 1. **Behavior Cloning (BC)** — a heuristic plays games while the neural network learns to imitate via cross-entropy loss
-2. **PPO Fine-Tuning** — the BC-initialized policy improves through online RL with entropy annealing, preserving BC knowledge while exploring better strategies
+2. **PPO Fine-Tuning** — the BC-initialized policy improves through online RL with conservative entropy, KL checks, and a small BC anchor loss to reduce policy drift
 3. **Parallel Scaling** — multiple game instances collect rollouts independently; an offline trainer merges and updates the shared model
 
 The `train_bc_ppo.py` script runs steps 1 and 2 end-to-end in a single session.
@@ -90,16 +90,25 @@ The control panel detects your hardware, recommends how many STS instances to ru
 | **Collect Rollouts (No Training)** | Multiple STS instances that only write `.npz` rollouts — no local training. For collaborators contributing data to someone else's trainer. |
 | **Single-Instance Training** | One STS instance running PPO training |
 | **BC → PPO (End-to-End)** | Behavior cloning warm-start then PPO fine-tuning in one session |
-| **Behavior Cloning** | Heuristic plays 50 games, network learns to imitate |
+| **Behavior Cloning** | Heuristic plays demonstration games, network learns to imitate |
 | **Evaluation (Greedy)** | Run games with the trained model (no exploration, no updates) |
 | **Game Logger (Passive)** | Record game states while you play manually |
 | **Play Game (No AI)** | Launch STS without any AI command — play normally or configure mods |
 
 ### Recommended workflow
 
-1. **BC → PPO** — select "BC → PPO (End-to-End)" mode and click Start. The heuristic plays 50 games, the network imitates, then PPO fine-tunes for 200 games with entropy annealing.
+1. **BC → PPO** — select "BC → PPO (End-to-End)" mode and click Start. The Control Panel default is 150 BC games for a sturdier fresh baseline before parallel PPO.
 2. **Parallel Workers** — once you have a baseline model, switch to "Parallel Workers" for faster training. Multiple STS instances collect experience while an offline trainer updates the model.
 3. **Evaluation** — select "Evaluation (Greedy)" to benchmark your model without exploration noise.
+
+For controlled comparisons, generate a fixed seed file and evaluate the heuristic, BC checkpoint, and PPO checkpoint on the same seeds:
+
+```bash
+python scripts\make_eval_seeds.py --count 200 --out seeds\eval_200.txt
+python scripts\eval_model.py --policy heuristic --games 200 --seed-file seeds\eval_200.txt --run-tag heuristic_200
+python scripts\eval_model.py --model models\ppo_sts_bc.pt --games 200 --seed-file seeds\eval_200.txt --run-tag bc_200
+python scripts\eval_model.py --model models\ppo_sts.pt --games 200 --seed-file seeds\eval_200.txt --run-tag ppo_200 --top-actions 5
+```
 
 During a healthy first run, you should see live output in the Control Panel tabs, new log files appear under `logs/`, and the trained checkpoint saved to `models/ppo_sts.pt`.
 
@@ -150,7 +159,9 @@ Training an RL agent on Slay the Spire is compute-bound by real-time game simula
 
 - **Batched PPO updates** — the trainer accumulates 4 games of transitions per gradient update (`--games-per-update 4`). Larger batches mean less noisy gradients and less time spent blocked on updates. Raise to `8` if you have plenty of memory; drop to `2` for faster feedback during debugging.
 - **4 PPO epochs per update** — down from a conservative 10. Each update trains ~2.5× faster with minimal quality loss.
-- **Conservative exploration defaults** — the Control Panel uses entropy `0.10` by default for PPO-style modes. BC -> PPO anneals the selected start value toward `0.01`, while the parallel offline trainer defaults to `--ent-coef 0.10`, `--lr 1e-4`, and `--clip 0.15` to reduce catastrophic forgetting from the BC warm start.
+- **Conservative exploration defaults** — the Control Panel uses entropy `0.01` by default for PPO-style modes. After BC, the practical range to test is usually `0.005` to `0.02`; higher values such as `0.03+` should be treated as explicit exploration experiments because they can damage a behavior-cloned policy.
+- **PPO drift guardrails** — PPO updates log `approx_kl`, `clip_fraction`, `explained_variance`, advantage stats, invalid actions, chosen-action probability, and BC anchor loss. Updates stop PPO epochs early when KL exceeds the target, and BC demos are kept as a small imitation anchor during PPO.
+- **Rollout freshness checks** — parallel rollouts include checkpoint/update metadata. The offline trainer rejects stale or legacy rollout files by default so old games do not poison a newer checkpoint.
 
 ### Scaling with hardware
 
@@ -169,17 +180,19 @@ If you prefer the terminal, use `launch_workers.ps1`:
 | Command | What it does |
 |---------|-------------|
 | `.\launch_workers.ps1 -Mode bc-ppo` | BC warm-start → PPO fine-tuning (recommended first run) |
-| `.\launch_workers.ps1 -Mode bc-ppo -BCGames 100` | Same, with 100 BC games instead of 50 |
+| `.\launch_workers.ps1 -Mode bc-ppo -BCGames 200` | Same, with 200 BC games |
 | `.\launch_workers.ps1 -Mode train` | 1 STS instance running PPO training |
 | `.\launch_workers.ps1` | 3 parallel rollout workers (default) |
 | `.\launch_workers.ps1 -NumWorkers 4` | 4 parallel rollout workers |
 | `.\launch_workers.ps1 -Mode eval -Games 30` | 30-game greedy evaluation |
+| `.\launch_workers.ps1 -Mode eval -Games 200 -SeedFile seeds\eval_200.txt -TopActions 5` | Fixed-seed eval with top-action logging |
+| `.\launch_workers.ps1 -Mode eval -Games 200 -SeedFile seeds\eval_200.txt -HeuristicEval` | Fixed-seed heuristic baseline |
 | `.\launch_workers.ps1 -Mode logger` | Passive game state recorder |
 
 For parallel mode, start the offline trainer in a separate terminal:
 
 ```bash
-python scripts\train_offline.py --model models\ppo_sts.pt --data rollouts_shared --delete-consumed --ent-coef 0.10 --clip 0.15
+python scripts\train_offline.py --model models\ppo_sts.pt --data rollouts_shared --delete-consumed --ent-coef 0.01 --clip 0.15 --target-kl 0.03
 ```
 
 ## Manual Configuration
@@ -191,19 +204,19 @@ If you prefer not to use the launcher, edit the CommunicationMod config directly
 ### BC → PPO end-to-end
 
 ```properties
-command=C\:/AscensionAI/.venv/Scripts/python.exe C\:/AscensionAI/scripts/train_bc_ppo.py --bc-games 50 --ppo-games 200 --save models/ppo_sts.pt --ent-start 0.10
+command=C\:/AscensionAI/.venv/Scripts/python.exe C\:/AscensionAI/scripts/train_bc_ppo.py --bc-games 150 --ppo-games 200 --save models/ppo_sts.pt --ent-start 0.01 --target-kl 0.03
 ```
 
 ### Single-instance PPO training
 
 ```properties
-command=C\:/AscensionAI/.venv/Scripts/python.exe C\:/AscensionAI/scripts/train_ppo.py --save models/ppo_sts.pt --resume models/ppo_sts.pt --save-every 5 --ent-coef 0.10
+command=C\:/AscensionAI/.venv/Scripts/python.exe C\:/AscensionAI/scripts/train_ppo.py --save models/ppo_sts.pt --resume models/ppo_sts.pt --save-every 5 --ent-coef 0.01 --target-kl 0.03
 ```
 
 ### Behavior cloning only
 
 ```properties
-command=C\:/AscensionAI/.venv/Scripts/python.exe C\:/AscensionAI/scripts/behavior_clone.py --games 50 --save models/ppo_sts.pt
+command=C\:/AscensionAI/.venv/Scripts/python.exe C\:/AscensionAI/scripts/behavior_clone.py --games 150 --save models/ppo_sts.pt
 ```
 
 ### Parallel rollout workers
@@ -217,7 +230,7 @@ command=C\:/AscensionAI/.venv/Scripts/python.exe C\:/AscensionAI/scripts/rollout
 Then run the offline trainer separately:
 
 ```bash
-python scripts/train_offline.py --model models/ppo_sts.pt --data rollouts_shared --delete-consumed --ent-coef 0.10 --clip 0.15
+python scripts/train_offline.py --model models/ppo_sts.pt --data rollouts_shared --delete-consumed --ent-coef 0.01 --clip 0.15 --target-kl 0.03
 ```
 
 Append `--verbose` to any manual command when you want step-by-step decision logging.
@@ -249,6 +262,12 @@ Training stats can be visualized with:
 python scripts/plot_training.py --save logs/training_plot.png
 ```
 
+Reward shaping can be sanity-checked against outcomes with:
+
+```bash
+python scripts\analyze_training_rewards.py --csv logs\training_stats.csv
+```
+
 ## Current Limitations
 
 - The project currently targets **Ironclad** only.
@@ -273,11 +292,15 @@ AscensionAI/
 │   ├── sts_gym_env.py        # Action space (134 actions), masking, rewards
 │   ├── screen_handler.py     # Shared non-combat screen handler (heuristic + RL delegation)
 │   ├── game_data.py          # Card, relic, and potion databases for the encoder
-│   ├── eval_model.py         # Greedy evaluation harness
+│   ├── eval_model.py         # Greedy/fixed-seed evaluation harness
+│   ├── make_eval_seeds.py    # Deterministic seed-list generator
+│   ├── analyze_training_rewards.py # Reward/outcome correlation report
 │   ├── game_logger.py        # Passive game state recorder
 │   ├── plot_training.py      # Training stats visualization
 │   └── analyze_trace.py      # Game logger trace analyzer
 ├── logs/                     # Debug logs, training stats, stuck-state dumps
+├── seeds/                    # Fixed seed lists for controlled evaluation
+├── docs/                     # Technical write-up and PDF export
 ├── external/
 │   └── spirecomm/            # SpireComm library (Communication Mod protocol)
 ├── requirements.txt
@@ -297,9 +320,9 @@ AscensionAI/
 
 4. **Behavior cloning** (`behavior_clone.py`): A hand-coded heuristic plays full games covering every decision surface. The neural network trains on these demonstrations via cross-entropy loss to get a reasonable starting policy.
 
-5. **PPO fine-tuning** (`train_ppo.py` / `train_bc_ppo.py`): The BC-initialized policy improves through online RL. PPO updates use GAE advantages, clipped surrogate loss, and an entropy bonus that anneals from the selected start value toward 0.01 in BC -> PPO mode.
+5. **PPO fine-tuning** (`train_ppo.py` / `train_bc_ppo.py`): The BC-initialized policy improves through online RL. PPO updates use GAE advantages, clipped surrogate loss, a conservative entropy bonus, target-KL early stopping, and optional BC imitation anchor loss.
 
-6. **Parallel scaling** (`rollout_worker.py` + `train_offline.py`): Multiple game instances collect rollouts independently, writing `.npz` files. An offline trainer merges batches and updates the model checkpoint, which workers periodically reload.
+6. **Parallel scaling** (`rollout_worker.py` + `train_offline.py`): Multiple game instances collect rollouts independently, writing `.npz` files with checkpoint metadata. The offline trainer filters stale files, merges fresh batches, updates the model checkpoint, and workers periodically reload.
 
 ## Credits
 

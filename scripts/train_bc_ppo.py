@@ -12,7 +12,7 @@ Designed to be the final integration step: the agent starts with a
 reasonable BC policy and improves it through online RL experience.
 
 Usage (in CommunicationMod config.properties):
-  command=python scripts/train_bc_ppo.py --bc-games 50 --ppo-games 200
+  command=python scripts/train_bc_ppo.py --bc-games 150 --ppo-games 200
 
 To resume PPO training from an existing checkpoint (skip BC):
   command=python scripts/train_bc_ppo.py --resume models/ppo_sts.pt
@@ -69,6 +69,11 @@ _STATS_COLUMNS = [
     "total_reward", "final_hp", "final_max_hp", "final_floor", "final_act",
     "victory", "terminated", "pg_loss", "vf_loss", "entropy", "worker",
     "elites_fought", "elites_won", "bosses_fought", "bosses_won",
+    "approx_kl", "clip_fraction", "explained_variance",
+    "mean_advantage", "std_advantage", "invalid_action_count",
+    "mean_chosen_action_prob", "bc_loss", "bc_coef", "early_stop",
+    "stale_rollouts", "legacy_rollouts", "skipped_rollouts",
+    "batch_model_updates", "batch_checkpoint_ids",
 ]
 
 
@@ -218,11 +223,14 @@ class BCPPOAgent:
         bc_epochs: int = 30,
         bc_lr: float = 1e-3,
         ppo_lr: float = 1e-4,
-        ent_start: float = 0.05,
+        ent_start: float = 0.01,
         ent_end: float = 0.01,
         clip_range: float = 0.15,
+        target_kl: float = 0.03,
         resume_path: Optional[str] = None,
         games_per_update: int = 4,
+        bc_anchor_coef: float = 0.02,
+        demo_save_path: Optional[str] = None,
     ):
         self.bc_games = bc_games
         self.ppo_games = ppo_games
@@ -234,7 +242,10 @@ class BCPPOAgent:
         self.ent_start = ent_start
         self.ent_end = ent_end
         self.clip_range = clip_range
+        self.target_kl = target_kl
         self.games_per_update = games_per_update
+        self.bc_anchor_coef = bc_anchor_coef
+        self.demo_save_path = demo_save_path or save_path.replace(".pt", "_bc_demos.npz")
         self.games_since_update = 0
         self._game_start_buf_len = 0
 
@@ -259,9 +270,13 @@ class BCPPOAgent:
                 lr=ppo_lr, gamma=0.995, gae_lambda=0.95,
                 clip_range=clip_range, ent_coef=ent_start, vf_coef=0.5,
                 n_epochs=4, batch_size=64, net_arch=(256, 256),
+                target_kl=target_kl,
             )
             self.trainer.load(resume_path)
-            log(f"Resumed from {resume_path} (updates={self.trainer.total_updates})")
+            self.trainer.set_lr(ppo_lr)
+            log(f"Resumed from {resume_path} (updates={self.trainer.total_updates}, "
+                f"optimizer lr reset to {ppo_lr})")
+            self._try_load_bc_anchor()
         else:
             self.trainer: Optional[PPOTrainer] = None
 
@@ -442,6 +457,7 @@ class BCPPOAgent:
             lr=self.bc_lr, gamma=0.995, gae_lambda=0.95,
             clip_range=self.clip_range, ent_coef=self.ent_start, vf_coef=0.5,
             n_epochs=4, batch_size=64, net_arch=(256, 256),
+            target_kl=self.target_kl,
         )
 
         if n >= 50:
@@ -463,6 +479,17 @@ class BCPPOAgent:
         self.trainer.save(bc_path)
         log(f"BC checkpoint saved to {bc_path}")
 
+        if n >= 50:
+            self._save_bc_demo_dataset()
+            if self.bc_anchor_coef > 0.0:
+                self.trainer.set_bc_reference(
+                    self.demo_obs, self.demo_actions, self.demo_masks,
+                    coef=self.bc_anchor_coef,
+                    batch_size=64,
+                )
+                log(f"BC anchor enabled for PPO: coef={self.bc_anchor_coef} "
+                    f"samples={len(self.demo_actions)}")
+
         # Free demo data
         self.demo_obs.clear()
         self.demo_actions.clear()
@@ -471,6 +498,49 @@ class BCPPOAgent:
         self.phase = self.PHASE_PPO
         log(f"=== PPO PHASE STARTED (lr={self.ppo_lr}, ent={self.ent_start}, "
             f"clip={self.clip_range}) ===")
+
+    def _save_bc_demo_dataset(self) -> None:
+        try:
+            os.makedirs(os.path.dirname(self.demo_save_path) or ".", exist_ok=True)
+            tmp = (
+                self.demo_save_path.replace(".npz", ".tmp.npz")
+                if self.demo_save_path.endswith(".npz")
+                else self.demo_save_path + ".tmp.npz"
+            )
+            np.savez_compressed(
+                tmp,
+                observations=np.array(self.demo_obs, dtype=np.float32),
+                actions=np.array(self.demo_actions, dtype=np.int64),
+                action_masks=np.array(self.demo_masks, dtype=np.bool_),
+                created_at=np.array(datetime.now().isoformat()),
+                samples=np.array(len(self.demo_actions), dtype=np.int64),
+            )
+            os.replace(tmp, self.demo_save_path)
+            log(f"BC demo dataset saved to {self.demo_save_path} "
+                f"({len(self.demo_actions)} samples)")
+        except Exception as e:
+            log(f"Failed to save BC demo dataset: {e}")
+
+    def _try_load_bc_anchor(self) -> None:
+        if self.trainer is None or self.bc_anchor_coef <= 0.0:
+            return
+        if not os.path.isfile(self.demo_save_path):
+            log(f"No BC anchor demos found at {self.demo_save_path}")
+            return
+        try:
+            with np.load(self.demo_save_path, allow_pickle=False) as data:
+                obs = data["observations"]
+                actions = data["actions"]
+                masks = data["action_masks"]
+            self.trainer.set_bc_reference(
+                obs, actions, masks,
+                coef=self.bc_anchor_coef,
+                batch_size=64,
+            )
+            log(f"Loaded BC anchor demos from {self.demo_save_path}: "
+                f"{len(actions)} samples coef={self.bc_anchor_coef}")
+        except Exception as e:
+            log(f"Failed to load BC anchor demos {self.demo_save_path}: {e}")
 
     def _train_supervised(self, n: int):
         """Train cross-entropy loss on BC demonstrations."""
@@ -706,7 +776,13 @@ class BCPPOAgent:
             if stats:
                 log(f"  PPO update #{self.trainer.total_updates}: "
                     f"pg={stats['pg_loss']:.4f} vf={stats['vf_loss']:.4f} "
-                    f"ent={stats['entropy']:.4f} transitions={n_buffered}")
+                    f"ent={stats['entropy']:.4f} "
+                    f"kl={stats.get('approx_kl', 0.0):.5f} "
+                    f"clip={stats.get('clip_fraction', 0.0):.3f} "
+                    f"ev={stats.get('explained_variance', 0.0):.3f} "
+                    f"early_stop={stats.get('early_stop', 0)} "
+                    f"bc={stats.get('bc_loss', 0.0):.4f} "
+                    f"transitions={n_buffered}")
             self.buffer.clear()
             self.games_since_update = 0
 
@@ -740,6 +816,16 @@ class BCPPOAgent:
             "elites_won": fight_stats["elites_won"],
             "bosses_fought": fight_stats["bosses_fought"],
             "bosses_won": fight_stats["bosses_won"],
+            "approx_kl": round(stats.get("approx_kl", 0.0), 8) if stats else "",
+            "clip_fraction": round(stats.get("clip_fraction", 0.0), 6) if stats else "",
+            "explained_variance": round(stats.get("explained_variance", 0.0), 6) if stats else "",
+            "mean_advantage": round(stats.get("mean_advantage", 0.0), 6) if stats else "",
+            "std_advantage": round(stats.get("std_advantage", 0.0), 6) if stats else "",
+            "invalid_action_count": stats.get("invalid_action_count", "") if stats else "",
+            "mean_chosen_action_prob": round(stats.get("mean_chosen_action_prob", 0.0), 6) if stats else "",
+            "bc_loss": round(stats.get("bc_loss", 0.0), 6) if stats else "",
+            "bc_coef": round(stats.get("bc_coef", 0.0), 6) if stats else "",
+            "early_stop": stats.get("early_stop", "") if stats else "",
         }
         _append_stats_csv(row)
         if fight_stats["elites_fought"] or fight_stats["bosses_fought"]:
@@ -785,8 +871,8 @@ def main():
 
     # BC phase
     bc = parser.add_argument_group("BC phase")
-    bc.add_argument("--bc-games", type=int, default=50,
-                    help="Heuristic demonstration games (default: 50)")
+    bc.add_argument("--bc-games", type=int, default=150,
+                    help="Heuristic demonstration games (default: 150)")
     bc.add_argument("--bc-epochs", type=int, default=30,
                     help="Supervised training epochs (default: 30)")
     bc.add_argument("--bc-lr", type=float, default=1e-3,
@@ -798,17 +884,23 @@ def main():
                      help="PPO games; 0 = unlimited (default: 0)")
     ppo.add_argument("--ppo-lr", type=float, default=1e-4,
                      help="PPO learning rate (default: 1e-4)")
-    ppo.add_argument("--ent-start", type=float, default=0.05,
-                     help="Initial entropy coefficient (default: 0.05)")
+    ppo.add_argument("--ent-start", type=float, default=0.01,
+                     help="Initial entropy coefficient (default: 0.01)")
     ppo.add_argument("--ent-end", type=float, default=0.01,
                      help="Final entropy coefficient (default: 0.01)")
     ppo.add_argument("--clip", type=float, default=0.15,
                      help="PPO clip range (default: 0.15)")
+    ppo.add_argument("--target-kl", type=float, default=0.03,
+                     help="Stop PPO epochs early when approx KL exceeds this value")
+    ppo.add_argument("--bc-anchor-coef", type=float, default=0.02,
+                     help="Small BC imitation loss during PPO (default: 0.02)")
 
     # General
     gen = parser.add_argument_group("General")
     gen.add_argument("--save", type=str, default="models/ppo_sts.pt",
                      help="Model save path (default: models/ppo_sts.pt)")
+    gen.add_argument("--demo-save", type=str, default=None,
+                     help="Where to save/load BC demos for PPO anchoring")
     gen.add_argument("--save-every", type=int, default=5,
                      help="Save every N PPO games (default: 5)")
     gen.add_argument("--resume", type=str, default=None,
@@ -823,13 +915,17 @@ def main():
 
     save_path = os.path.join(_root, args.save)
     os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
+    demo_save = args.demo_save
+    if demo_save is not None and not os.path.isabs(demo_save):
+        demo_save = os.path.join(_root, demo_save)
 
     resume_path = os.path.join(_root, args.resume) if args.resume else None
 
     log(f"Config: bc_games={args.bc_games} bc_epochs={args.bc_epochs} "
         f"bc_lr={args.bc_lr} ppo_games={args.ppo_games} ppo_lr={args.ppo_lr} "
         f"ent={args.ent_start}->{args.ent_end} clip={args.clip} "
-        f"resume={args.resume} verbose={VERBOSE}")
+        f"target_kl={args.target_kl} bc_anchor={args.bc_anchor_coef} resume={args.resume} "
+        f"verbose={VERBOSE}")
 
     agent = BCPPOAgent(
         bc_games=args.bc_games,
@@ -842,8 +938,11 @@ def main():
         ent_start=args.ent_start,
         ent_end=args.ent_end,
         clip_range=args.clip,
+        target_kl=args.target_kl,
         resume_path=resume_path,
         games_per_update=args.games_per_update,
+        bc_anchor_coef=args.bc_anchor_coef,
+        demo_save_path=demo_save,
     )
 
     log("Setting up Coordinator...")

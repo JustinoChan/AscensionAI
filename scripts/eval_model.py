@@ -68,6 +68,9 @@ from sts_gym_env import (
 from ppo_model import PPOTrainer
 from screen_handler import auto_handle_screen, recover_from_command_error
 from fight_tracker import FightTracker
+from behavior_clone import heuristic_action
+
+_coord_module.write_stdout = _patched_write_stdout
 
 
 os.makedirs(os.path.join(_root, "logs"), exist_ok=True)
@@ -76,7 +79,7 @@ EVAL_CSV = os.path.join(_root, "logs", "eval_stats.csv")
 VERBOSE = os.environ.get("ASCENSION_VERBOSE", "0") == "1"
 
 _EVAL_COLUMNS = [
-    "timestamp", "run", "game", "steps", "total_reward",
+    "timestamp", "run", "policy", "model", "seed", "game", "steps", "total_reward",
     "final_hp", "final_max_hp", "final_floor", "final_act", "victory",
     "elites_fought", "elites_won", "bosses_fought", "bosses_won",
 ]
@@ -143,10 +146,23 @@ def auto_handle(gs: Any, screen_name: str) -> Optional[Action]:
 # Evaluator agent
 # ---------------------------------------------------------------------------
 class EvalAgent:
-    def __init__(self, trainer: PPOTrainer, target_games: int, run_tag: str):
+    def __init__(
+        self,
+        trainer: Optional[PPOTrainer],
+        target_games: int,
+        run_tag: str,
+        policy: str = "model",
+        model_label: str = "",
+        seeds: Optional[list[str]] = None,
+        top_actions: int = 0,
+    ):
         self.trainer = trainer
         self.target_games = target_games
         self.run_tag = run_tag
+        self.policy = policy
+        self.model_label = model_label
+        self.seeds = seeds or []
+        self.top_actions = top_actions
         self.reward_tracker = RewardTracker()
         self.games_played = 0
         self.total_steps = 0
@@ -161,6 +177,7 @@ class EvalAgent:
         self.bosses_fought = 0
         self.bosses_won = 0
         self.fight_tracker = FightTracker(source="eval", worker="eval", log=log)
+        self._current_seed = ""
 
     def on_state_change(self, gs) -> Action:
         try:
@@ -185,7 +202,9 @@ class EvalAgent:
             self.reward_tracker.reset(gs)
             self.reward_tracker._last_act = int(getattr(gs, "act", 0) or 0)
             self.initialized = True
-            log(f"Eval game #{self.games_played + 1} starting, floor={getattr(gs, 'floor', '?')}")
+            log(f"Eval game #{self.games_played + 1} starting, "
+                f"policy={self.policy} seed={self._current_seed or 'random'} "
+                f"floor={getattr(gs, 'floor', '?')}")
 
         reward = self.reward_tracker.compute(gs, terminal, victory)
         self.episode_reward += reward
@@ -223,8 +242,15 @@ class EvalAgent:
 
         obs = encode_game_state(gs)
         mask = compute_action_mask(gs)
-        action, _lp, _v = self.trainer.predict(obs, mask, deterministic=True)
-        spire_action = flat_action_to_spire_action(action, gs)
+        if self.policy == "heuristic":
+            spire_action, action = heuristic_action(gs)
+            if spire_action is None or action is None:
+                return Action("state")
+        else:
+            action, _lp, _v = self.trainer.predict(obs, mask, deterministic=True)
+            spire_action = flat_action_to_spire_action(action, gs)
+            if self.top_actions > 0:
+                self._log_top_actions(gs, obs, mask)
         self.total_steps += 1
         if VERBOSE:
             choice_list = list(getattr(gs, "choice_list", []) or [])
@@ -235,6 +261,26 @@ class EvalAgent:
                 f"mask_sum={int(mask.sum())} action_id={action} "
                 f"action={_action_desc(spire_action)}")
         return spire_action
+
+    def _log_top_actions(self, gs, obs: np.ndarray, mask: np.ndarray) -> None:
+        if self.trainer is None:
+            return
+        try:
+            probs, value = self.trainer.action_probabilities(obs, mask)
+            legal = np.where(mask)[0]
+            if legal.size == 0:
+                return
+            top = legal[np.argsort(probs[legal])[::-1][:self.top_actions]]
+            parts = []
+            for rank, action_id in enumerate(top, start=1):
+                act = flat_action_to_spire_action(int(action_id), gs)
+                parts.append(f"{rank}. {int(action_id)} {_action_desc(act)}={probs[action_id]:.1%}")
+            log(f"EVAL TOP ACTIONS: game={self.games_played + 1} "
+                f"floor={getattr(gs, 'floor', '?')} "
+                f"hp={getattr(gs, 'current_hp', '?')}/{getattr(gs, 'max_hp', '?')} "
+                f"value={value:.3f} {' | '.join(parts)}")
+        except Exception as e:
+            log(f"top action logging failed: {e}")
 
     def _end_game(self, final_gs, victory: bool) -> None:
         self.games_played += 1
@@ -254,6 +300,9 @@ class EvalAgent:
         _append_csv({
             "timestamp": datetime.now().isoformat(),
             "run": self.run_tag,
+            "policy": self.policy,
+            "model": self.model_label,
+            "seed": self._current_seed,
             "game": self.games_played,
             "steps": self.total_steps,
             "total_reward": round(self.episode_reward, 4),
@@ -280,7 +329,15 @@ class EvalAgent:
         self.total_steps = 0
 
     def on_out_of_game(self) -> Action:
-        return StartGameAction(player_class=PlayerClass.IRONCLAD, ascension_level=0)
+        if self.games_played < len(self.seeds):
+            self._current_seed = str(self.seeds[self.games_played])
+        else:
+            self._current_seed = ""
+        return StartGameAction(
+            player_class=PlayerClass.IRONCLAD,
+            ascension_level=0,
+            seed=self._current_seed or None,
+        )
 
     def on_error(self, err: str) -> Action:
         log(f"COMMAND ERROR: {err}")
@@ -293,28 +350,62 @@ def main() -> None:
     parser.add_argument("--model", type=str, default="models/ppo_sts.pt")
     parser.add_argument("--games", type=int, default=20)
     parser.add_argument("--run-tag", type=str, default=datetime.now().strftime("%Y%m%d_%H%M%S"))
+    parser.add_argument("--policy", choices=("model", "heuristic"), default="model",
+                        help="Evaluate trained model or heuristic baseline")
+    parser.add_argument("--seed", action="append", default=[],
+                        help="Fixed seed; can be repeated")
+    parser.add_argument("--seed-file", type=str, default=None,
+                        help="File of one seed per line for fixed-seed eval")
+    parser.add_argument("--top-actions", type=int, default=0,
+                        help="Log top N model actions at each RL decision")
     parser.add_argument("--verbose", action="store_true",
                         help="Write detailed per-state/per-action debug logs")
     args = parser.parse_args()
     VERBOSE = VERBOSE or args.verbose
 
+    seeds: list[str] = []
+    if args.seed_file:
+        seed_path = args.seed_file if os.path.isabs(args.seed_file) else os.path.join(_root, args.seed_file)
+        try:
+            with open(seed_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    seed = line.strip()
+                    if seed and not seed.startswith("#"):
+                        seeds.append(seed)
+        except Exception as e:
+            log(f"WARNING: failed to read seed file {seed_path}: {e}")
+    seeds.extend(str(s) for s in args.seed)
+    if seeds and len(seeds) < args.games:
+        log(f"WARNING: only {len(seeds)} seeds for {args.games} games; remaining games use random seeds")
+
+    trainer: Optional[PPOTrainer] = None
     model_path = os.path.join(_root, args.model) if not os.path.isabs(args.model) else args.model
-    log(f"Loading model from {model_path} for {args.games} greedy games "
-        f"run_tag={args.run_tag} verbose={VERBOSE}")
+    log(f"Starting eval for {args.games} greedy games "
+        f"run_tag={args.run_tag} policy={args.policy} verbose={VERBOSE} "
+        f"seeds={len(seeds)} top_actions={args.top_actions}")
+    if args.policy == "model":
+        log(f"Loading model from {model_path}")
+        trainer = PPOTrainer(
+            obs_size=OBS_SIZE,
+            n_actions=NUM_ACTIONS,
+            device="cpu",
+            net_arch=(256, 256),
+        )
+        if os.path.exists(model_path):
+            trainer.load(model_path)
+            log(f"Loaded checkpoint (total_updates={trainer.total_updates})")
+        else:
+            log(f"WARNING: no checkpoint at {model_path} - evaluating randomly-initialized policy")
 
-    trainer = PPOTrainer(
-        obs_size=OBS_SIZE,
-        n_actions=NUM_ACTIONS,
-        device="cpu",
-        net_arch=(256, 256),
+    agent = EvalAgent(
+        trainer,
+        target_games=args.games,
+        run_tag=args.run_tag,
+        policy=args.policy,
+        model_label=args.model if args.policy == "model" else "heuristic",
+        seeds=seeds,
+        top_actions=max(0, args.top_actions),
     )
-    if os.path.exists(model_path):
-        trainer.load(model_path)
-        log(f"Loaded checkpoint (total_updates={trainer.total_updates})")
-    else:
-        log(f"WARNING: no checkpoint at {model_path} — evaluating randomly-initialized policy")
-
-    agent = EvalAgent(trainer, target_games=args.games, run_tag=args.run_tag)
 
     coord = Coordinator()
     coord.register_state_change_callback(agent.on_state_change)

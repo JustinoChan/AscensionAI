@@ -59,6 +59,11 @@ _STATS_COLUMNS = [
     "total_reward", "final_hp", "final_max_hp", "final_floor", "final_act",
     "victory", "terminated", "pg_loss", "vf_loss", "entropy", "worker",
     "elites_fought", "elites_won", "bosses_fought", "bosses_won",
+    "approx_kl", "clip_fraction", "explained_variance",
+    "mean_advantage", "std_advantage", "invalid_action_count",
+    "mean_chosen_action_prob", "bc_loss", "bc_coef", "early_stop",
+    "stale_rollouts", "legacy_rollouts", "skipped_rollouts",
+    "batch_model_updates", "batch_checkpoint_ids",
 ]
 
 def _init_stats_csv():
@@ -98,6 +103,44 @@ def load_npz_files(data_dir: str, consumed: set) -> List[str]:
             continue
         ready.append(f)
     return ready
+
+
+def _scalar(data, key: str, default=None):
+    if key not in data.files:
+        return default
+    val = data[key]
+    try:
+        return val.item()
+    except Exception:
+        return val
+
+
+def read_rollout_meta(path: str) -> dict:
+    try:
+        with np.load(path, allow_pickle=False) as data:
+            return {
+                "model_update_number": _scalar(data, "model_update_number"),
+                "checkpoint_id": _scalar(data, "checkpoint_id"),
+                "worker_id": _scalar(data, "worker_id"),
+                "episode_number": _scalar(data, "episode_number"),
+                "entropy_coeff": _scalar(data, "entropy_coeff"),
+                "learning_rate": _scalar(data, "learning_rate"),
+                "created_at": _scalar(data, "created_at"),
+            }
+    except Exception as e:
+        log(f"Failed to read rollout metadata {path}: {e}")
+        return {}
+
+
+def load_bc_demo(path: str) -> tuple:
+    with np.load(path, allow_pickle=False) as data:
+        obs = data["observations"]
+        actions = data["actions"]
+        masks = data["action_masks"]
+    n = len(obs)
+    if len(actions) != n or len(masks) != n:
+        raise ValueError(f"BC demo length mismatch: obs={n}, actions={len(actions)}, masks={len(masks)}")
+    return obs, actions, masks
 
 
 def load_transitions(paths: List[str]) -> tuple:
@@ -173,10 +216,20 @@ def main():
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--epochs", type=int, default=4)
     parser.add_argument("--batch-size", type=int, default=64)
-    parser.add_argument("--ent-coef", type=float, default=0.10,
+    parser.add_argument("--ent-coef", type=float, default=0.01,
                         help="Entropy bonus coefficient (higher = more exploration)")
     parser.add_argument("--clip", type=float, default=0.15,
                         help="PPO clip range (default: 0.15)")
+    parser.add_argument("--target-kl", type=float, default=0.03,
+                        help="Stop PPO epochs early when approx KL exceeds this value")
+    parser.add_argument("--max-rollout-lag", type=int, default=2,
+                        help="Reject rollouts more than N model updates behind")
+    parser.add_argument("--allow-legacy-rollouts", action="store_true",
+                        help="Allow rollout files without checkpoint metadata")
+    parser.add_argument("--bc-demo", type=str, default=None,
+                        help="Optional BC demo npz for imitation anchor loss")
+    parser.add_argument("--bc-coef", type=float, default=0.02,
+                        help="BC anchor coefficient if --bc-demo exists")
     parser.add_argument("--verbose", action="store_true",
                         help="Write detailed polling and rollout loading logs")
     args = parser.parse_args()
@@ -192,38 +245,118 @@ def main():
     log(f"Data dir: {data_dir}")
     log(f"Hyperparams: lr={args.lr}, epochs={args.epochs}, "
         f"batch_size={args.batch_size}, ent_coef={args.ent_coef}, "
-        f"clip={args.clip}, batch_games={args.batch_games}, verbose={VERBOSE}")
+        f"clip={args.clip}, target_kl={args.target_kl}, "
+        f"batch_games={args.batch_games}, max_rollout_lag={args.max_rollout_lag}, "
+        f"allow_legacy={args.allow_legacy_rollouts}, verbose={VERBOSE}")
 
     trainer = PPOTrainer(
         obs_size=OBS_SIZE, n_actions=NUM_ACTIONS, device="cpu",
         lr=args.lr, n_epochs=args.epochs, batch_size=args.batch_size,
         ent_coef=args.ent_coef, clip_range=args.clip, net_arch=(256, 256),
+        target_kl=args.target_kl,
     )
 
     if os.path.isfile(model_path):
         trainer.load(model_path)
-        log("Loaded existing model")
+        trainer.set_lr(args.lr)
+        log(f"Loaded existing model; optimizer lr reset to {args.lr}")
     else:
         log("Starting with fresh model")
+
+    bc_demo_path = args.bc_demo
+    if bc_demo_path is None:
+        bc_demo_path = model_path.replace(".pt", "_bc_demos.npz")
+    elif not os.path.isabs(bc_demo_path):
+        bc_demo_path = os.path.join(_root, bc_demo_path)
+    if args.bc_coef > 0.0 and os.path.isfile(bc_demo_path):
+        try:
+            bc_obs, bc_actions, bc_masks = load_bc_demo(bc_demo_path)
+            trainer.set_bc_reference(
+                bc_obs, bc_actions, bc_masks,
+                coef=args.bc_coef,
+                batch_size=args.batch_size,
+            )
+            log(f"Loaded BC anchor demos: {len(bc_actions)} samples "
+                f"coef={args.bc_coef} path={bc_demo_path}")
+        except Exception as e:
+            log(f"Failed to load BC anchor demos {bc_demo_path}: {e}")
+    elif args.bc_coef > 0.0:
+        log(f"No BC anchor demos found at {bc_demo_path}; PPO runs without BC anchor")
 
     consumed: set = set()
     total_transitions = 0
     total_updates = int(getattr(trainer, "total_updates", 0) or 0)
+    stale_rollouts_total = 0
+    legacy_rollouts_total = 0
+    skipped_rollouts_total = 0
 
     log("Entering training loop (Ctrl+C to stop)...")
 
     try:
         while True:
             new_files = load_npz_files(data_dir, consumed)
+            eligible_files: List[str] = []
+            stale_files: List[str] = []
+            legacy_files: List[str] = []
+            batch_updates: list[int] = []
+            batch_checkpoint_ids: list[str] = []
+            current_update = int(getattr(trainer, "total_updates", 0) or 0)
+            for f in new_files:
+                meta = read_rollout_meta(f)
+                model_update = meta.get("model_update_number")
+                checkpoint_id = meta.get("checkpoint_id")
+                try:
+                    model_update_int = int(model_update)
+                except Exception:
+                    model_update_int = None
+                if model_update_int is None:
+                    if not args.allow_legacy_rollouts:
+                        legacy_files.append(f)
+                        continue
+                else:
+                    lag = current_update - model_update_int
+                    if lag > args.max_rollout_lag:
+                        stale_files.append(f)
+                        continue
+                    batch_updates.append(model_update_int)
+                if checkpoint_id not in (None, ""):
+                    batch_checkpoint_ids.append(str(checkpoint_id))
+                eligible_files.append(f)
 
-            if len(new_files) < args.batch_games:
+            if legacy_files:
+                legacy_rollouts_total += len(legacy_files)
+                for f in legacy_files:
+                    consumed.add(f)
+                log(f"Rejecting {len(legacy_files)} legacy rollout(s) without metadata; "
+                    f"use --allow-legacy-rollouts to train on old files")
+                if args.delete_consumed:
+                    delete_files(legacy_files)
+                else:
+                    for f in legacy_files:
+                        retire_file(f, ".legacy")
+
+            if stale_files:
+                stale_rollouts_total += len(stale_files)
+                for f in stale_files:
+                    consumed.add(f)
+                log(f"Rejecting {len(stale_files)} stale rollout(s): "
+                    f"current_update={current_update} max_lag={args.max_rollout_lag}")
+                if args.delete_consumed:
+                    delete_files(stale_files)
+                else:
+                    for f in stale_files:
+                        retire_file(f, ".stale")
+
+            if len(eligible_files) < args.batch_games:
                 if VERBOSE:
-                    log(f"Waiting for rollouts: ready={len(new_files)} "
-                        f"need={args.batch_games} consumed={len(consumed)}")
+                    log(f"Waiting for rollouts: ready={len(eligible_files)} "
+                        f"need={args.batch_games} consumed={len(consumed)} "
+                        f"stale_total={stale_rollouts_total} "
+                        f"legacy_total={legacy_rollouts_total}")
                 time.sleep(args.poll_interval)
                 continue
 
-            batch_files = new_files[:args.batch_games]
+            batch_files = eligible_files[:args.batch_games]
             log(f"Loading {len(batch_files)} new game files...")
             if VERBOSE:
                 log("Batch files: " + ", ".join(os.path.basename(f) for f in batch_files))
@@ -237,6 +370,7 @@ def main():
 
             for f in loaded:
                 consumed.add(f)
+            skipped_rollouts_total += len(failed)
 
             if n < 10:
                 log(f"Too few transitions ({n}), skipping update")
@@ -255,6 +389,10 @@ def main():
             if stats:
                 log(f"Update #{total_updates}: pg={stats['pg_loss']:.4f} "
                     f"vf={stats['vf_loss']:.4f} ent={stats['entropy']:.4f} "
+                    f"kl={stats.get('approx_kl', 0.0):.5f} "
+                    f"clip={stats.get('clip_fraction', 0.0):.3f} "
+                    f"ev={stats.get('explained_variance', 0.0):.3f} "
+                    f"early_stop={stats.get('early_stop', 0)} "
                     f"transitions={n} total={total_transitions}")
                 _append_training_stats({
                     "timestamp": datetime.now().isoformat(),
@@ -264,6 +402,21 @@ def main():
                     "vf_loss": round(stats["vf_loss"], 6),
                     "entropy": round(stats["entropy"], 6),
                     "worker": "trainer",
+                    "approx_kl": round(stats.get("approx_kl", 0.0), 8),
+                    "clip_fraction": round(stats.get("clip_fraction", 0.0), 6),
+                    "explained_variance": round(stats.get("explained_variance", 0.0), 6),
+                    "mean_advantage": round(stats.get("mean_advantage", 0.0), 6),
+                    "std_advantage": round(stats.get("std_advantage", 0.0), 6),
+                    "invalid_action_count": stats.get("invalid_action_count", 0),
+                    "mean_chosen_action_prob": round(stats.get("mean_chosen_action_prob", 0.0), 6),
+                    "bc_loss": round(stats.get("bc_loss", 0.0), 6),
+                    "bc_coef": round(stats.get("bc_coef", 0.0), 6),
+                    "early_stop": stats.get("early_stop", 0),
+                    "stale_rollouts": stale_rollouts_total,
+                    "legacy_rollouts": legacy_rollouts_total,
+                    "skipped_rollouts": skipped_rollouts_total,
+                    "batch_model_updates": ";".join(str(x) for x in sorted(set(batch_updates))),
+                    "batch_checkpoint_ids": ";".join(sorted(set(batch_checkpoint_ids))),
                 })
 
             trainer.save(model_path)

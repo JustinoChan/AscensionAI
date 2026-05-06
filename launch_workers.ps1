@@ -8,14 +8,15 @@
     the process to start, then swaps in the next config.
 
     Run train_offline.py separately to consume the rollout data:
-        python scripts\train_offline.py --model models\ppo_sts.pt --data rollouts_shared --delete-consumed
+        python scripts\train_offline.py --model models\ppo_sts.pt --data rollouts_shared --delete-consumed --ent-coef 0.01
 
 .PARAMETER NumWorkers
     Number of STS instances to launch (default: 3).
 
 .PARAMETER Mode
     "worker" to run rollout_worker.py (default), "train" to run train_ppo.py,
-    "bc" to run behavior_clone.py on a single instance.
+    "bc-ppo" for end-to-end warm start, "bc" for behavior cloning,
+    "eval" for greedy evaluation, or "logger" for passive logging.
 
 .EXAMPLE
     .\launch_workers.ps1
@@ -28,7 +29,10 @@ param(
     [ValidateSet("worker", "train", "bc-ppo", "bc", "eval", "logger")]
     [string]$Mode = "worker",
     [int]$Games = 20,
-    [int]$BCGames = 50
+    [int]$BCGames = 150,
+    [string]$SeedFile = "",
+    [int]$TopActions = 0,
+    [switch]$HeuristicEval
 )
 
 $ErrorActionPreference = "Stop"
@@ -105,7 +109,7 @@ function Get-Command-For-Train {
 }
 
 function Get-Command-For-BC {
-    return "$PyEsc $RootEsc/scripts/behavior_clone.py --games 50 --save models/ppo_sts.pt"
+    return "$PyEsc $RootEsc/scripts/behavior_clone.py --games $BCGames --save models/ppo_sts.pt"
 }
 
 function Get-Command-For-BCPPO {
@@ -113,7 +117,17 @@ function Get-Command-For-BCPPO {
 }
 
 function Get-Command-For-Eval {
-    return "$PyEsc $RootEsc/scripts/eval_model.py --model models/ppo_sts.pt --games $Games"
+    $cmd = "$PyEsc $RootEsc/scripts/eval_model.py --model models/ppo_sts.pt --games $Games"
+    if ($SeedFile -ne "") {
+        $cmd += " --seed-file $SeedFile"
+    }
+    if ($TopActions -gt 0) {
+        $cmd += " --top-actions $TopActions"
+    }
+    if ($HeuristicEval) {
+        $cmd += " --policy heuristic"
+    }
+    return $cmd
 }
 
 function Get-Command-For-Logger {
@@ -134,7 +148,7 @@ switch ($Mode) {
         Write-Host "Mode: Parallel rollout workers ($NumWorkers instances)" -ForegroundColor Green
         Write-Host ""
         Write-Host "IMPORTANT: Start the offline trainer in a separate terminal:" -ForegroundColor Yellow
-        Write-Host "  python scripts\train_offline.py --model models\ppo_sts.pt --data rollouts_shared --delete-consumed" -ForegroundColor Yellow
+        Write-Host "  python scripts\train_offline.py --model models\ppo_sts.pt --data rollouts_shared --delete-consumed --ent-coef 0.01" -ForegroundColor Yellow
         Write-Host ""
 
         for ($i = 1; $i -le $NumWorkers; $i++) {
@@ -164,7 +178,7 @@ switch ($Mode) {
         Write-Host "PID: $($proc.Id)" -ForegroundColor DarkGray
     }
     "bc" {
-        Write-Host "Mode: Behavior cloning (50 heuristic games)" -ForegroundColor Green
+        Write-Host "Mode: Behavior cloning ($BCGames heuristic games)" -ForegroundColor Green
         $NumWorkers = 1
         $cmd = Get-Command-For-BC
         Write-Config $cmd

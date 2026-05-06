@@ -13,6 +13,7 @@ from typing import List
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 
 class GameBuffer:
@@ -48,9 +49,9 @@ class PPOTrainer:
 
     def __init__(self, obs_size: int, n_actions: int, device: str = "cpu",
                  lr: float = 3e-4, gamma: float = 0.995, gae_lambda: float = 0.95,
-                 clip_range: float = 0.2, ent_coef: float = 0.05, vf_coef: float = 0.5,
+                 clip_range: float = 0.2, ent_coef: float = 0.01, vf_coef: float = 0.5,
                  max_grad_norm: float = 0.5, n_epochs: int = 4, batch_size: int = 64,
-                 net_arch: tuple = (256, 256)):
+                 net_arch: tuple = (256, 256), target_kl: float = 0.03):
         self.device = torch.device(device)
         self.gamma = gamma
         self.gae_lambda = gae_lambda
@@ -61,6 +62,7 @@ class PPOTrainer:
         self.n_epochs = n_epochs
         self.batch_size = batch_size
         self.n_actions = n_actions
+        self.target_kl = target_kl
 
         layers = []
         in_dim = obs_size
@@ -80,6 +82,58 @@ class PPOTrainer:
         self.optimizer = torch.optim.Adam(params, lr=lr)
 
         self.total_updates = 0
+        self.bc_obs_t = None
+        self.bc_actions_t = None
+        self.bc_masks_t = None
+        self.bc_coef = 0.0
+        self.bc_batch_size = batch_size
+
+    def set_lr(self, lr: float) -> None:
+        """Reset optimizer learning rate after loading a checkpoint."""
+        for group in self.optimizer.param_groups:
+            group["lr"] = float(lr)
+
+    def set_bc_reference(self, observations, actions, masks,
+                         coef: float = 0.0, batch_size: int | None = None) -> None:
+        """Attach behavior-cloning examples used as a small PPO anchor loss."""
+        self.bc_coef = float(coef or 0.0)
+        self.bc_batch_size = int(batch_size or self.batch_size)
+        if self.bc_coef <= 0.0 or observations is None or len(observations) == 0:
+            self.bc_obs_t = self.bc_actions_t = self.bc_masks_t = None
+            return
+        obs = np.array(observations, dtype=np.float32)
+        actions = np.array(actions, dtype=np.int64)
+        masks = np.array(masks, dtype=np.bool_)
+        in_range = (actions >= 0) & (actions < self.n_actions)
+        mask_legal = np.zeros_like(in_range, dtype=np.bool_)
+        if masks.ndim == 2 and masks.shape[1] == self.n_actions:
+            valid_idx = np.where(in_range)[0]
+            mask_legal[valid_idx] = masks[valid_idx, actions[valid_idx]]
+        finite = np.isfinite(obs).all(axis=1)
+        valid = in_range & mask_legal & finite
+        if not bool(valid.any()):
+            self.bc_obs_t = self.bc_actions_t = self.bc_masks_t = None
+            self.bc_coef = 0.0
+            return
+        obs = obs[valid]
+        actions = actions[valid]
+        masks = masks[valid]
+
+        self.bc_obs_t = torch.as_tensor(
+            obs,
+            dtype=torch.float32,
+            device=self.device,
+        )
+        self.bc_actions_t = torch.as_tensor(
+            actions,
+            dtype=torch.long,
+            device=self.device,
+        )
+        self.bc_masks_t = torch.as_tensor(
+            masks,
+            dtype=torch.bool,
+            device=self.device,
+        )
 
     def predict(self, obs: np.ndarray, mask: np.ndarray, deterministic: bool = False):
         """Pick an action, return (action, log_prob, value)."""
@@ -103,6 +157,17 @@ class PPOTrainer:
 
         return action.item(), log_prob.item(), value.item()
 
+    def action_probabilities(self, obs: np.ndarray, mask: np.ndarray) -> tuple[np.ndarray, float]:
+        """Return masked action probabilities and value for diagnostics."""
+        with torch.no_grad():
+            obs_t = torch.as_tensor(obs, dtype=torch.float32, device=self.device).unsqueeze(0)
+            mask_t = torch.as_tensor(mask, dtype=torch.bool, device=self.device).unsqueeze(0)
+            features = self.shared(obs_t)
+            logits = self.policy_head(features).masked_fill(~mask_t, -1e8)
+            probs = torch.softmax(logits, dim=-1).squeeze(0)
+            value = self.value_head(features).squeeze(-1)
+        return probs.cpu().numpy(), float(value.item())
+
     def update(self, buffer: GameBuffer) -> dict:
         """Run PPO update on collected transitions. Returns loss stats."""
         if len(buffer) < 2:
@@ -116,6 +181,30 @@ class PPOTrainer:
         old_log_probs = np.array(buffer.log_probs, dtype=np.float32)
         old_values = np.array(buffer.values, dtype=np.float32)
 
+        in_range = (actions >= 0) & (actions < self.n_actions)
+        mask_legal = np.zeros_like(in_range, dtype=np.bool_)
+        if masks.ndim == 2 and masks.shape[1] == self.n_actions:
+            valid_idx = np.where(in_range)[0]
+            mask_legal[valid_idx] = masks[valid_idx, actions[valid_idx]]
+        finite = (
+            np.isfinite(obs).all(axis=1)
+            & np.isfinite(rewards)
+            & np.isfinite(old_log_probs)
+            & np.isfinite(old_values)
+        )
+        valid = in_range & mask_legal & finite
+        invalid_action_count = int(len(actions) - int(valid.sum()))
+        if invalid_action_count:
+            obs = obs[valid]
+            actions = actions[valid]
+            rewards = rewards[valid]
+            dones = dones[valid]
+            masks = masks[valid]
+            old_log_probs = old_log_probs[valid]
+            old_values = old_values[valid]
+        if len(obs) < 2:
+            return {"invalid_action_count": invalid_action_count}
+
         advantages = np.zeros_like(rewards)
         last_gae = 0.0
         for t in reversed(range(len(rewards))):
@@ -127,6 +216,14 @@ class PPOTrainer:
             last_gae = delta + self.gamma * self.gae_lambda * (1 - dones[t]) * last_gae
             advantages[t] = last_gae
         returns = advantages + old_values
+        raw_advantages = advantages.copy()
+        mean_advantage = float(raw_advantages.mean())
+        std_advantage = float(raw_advantages.std())
+        return_var = float(np.var(returns))
+        if return_var > 1e-8:
+            explained_variance = float(1.0 - np.var(returns - old_values) / return_var)
+        else:
+            explained_variance = float("nan")
 
         if len(advantages) > 1:
             advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
@@ -142,9 +239,17 @@ class PPOTrainer:
         total_pg_loss = 0.0
         total_vf_loss = 0.0
         total_ent = 0.0
+        total_kl = 0.0
+        total_clip_frac = 0.0
+        total_chosen_prob = 0.0
+        total_bc_loss = 0.0
         num_batches = 0
+        bc_batches = 0
+        early_stop = 0
 
         for _ in range(self.n_epochs):
+            epoch_kl = 0.0
+            epoch_batches = 0
             indices = np.random.permutation(n)
             for start in range(0, n, self.batch_size):
                 end = min(start + self.batch_size, n)
@@ -174,6 +279,16 @@ class PPOTrainer:
                 vf_loss = ((values - b_ret) ** 2).mean()
 
                 loss = pg_loss + self.vf_coef * vf_loss - self.ent_coef * entropy
+                bc_loss = None
+                if self.bc_coef > 0.0 and self.bc_obs_t is not None:
+                    bc_n = self.bc_obs_t.shape[0]
+                    k = min(max(1, self.bc_batch_size), bc_n)
+                    bc_idx = torch.randint(0, bc_n, (k,), device=self.device)
+                    bc_features = self.shared(self.bc_obs_t[bc_idx])
+                    bc_logits = self.policy_head(bc_features)
+                    bc_logits = bc_logits.masked_fill(~self.bc_masks_t[bc_idx], -1e8)
+                    bc_loss = F.cross_entropy(bc_logits, self.bc_actions_t[bc_idx])
+                    loss = loss + self.bc_coef * bc_loss
 
                 self.optimizer.zero_grad()
                 loss.backward()
@@ -188,7 +303,25 @@ class PPOTrainer:
                 total_pg_loss += pg_loss.item()
                 total_vf_loss += vf_loss.item()
                 total_ent += entropy.item()
+                with torch.no_grad():
+                    batch_kl = (b_old_lp - new_lp).mean().item()
+                    total_kl += batch_kl
+                    epoch_kl += batch_kl
+                    epoch_batches += 1
+                    total_clip_frac += ((ratio - 1.0).abs() > self.clip_range).float().mean().item()
+                    total_chosen_prob += new_lp.exp().mean().item()
+                    if bc_loss is not None:
+                        total_bc_loss += bc_loss.item()
+                        bc_batches += 1
                 num_batches += 1
+            if (
+                self.target_kl
+                and self.target_kl > 0.0
+                and epoch_batches > 0
+                and (epoch_kl / epoch_batches) > self.target_kl
+            ):
+                early_stop = 1
+                break
 
         self.total_updates += 1
         if num_batches == 0:
@@ -197,6 +330,16 @@ class PPOTrainer:
             "pg_loss": total_pg_loss / num_batches,
             "vf_loss": total_vf_loss / num_batches,
             "entropy": total_ent / num_batches,
+            "approx_kl": total_kl / num_batches,
+            "clip_fraction": total_clip_frac / num_batches,
+            "explained_variance": explained_variance,
+            "mean_advantage": mean_advantage,
+            "std_advantage": std_advantage,
+            "invalid_action_count": invalid_action_count,
+            "mean_chosen_action_prob": total_chosen_prob / num_batches,
+            "bc_loss": total_bc_loss / bc_batches if bc_batches else 0.0,
+            "bc_coef": self.bc_coef,
+            "early_stop": early_stop,
         }
 
     def save(self, path: str):

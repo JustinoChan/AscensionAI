@@ -86,8 +86,8 @@ SPINNER_CONFIG = {
     "worker":  ("Workers:", 1, 8, None),
     "collect": ("Workers:", 1, 8, None),
     "train":   (None, 0, 0, 0),
-    "bc_ppo":  ("BC Games:", 10, 200, 50),
-    "bc":      ("BC Games:", 10, 300, 50),
+    "bc_ppo":  ("BC Games:", 10, 300, 150),
+    "bc":      ("BC Games:", 10, 300, 150),
     "eval":    ("Games:", 1, 100, 20),
     "logger":  (None, 0, 0, 0),
     "play":    (None, 0, 0, 0),
@@ -172,8 +172,8 @@ def write_config(command: str | None = None, *, verbose: bool = True):
 
 
 def build_command(mode: str, worker_id: int = 1, games: int = 20,
-                  bc_games: int = 50, ppo_games: int = 200,
-                  ent_coef: float = 0.10, verbose: bool = False) -> str:
+                  bc_games: int = 150, ppo_games: int = 200,
+                  ent_coef: float = 0.01, verbose: bool = False) -> str:
     py = escape_properties_path(VENV_PYTHON)
     root = escape_properties_path(ROOT)
     verbose_flag = " --verbose" if verbose else ""
@@ -480,8 +480,8 @@ class AscensionApp:
 
         self.ent_label = ttk.Label(self.ent_row, text="Entropy Coef:")
         self.ent_label.pack(side="left", padx=(0, 5))
-        self._ent_value = 0.10
-        self.ent_var = tk.StringVar(value="0.10")
+        self._ent_value = 0.01
+        self.ent_var = tk.StringVar(value="0.010")
         self.ent_minus = ttk.Button(self.ent_row, text="-", width=3, command=self._dec_ent)
         self.ent_minus.pack(side="left")
         self.ent_display = ttk.Label(self.ent_row, textvariable=self.ent_var, width=5,
@@ -603,28 +603,28 @@ class AscensionApp:
         return value
 
     def _inc_ent(self):
-        v = round(self._ent_value + 0.01, 2)
-        if v <= 0.50:
+        v = round(self._ent_value + 0.005, 3)
+        if v <= 0.10:
             self._ent_value = v
-            self.ent_var.set(f"{v:.2f}")
+            self.ent_var.set(f"{v:.3f}")
 
     def _dec_ent(self):
-        v = round(self._ent_value - 0.01, 2)
-        if v >= 0.01:
+        v = round(self._ent_value - 0.005, 3)
+        if v >= 0.0:
             self._ent_value = v
-            self.ent_var.set(f"{v:.2f}")
+            self.ent_var.set(f"{v:.3f}")
 
     _ENT_TOOLTIP_TEXT = (
         "Controls how much the agent explores vs. exploits.\n"
         "\n"
-        "Higher (0.15-0.30): More random actions, discovers\n"
-        "new strategies but plays worse short-term.\n"
+        "Higher (0.03-0.10): More random actions, but can\n"
+        "destabilize a behavior-cloned warm start.\n"
         "\n"
-        "Lower (0.01-0.10): More deterministic, exploits what\n"
-        "it already knows but can get stuck in local optima.\n"
+        "Lower (0.00-0.02): More deterministic, better for\n"
+        "testing whether PPO improves the BC policy.\n"
         "\n"
-        "Start higher after BC warm-up to break out of\n"
-        "imitation patterns, then lower once it improves."
+        "Recommended after BC: 0.005-0.02. Raise only if\n"
+        "entropy collapses too early."
     )
 
     def _show_ent_tooltip(self, event):
@@ -890,10 +890,12 @@ class AscensionApp:
 
         display_transitions = trainer_transitions if trainer_transitions else total_transitions
 
-        recent_n = 25
+        recent_n = 100
         recent_floors = floors[-recent_n:]
         recent_rewards = rewards[-recent_n:]
         recent_wins = sum(victories[-recent_n:])
+        lifetime_avg_floor = sum(floors) / len(floors) if floors else 0.0
+        lifetime_avg_reward = sum(rewards) / len(rewards) if rewards else 0.0
 
         rollouts_pending = 0
         rollouts_dir = ROOT / "rollouts_shared"
@@ -923,6 +925,8 @@ class AscensionApp:
             "best_act": best_act,
             "avg_floor": sum(recent_floors) / len(recent_floors) if recent_floors else 0.0,
             "avg_reward": sum(recent_rewards) / len(recent_rewards) if recent_rewards else 0.0,
+            "lifetime_avg_floor": lifetime_avg_floor,
+            "lifetime_avg_reward": lifetime_avg_reward,
             "updates": updates,
             "total_transitions": display_transitions,
             "episode_transitions": total_transitions,
@@ -979,15 +983,17 @@ class AscensionApp:
                 self.stats_vars["train_line"].set(
                     f"Training:  {ts['total']} games  |  "
                     f"Wins: {ts['wins']} ({ts['win_rate']:.0%})  |  "
-                    f"Last 25: {ts['recent_win_rate']:.0%}  |  "
+                    f"Avg100 Wins: {ts['recent_win_rate']:.0%}  |  "
                     f"Best: Floor {ts['best_floor']} Act {ts['best_act']}  |  "
-                    f"Avg Floor: {ts['avg_floor']:.1f}"
+                    f"Avg100 Floor: {ts['avg_floor']:.1f}  |  "
+                    f"Life Floor: {ts['lifetime_avg_floor']:.1f}"
                 )
                 detail_parts = [
                     f"Transitions: {ts['total_transitions']:,}",
                     f"Steps: {ts['total_steps']:,}",
                     f"Updates: {ts['updates']}",
-                    f"Avg Reward: {ts['avg_reward']:.1f}",
+                    f"Avg100 Reward: {ts['avg_reward']:.1f}",
+                    f"Life Reward: {ts['lifetime_avg_reward']:.1f}",
                 ]
                 if ts['rollouts_pending']:
                     detail_parts.append(f"Rollouts Queued: {ts['rollouts_pending']}")

@@ -11,7 +11,7 @@ drafting, campfire rest/smith, event choices, shop purchases, boss relic picks,
 forced discard, grid selection, and combat reward priority.
 
 Usage (in CommunicationMod config.properties):
-  command=python behavior_clone.py --games 50 --save models/ppo_sts.pt
+  command=python behavior_clone.py --games 150 --save models/ppo_sts.pt
 """
 
 from __future__ import annotations
@@ -63,8 +63,6 @@ def log(msg: str):
             f.flush()
     except Exception:
         pass
-
-log("=== BEHAVIOR CLONE STARTING ===")
 
 from spirecomm.communication.coordinator import Coordinator
 from spirecomm.communication.action import (
@@ -825,24 +823,48 @@ def train_supervised(obs_list, action_list, mask_list, save_path: str,
     return trainer
 
 
+def save_demo_dataset(obs_list, action_list, mask_list, path: str) -> None:
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    tmp = path.replace(".npz", ".tmp.npz") if path.endswith(".npz") else path + ".tmp.npz"
+    np.savez_compressed(
+        tmp,
+        observations=np.array(obs_list, dtype=np.float32),
+        actions=np.array(action_list, dtype=np.int64),
+        action_masks=np.array(mask_list, dtype=np.bool_),
+        created_at=np.array(datetime.now().isoformat()),
+        samples=np.array(len(action_list), dtype=np.int64),
+    )
+    os.replace(tmp, path)
+    log(f"BC demo dataset saved to {path} ({len(action_list)} samples)")
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 def main():
     global VERBOSE
     parser = argparse.ArgumentParser()
-    parser.add_argument("--games", type=int, default=50,
+    parser.add_argument("--games", type=int, default=150,
                         help="Number of heuristic games to collect")
     parser.add_argument("--save", type=str, default="models/ppo_sts.pt",
                         help="Where to save warm-started model")
+    parser.add_argument("--demo-save", type=str, default=None,
+                        help="Where to save BC demo dataset for PPO anchoring")
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--verbose", action="store_true",
                         help="Write detailed per-state/per-action debug logs")
     args = parser.parse_args()
     VERBOSE = VERBOSE or args.verbose
 
+    log("=== BEHAVIOR CLONE STARTING ===")
+
     save_path = os.path.join(_root, args.save)
     os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
+    demo_save = args.demo_save
+    if demo_save is None:
+        demo_save = save_path.replace(".pt", "_bc_demos.npz")
+    elif not os.path.isabs(demo_save):
+        demo_save = os.path.join(_root, demo_save)
 
     collector = DemoCollector(max_games=args.games)
 
@@ -866,6 +888,11 @@ def main():
     if n < 50:
         log("Too few samples, skipping training")
         return
+
+    save_demo_dataset(
+        collector.observations, collector.actions, collector.masks,
+        demo_save,
+    )
 
     train_supervised(
         collector.observations, collector.actions, collector.masks,

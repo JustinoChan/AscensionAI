@@ -190,6 +190,11 @@ _STATS_COLUMNS = [
     "total_reward", "final_hp", "final_max_hp", "final_floor", "final_act",
     "victory", "terminated", "pg_loss", "vf_loss", "entropy", "worker",
     "elites_fought", "elites_won", "bosses_fought", "bosses_won",
+    "approx_kl", "clip_fraction", "explained_variance",
+    "mean_advantage", "std_advantage", "invalid_action_count",
+    "mean_chosen_action_prob", "bc_loss", "bc_coef", "early_stop",
+    "stale_rollouts", "legacy_rollouts", "skipped_rollouts",
+    "batch_model_updates", "batch_checkpoint_ids",
 ]
 
 def _init_stats_csv():
@@ -238,17 +243,22 @@ class TransitionBuffer:
     def clear(self):
         self.__init__()
 
-    def save_npz(self, path: str):
+    def save_npz(self, path: str, metadata: dict | None = None):
         tmp = path.replace(".npz", ".tmp.npz")
+        payload = {
+            "observations": np.array(self.observations, dtype=np.float32),
+            "actions": np.array(self.actions, dtype=np.int64),
+            "rewards": np.array(self.rewards, dtype=np.float32),
+            "dones": np.array(self.dones, dtype=np.bool_),
+            "action_masks": np.array(self.action_masks, dtype=np.bool_),
+            "log_probs": np.array(self.log_probs, dtype=np.float32),
+            "values": np.array(self.values, dtype=np.float32),
+        }
+        for key, value in (metadata or {}).items():
+            payload[key] = np.array(value)
         np.savez_compressed(
             tmp,
-            observations=np.array(self.observations, dtype=np.float32),
-            actions=np.array(self.actions, dtype=np.int64),
-            rewards=np.array(self.rewards, dtype=np.float32),
-            dones=np.array(self.dones, dtype=np.bool_),
-            action_masks=np.array(self.action_masks, dtype=np.bool_),
-            log_probs=np.array(self.log_probs, dtype=np.float32),
-            values=np.array(self.values, dtype=np.float32),
+            **payload,
         )
         os.replace(tmp, path)
 
@@ -285,6 +295,11 @@ class WorkerAgent:
         self._stuck_dumped_key = ""
         self._recent_actions: list[str] = []
         self._model_mtime = 0.0
+        if os.path.isfile(self.model_path):
+            try:
+                self._model_mtime = os.path.getmtime(self.model_path)
+            except OSError:
+                self._model_mtime = 0.0
 
         self.fight_tracker = FightTracker(
             source="worker", worker=worker_id, log=log
@@ -463,8 +478,27 @@ class WorkerAgent:
                 fname = f"w{self.worker_id}_g{self.total_games}_{int(time.time())}.npz"
                 path = os.path.join(self.out_dir, fname)
                 try:
-                    self.buffer.save_npz(path)
-                    log(f"  Saved {n} transitions to {fname}")
+                    lr = 0.0
+                    try:
+                        lr = float(self.trainer.optimizer.param_groups[0].get("lr", 0.0))
+                    except Exception:
+                        pass
+                    model_update = int(getattr(self.trainer, "total_updates", 0) or 0)
+                    checkpoint_mtime = self._model_mtime
+                    if checkpoint_mtime <= 0 and os.path.isfile(self.model_path):
+                        checkpoint_mtime = os.path.getmtime(self.model_path)
+                    metadata = {
+                        "model_update_number": model_update,
+                        "checkpoint_id": f"u{model_update}_m{int(checkpoint_mtime)}",
+                        "worker_id": self.worker_id,
+                        "episode_number": self.total_games,
+                        "entropy_coeff": float(getattr(self.trainer, "ent_coef", 0.0)),
+                        "learning_rate": lr,
+                        "created_at": datetime.now().isoformat(),
+                    }
+                    self.buffer.save_npz(path, metadata=metadata)
+                    log(f"  Saved {n} transitions to {fname} "
+                        f"(model_update={model_update}, checkpoint={metadata['checkpoint_id']})")
                 except Exception as e:
                     log(f"save_npz failed (non-fatal): {e}")
 

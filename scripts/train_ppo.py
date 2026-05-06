@@ -60,6 +60,11 @@ _STATS_COLUMNS = [
     "total_reward", "final_hp", "final_max_hp", "final_floor", "final_act",
     "victory", "terminated", "pg_loss", "vf_loss", "entropy", "worker",
     "elites_fought", "elites_won", "bosses_fought", "bosses_won",
+    "approx_kl", "clip_fraction", "explained_variance",
+    "mean_advantage", "std_advantage", "invalid_action_count",
+    "mean_chosen_action_prob", "bc_loss", "bc_coef", "early_stop",
+    "stale_rollouts", "legacy_rollouts", "skipped_rollouts",
+    "batch_model_updates", "batch_checkpoint_ids",
 ]
 
 
@@ -374,7 +379,12 @@ class PPOAgent:
             if stats:
                 log(f"  PPO update #{self.trainer.total_updates}: "
                     f"pg={stats['pg_loss']:.4f} vf={stats['vf_loss']:.4f} "
-                    f"ent={stats['entropy']:.4f} transitions={n_buffered}")
+                    f"ent={stats['entropy']:.4f} "
+                    f"kl={stats.get('approx_kl', 0.0):.5f} "
+                    f"clip={stats.get('clip_fraction', 0.0):.3f} "
+                    f"ev={stats.get('explained_variance', 0.0):.3f} "
+                    f"early_stop={stats.get('early_stop', 0)} "
+                    f"transitions={n_buffered}")
             self.buffer.clear()
             self.games_since_update = 0
 
@@ -398,6 +408,16 @@ class PPOAgent:
             "elites_won": fight_stats["elites_won"],
             "bosses_fought": fight_stats["bosses_fought"],
             "bosses_won": fight_stats["bosses_won"],
+            "approx_kl": round(stats.get("approx_kl", 0.0), 8) if stats else "",
+            "clip_fraction": round(stats.get("clip_fraction", 0.0), 6) if stats else "",
+            "explained_variance": round(stats.get("explained_variance", 0.0), 6) if stats else "",
+            "mean_advantage": round(stats.get("mean_advantage", 0.0), 6) if stats else "",
+            "std_advantage": round(stats.get("std_advantage", 0.0), 6) if stats else "",
+            "invalid_action_count": stats.get("invalid_action_count", "") if stats else "",
+            "mean_chosen_action_prob": round(stats.get("mean_chosen_action_prob", 0.0), 6) if stats else "",
+            "bc_loss": round(stats.get("bc_loss", 0.0), 6) if stats else "",
+            "bc_coef": round(stats.get("bc_coef", 0.0), 6) if stats else "",
+            "early_stop": stats.get("early_stop", "") if stats else "",
         }
         _append_stats_csv(row)
         if fight_stats["elites_fought"] or fight_stats["bosses_fought"]:
@@ -445,8 +465,12 @@ def main():
                         help="Save model every N games")
     parser.add_argument("--games-per-update", type=int, default=4,
                         help="Accumulate N games of transitions per PPO update (default: 4)")
-    parser.add_argument("--ent-coef", type=float, default=0.15,
+    parser.add_argument("--lr", type=float, default=1e-4,
+                        help="PPO learning rate (default: 1e-4)")
+    parser.add_argument("--ent-coef", type=float, default=0.01,
                         help="Entropy bonus coefficient (higher = more exploration)")
+    parser.add_argument("--target-kl", type=float, default=0.03,
+                        help="Stop PPO epochs early when approx KL exceeds this value")
     parser.add_argument("--verbose", action="store_true",
                         help="Write detailed per-state/per-action debug logs")
     args = parser.parse_args()
@@ -457,13 +481,13 @@ def main():
 
     log("Creating PPO trainer...")
     log(f"Config: save={args.save} resume={args.resume} "
-        f"games_per_update={args.games_per_update} ent_coef={args.ent_coef} "
-        f"verbose={VERBOSE}")
+        f"games_per_update={args.games_per_update} lr={args.lr} ent_coef={args.ent_coef} "
+        f"target_kl={args.target_kl} verbose={VERBOSE}")
     trainer = PPOTrainer(
         obs_size=OBS_SIZE,
         n_actions=NUM_ACTIONS,
         device="cpu",
-        lr=3e-4,
+        lr=args.lr,
         gamma=0.995,
         gae_lambda=0.95,
         clip_range=0.2,
@@ -472,11 +496,14 @@ def main():
         n_epochs=4,
         batch_size=64,
         net_arch=(256, 256),
+        target_kl=args.target_kl,
     )
 
     if args.resume:
         resume_path = os.path.join(_root, args.resume)
         trainer.load(resume_path)
+        trainer.set_lr(args.lr)
+        log(f"Loaded checkpoint {resume_path}; optimizer lr reset to {args.lr}")
 
     log("Creating agent...")
     agent = PPOAgent(trainer, save_path, save_every=args.save_every,
