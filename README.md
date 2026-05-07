@@ -122,6 +122,7 @@ AscensionAI is designed to run multiple live STS instances for many hours, but m
 - **Events** — event choices use CommunicationMod's real `choice_index`, which matters for events with disabled or hidden options.
 - **Card grids** — grid confirmations, hand-selection screens, and Match and Keep avoid repeated invalid selections.
 - **Shops** — each shop room is entered once per floor so canceling out of the shop does not bounce back into it forever.
+- **BC progress checkpoints** — BC-only and BC → PPO save demo progress after every completed BC game to `models/ppo_sts_bc_progress.npz` by default. If STS crashes at game 145/150, restart the same mode and it resumes from the saved completed-game count. Use `--no-resume-bc` or delete that progress file for a fully fresh BC run.
 - **Command errors** — rejected commands recover through a conservative state/choose fallback instead of repeatedly sending invalid no-ops.
 
 For the first long run after a patch, enable **Verbose Logs** in the Control Panel. It passes `--verbose` to every launch mode and also sets CommunicationMod `verbose=true`, producing step-by-step logs for BC, PPO, workers, evaluation, and passive logging.

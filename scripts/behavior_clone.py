@@ -667,19 +667,72 @@ def _action_desc(action: Optional[Action]) -> str:
     return " ".join(parts)
 
 
+def _tmp_npz_path(path: str) -> str:
+    return path.replace(".npz", ".tmp.npz") if path.endswith(".npz") else path + ".tmp.npz"
+
+
+def _remove_if_exists(path: str) -> None:
+    try:
+        if path and os.path.exists(path):
+            os.remove(path)
+            log(f"Removed BC progress checkpoint: {path}")
+    except OSError as e:
+        log(f"Failed to remove BC progress checkpoint {path}: {e}")
+
+
 # ---------------------------------------------------------------------------
 # Demonstration collector
 # ---------------------------------------------------------------------------
 class DemoCollector:
-    def __init__(self, max_games: int):
+    def __init__(self, max_games: int, checkpoint_path: Optional[str] = None,
+                 resume_checkpoint: bool = True):
         self.max_games = max_games
         self.games_done = 0
         self.total_steps = 0
         self.initialized = False
+        self.checkpoint_path = checkpoint_path
 
         self.observations: List[np.ndarray] = []
         self.actions: List[int] = []
         self.masks: List[np.ndarray] = []
+        if resume_checkpoint and checkpoint_path and os.path.isfile(checkpoint_path):
+            self._load_checkpoint(checkpoint_path)
+
+    def _save_checkpoint(self) -> None:
+        if not self.checkpoint_path:
+            return
+        try:
+            os.makedirs(os.path.dirname(self.checkpoint_path) or ".", exist_ok=True)
+            tmp = _tmp_npz_path(self.checkpoint_path)
+            np.savez_compressed(
+                tmp,
+                observations=np.array(self.observations, dtype=np.float32),
+                actions=np.array(self.actions, dtype=np.int64),
+                action_masks=np.array(self.masks, dtype=np.bool_),
+                games_done=np.array(self.games_done, dtype=np.int64),
+                total_steps=np.array(self.total_steps, dtype=np.int64),
+                max_games=np.array(self.max_games, dtype=np.int64),
+                saved_at=np.array(datetime.now().isoformat()),
+            )
+            os.replace(tmp, self.checkpoint_path)
+            log(f"BC progress checkpoint saved: games={self.games_done}/{self.max_games} "
+                f"samples={len(self.actions)} path={self.checkpoint_path}")
+        except Exception as e:
+            log(f"Failed to save BC progress checkpoint {self.checkpoint_path}: {e}")
+
+    def _load_checkpoint(self, path: str) -> None:
+        try:
+            with np.load(path, allow_pickle=False) as data:
+                self.observations = [x for x in data["observations"]]
+                self.actions = [int(x) for x in data["actions"]]
+                self.masks = [x for x in data["action_masks"]]
+                self.games_done = int(data["games_done"].item())
+                self.total_steps = int(data["total_steps"].item())
+            self.games_done = min(self.games_done, self.max_games)
+            log(f"Resumed BC progress checkpoint: games={self.games_done}/{self.max_games} "
+                f"samples={len(self.actions)} path={path}")
+        except Exception as e:
+            log(f"Failed to load BC progress checkpoint {path}: {e}")
 
     def on_state_change(self, gs) -> Action:
         try:
@@ -704,6 +757,7 @@ class DemoCollector:
             _skipped_card_reward_keys.clear()
             log(f"Demo game #{self.games_done} ended. "
                 f"Samples so far: {len(self.observations)}, total_steps={self.total_steps}")
+            self._save_checkpoint()
             proceed_avail = bool(getattr(gs, "proceed_available", False))
             if proceed_avail:
                 return Action("proceed")
@@ -825,7 +879,7 @@ def train_supervised(obs_list, action_list, mask_list, save_path: str,
 
 def save_demo_dataset(obs_list, action_list, mask_list, path: str) -> None:
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
-    tmp = path.replace(".npz", ".tmp.npz") if path.endswith(".npz") else path + ".tmp.npz"
+    tmp = _tmp_npz_path(path)
     np.savez_compressed(
         tmp,
         observations=np.array(obs_list, dtype=np.float32),
@@ -850,6 +904,10 @@ def main():
                         help="Where to save warm-started model")
     parser.add_argument("--demo-save", type=str, default=None,
                         help="Where to save BC demo dataset for PPO anchoring")
+    parser.add_argument("--bc-checkpoint", type=str, default=None,
+                        help="Per-game BC progress checkpoint path")
+    parser.add_argument("--no-resume-bc", dest="resume_bc", action="store_false",
+                        help="Ignore any existing BC progress checkpoint")
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--verbose", action="store_true",
                         help="Write detailed per-state/per-action debug logs")
@@ -865,22 +923,36 @@ def main():
         demo_save = save_path.replace(".pt", "_bc_demos.npz")
     elif not os.path.isabs(demo_save):
         demo_save = os.path.join(_root, demo_save)
+    bc_checkpoint = args.bc_checkpoint
+    if bc_checkpoint is None:
+        bc_checkpoint = save_path.replace(".pt", "_bc_progress.npz")
+    elif not os.path.isabs(bc_checkpoint):
+        bc_checkpoint = os.path.join(_root, bc_checkpoint)
 
-    collector = DemoCollector(max_games=args.games)
+    collector = DemoCollector(
+        max_games=args.games,
+        checkpoint_path=bc_checkpoint,
+        resume_checkpoint=args.resume_bc,
+    )
 
-    coord = Coordinator()
-    coord.register_state_change_callback(collector.on_state_change)
-    coord.register_out_of_game_callback(collector.on_out_of_game)
-    coord.register_command_error_callback(collector.on_error)
+    if collector.games_done < args.games:
+        coord = Coordinator()
+        coord.register_state_change_callback(collector.on_state_change)
+        coord.register_out_of_game_callback(collector.on_out_of_game)
+        coord.register_command_error_callback(collector.on_error)
 
-    log(f"Starting demo collection: {args.games} games "
-        f"save={args.save} epochs={args.epochs} verbose={VERBOSE}")
-    coord.signal_ready()
+        log(f"Starting demo collection: {args.games} games "
+            f"save={args.save} epochs={args.epochs} verbose={VERBOSE} "
+            f"checkpoint={bc_checkpoint} resume={args.resume_bc}")
+        coord.signal_ready()
 
-    try:
-        coord.run()
-    except StopIteration:
-        pass
+        try:
+            coord.run()
+        except StopIteration:
+            pass
+    else:
+        log(f"BC checkpoint already has {collector.games_done}/{args.games} games; "
+            "training immediately")
 
     n = len(collector.observations)
     log(f"Collection done: {collector.games_done} games, {n} samples")
@@ -898,6 +970,7 @@ def main():
         collector.observations, collector.actions, collector.masks,
         save_path, epochs=args.epochs,
     )
+    _remove_if_exists(bc_checkpoint)
     log("=== BEHAVIOR CLONE COMPLETE ===")
 
 

@@ -97,6 +97,7 @@ AscensionAI has already moved beyond a small toy agent. The current project incl
 - A central offline trainer that filters stale rollout files, consumes fresh rollout batches, logs PPO diagnostics, and atomically saves updated checkpoints.
 - A Windows control panel that launches workers, starts/stops training, tails logs, detects worker crashes, restarts instances, and tracks progress.
 - Robustness patches for common Slay the Spire screen loops, including boss relic screens, combat rewards, map transitions, shops, card grids, Match and Keep, and events with disabled options.
+- Per-game BC progress checkpointing so long BC collection can resume after a crash instead of starting over.
 - Fight tracking for elite and boss encounters, including terminal in-combat losses that would otherwise be missed.
 - Progress tracking through CSV logs, fight logs, eval logs, fixed-seed evaluations, policy top-action logs, reward-correlation reports, and training plots.
 - An archive workflow for clearing old logs, rollouts, and checkpoints before a clean experiment restart.
@@ -336,6 +337,7 @@ Important generated files:
 
 - models/ppo_sts.pt: main PPO checkpoint.
 - models/ppo_sts_bc.pt: behavior cloning checkpoint.
+- models/ppo_sts_bc_progress.npz: resumable in-progress BC demo checkpoint, removed after successful BC training.
 - logs/training_stats.csv: game and trainer metrics.
 - logs/fight_stats.csv: elite and boss fight outcomes.
 - logs/eval_stats.csv: greedy evaluation results.

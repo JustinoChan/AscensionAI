@@ -168,6 +168,19 @@ def _append_stats_csv(row: dict) -> None:
         log(f"stats csv append failed: {e}")
 
 
+def _tmp_npz_path(path: str) -> str:
+    return path.replace(".npz", ".tmp.npz") if path.endswith(".npz") else path + ".tmp.npz"
+
+
+def _remove_if_exists(path: str) -> None:
+    try:
+        if path and os.path.exists(path):
+            os.remove(path)
+            log(f"Removed BC progress checkpoint: {path}")
+    except OSError as e:
+        log(f"Failed to remove BC progress checkpoint {path}: {e}")
+
+
 log("=== BC->PPO PIPELINE STARTING ===")
 _init_stats_csv()
 
@@ -231,6 +244,8 @@ class BCPPOAgent:
         games_per_update: int = 4,
         bc_anchor_coef: float = 0.02,
         demo_save_path: Optional[str] = None,
+        bc_checkpoint_path: Optional[str] = None,
+        resume_bc: bool = True,
     ):
         self.bc_games = bc_games
         self.ppo_games = ppo_games
@@ -246,6 +261,8 @@ class BCPPOAgent:
         self.games_per_update = games_per_update
         self.bc_anchor_coef = bc_anchor_coef
         self.demo_save_path = demo_save_path or save_path.replace(".pt", "_bc_demos.npz")
+        self.bc_checkpoint_path = bc_checkpoint_path or save_path.replace(".pt", "_bc_progress.npz")
+        self.resume_bc = resume_bc
         self.games_since_update = 0
         self._game_start_buf_len = 0
 
@@ -262,6 +279,7 @@ class BCPPOAgent:
         self._bc_game_start_demo_len = 0
         self.bc_skipped_samples = 0
         self.bc_initialized = False
+        self.total_games = 0
 
         # --- PPO trainer (created after BC, or loaded from checkpoint) ---
         if resume_path:
@@ -286,7 +304,6 @@ class BCPPOAgent:
         self.ppo_games_done = 0
         self.ppo_steps = 0
         self._ppo_game_start_steps = 0
-        self.total_games = 0
         self.episode_reward = 0.0
         self.pending_reward = 0.0
         self.ppo_initialized = False
@@ -301,6 +318,8 @@ class BCPPOAgent:
         self.fight_tracker = FightTracker(
             source="bc_ppo", worker="bc_ppo", log=log
         )
+        if self.phase == self.PHASE_BC and self.resume_bc:
+            self._try_load_bc_progress()
 
     # ------------------------------------------------------------------
     # Coordinator callbacks
@@ -316,6 +335,10 @@ class BCPPOAgent:
             return Action("state")
 
     def on_out_of_game(self) -> Action:
+        if self.phase == self.PHASE_BC and self.bc_games_done >= self.bc_games:
+            log("BC progress already complete; transitioning to PPO before next game")
+            self._transition_to_ppo()
+
         if (self.phase == self.PHASE_PPO
                 and self.ppo_games > 0
                 and self.ppo_games_done >= self.ppo_games):
@@ -334,6 +357,50 @@ class BCPPOAgent:
         log(f"COMMAND ERROR CONTEXT: phase={self.phase} "
             f"bc_steps={self.bc_steps} ppo_steps={self.ppo_steps}")
         return recover_from_command_error(err)
+
+    def _save_bc_progress(self) -> None:
+        if not self.bc_checkpoint_path:
+            return
+        try:
+            os.makedirs(os.path.dirname(self.bc_checkpoint_path) or ".", exist_ok=True)
+            tmp = _tmp_npz_path(self.bc_checkpoint_path)
+            np.savez_compressed(
+                tmp,
+                observations=np.array(self.demo_obs, dtype=np.float32),
+                actions=np.array(self.demo_actions, dtype=np.int64),
+                action_masks=np.array(self.demo_masks, dtype=np.bool_),
+                games_done=np.array(self.bc_games_done, dtype=np.int64),
+                total_games=np.array(self.total_games, dtype=np.int64),
+                bc_steps=np.array(self.bc_steps, dtype=np.int64),
+                skipped_samples=np.array(self.bc_skipped_samples, dtype=np.int64),
+                target_games=np.array(self.bc_games, dtype=np.int64),
+                saved_at=np.array(datetime.now().isoformat()),
+            )
+            os.replace(tmp, self.bc_checkpoint_path)
+            log(f"BC progress checkpoint saved: games={self.bc_games_done}/{self.bc_games} "
+                f"samples={len(self.demo_actions)} path={self.bc_checkpoint_path}")
+        except Exception as e:
+            log(f"Failed to save BC progress checkpoint {self.bc_checkpoint_path}: {e}")
+
+    def _try_load_bc_progress(self) -> None:
+        if not self.bc_checkpoint_path or not os.path.isfile(self.bc_checkpoint_path):
+            return
+        try:
+            with np.load(self.bc_checkpoint_path, allow_pickle=False) as data:
+                self.demo_obs = [x for x in data["observations"]]
+                self.demo_actions = [int(x) for x in data["actions"]]
+                self.demo_masks = [x for x in data["action_masks"]]
+                self.bc_games_done = int(data["games_done"].item())
+                self.total_games = int(data["total_games"].item()) if "total_games" in data.files else self.bc_games_done
+                self.bc_steps = int(data["bc_steps"].item())
+                self.bc_skipped_samples = int(data["skipped_samples"].item())
+            self.bc_games_done = min(self.bc_games_done, self.bc_games)
+            self.total_games = max(self.total_games, self.bc_games_done)
+            log(f"Resumed BC progress checkpoint: games={self.bc_games_done}/{self.bc_games} "
+                f"samples={len(self.demo_actions)} skipped={self.bc_skipped_samples} "
+                f"path={self.bc_checkpoint_path}")
+        except Exception as e:
+            log(f"Failed to load BC progress checkpoint {self.bc_checkpoint_path}: {e}")
 
     # ------------------------------------------------------------------
     # Phase 1: BC demonstration collection
@@ -394,6 +461,8 @@ class BCPPOAgent:
                 "bosses_fought": fight_stats["bosses_fought"],
                 "bosses_won": fight_stats["bosses_won"],
             })
+
+            self._save_bc_progress()
 
             # Collected enough demos — train and switch to PPO
             if self.bc_games_done >= self.bc_games:
@@ -489,6 +558,7 @@ class BCPPOAgent:
                 )
                 log(f"BC anchor enabled for PPO: coef={self.bc_anchor_coef} "
                     f"samples={len(self.demo_actions)}")
+            _remove_if_exists(self.bc_checkpoint_path)
 
         # Free demo data
         self.demo_obs.clear()
@@ -502,11 +572,7 @@ class BCPPOAgent:
     def _save_bc_demo_dataset(self) -> None:
         try:
             os.makedirs(os.path.dirname(self.demo_save_path) or ".", exist_ok=True)
-            tmp = (
-                self.demo_save_path.replace(".npz", ".tmp.npz")
-                if self.demo_save_path.endswith(".npz")
-                else self.demo_save_path + ".tmp.npz"
-            )
+            tmp = _tmp_npz_path(self.demo_save_path)
             np.savez_compressed(
                 tmp,
                 observations=np.array(self.demo_obs, dtype=np.float32),
@@ -901,6 +967,10 @@ def main():
                      help="Model save path (default: models/ppo_sts.pt)")
     gen.add_argument("--demo-save", type=str, default=None,
                      help="Where to save/load BC demos for PPO anchoring")
+    gen.add_argument("--bc-checkpoint", type=str, default=None,
+                     help="Per-game BC progress checkpoint path")
+    gen.add_argument("--no-resume-bc", dest="resume_bc", action="store_false",
+                     help="Ignore any existing BC progress checkpoint")
     gen.add_argument("--save-every", type=int, default=5,
                      help="Save every N PPO games (default: 5)")
     gen.add_argument("--resume", type=str, default=None,
@@ -918,6 +988,9 @@ def main():
     demo_save = args.demo_save
     if demo_save is not None and not os.path.isabs(demo_save):
         demo_save = os.path.join(_root, demo_save)
+    bc_checkpoint = args.bc_checkpoint
+    if bc_checkpoint is not None and not os.path.isabs(bc_checkpoint):
+        bc_checkpoint = os.path.join(_root, bc_checkpoint)
 
     resume_path = os.path.join(_root, args.resume) if args.resume else None
 
@@ -925,7 +998,7 @@ def main():
         f"bc_lr={args.bc_lr} ppo_games={args.ppo_games} ppo_lr={args.ppo_lr} "
         f"ent={args.ent_start}->{args.ent_end} clip={args.clip} "
         f"target_kl={args.target_kl} bc_anchor={args.bc_anchor_coef} resume={args.resume} "
-        f"verbose={VERBOSE}")
+        f"resume_bc={args.resume_bc} verbose={VERBOSE}")
 
     agent = BCPPOAgent(
         bc_games=args.bc_games,
@@ -943,6 +1016,8 @@ def main():
         games_per_update=args.games_per_update,
         bc_anchor_coef=args.bc_anchor_coef,
         demo_save_path=demo_save,
+        bc_checkpoint_path=bc_checkpoint,
+        resume_bc=args.resume_bc,
     )
 
     log("Setting up Coordinator...")
