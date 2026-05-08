@@ -27,8 +27,6 @@ if _root not in sys.path:
 if _scripts not in sys.path:
     sys.path.insert(0, _scripts)
 
-os.environ["CUDA_VISIBLE_DEVICES"] = ""
-
 import numpy as np
 import torch
 
@@ -82,6 +80,50 @@ def _append_training_stats(row: dict):
             f.write(",".join(str(row.get(c, "")) for c in _STATS_COLUMNS) + "\n")
     except Exception as e:
         log(f"stats csv append failed: {e}")
+
+
+def _torch_backend_summary() -> str:
+    return (
+        f"torch={getattr(torch, '__version__', '?')} "
+        f"cuda_built={getattr(torch.version, 'cuda', None)} "
+        f"hip_built={getattr(torch.version, 'hip', None)} "
+        f"cuda_available={torch.cuda.is_available()}"
+    )
+
+
+def _resolve_device(requested: str) -> str:
+    """Return a usable torch device.
+
+    ROCm-backed AMD PyTorch still reports devices through torch.cuda, so
+    "cuda" is the expected device name for both NVIDIA CUDA and AMD ROCm.
+    """
+    try:
+        gpu_available = bool(torch.cuda.is_available())
+    except Exception as e:
+        log(f"GPU availability check failed: {e}")
+        gpu_available = False
+
+    if requested == "cpu":
+        return "cpu"
+    if gpu_available:
+        name = ""
+        try:
+            name = torch.cuda.get_device_name(0)
+        except Exception:
+            pass
+        log(f"Using GPU device cuda{f' ({name})' if name else ''}; {_torch_backend_summary()}")
+        return "cuda"
+
+    if requested == "gpu":
+        log(
+            "WARNING: GPU training was requested, but this PyTorch install has "
+            f"no usable GPU backend; falling back to CPU. {_torch_backend_summary()}"
+        )
+        log(
+            "For AMD GPUs, install a ROCm-enabled PyTorch build; the ROCm build "
+            "still uses torch's 'cuda' device name."
+        )
+    return "cpu"
 
 
 # ---------------------------------------------------------------------------
@@ -213,7 +255,7 @@ def main():
                         help="Seconds between checking for new data")
     parser.add_argument("--delete-consumed", action="store_true",
                         help="Delete .npz files after training on them")
-    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--lr", type=float, default=3e-5)
     parser.add_argument("--epochs", type=int, default=4)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--ent-coef", type=float, default=0.001,
@@ -230,10 +272,15 @@ def main():
                         help="Optional BC demo npz for imitation anchor loss")
     parser.add_argument("--bc-coef", type=float, default=0.02,
                         help="BC anchor coefficient if --bc-demo exists")
+    parser.add_argument("--device", type=str, default="auto",
+                        choices=["auto", "cpu", "gpu"],
+                        help="Device for training: auto (GPU if available), cpu, or gpu")
     parser.add_argument("--verbose", action="store_true",
                         help="Write detailed polling and rollout loading logs")
     args = parser.parse_args()
     VERBOSE = VERBOSE or args.verbose
+
+    device = _resolve_device(args.device)
 
     model_path = os.path.join(_root, args.model)
     data_dir = os.path.join(_root, args.data)
@@ -247,10 +294,10 @@ def main():
         f"batch_size={args.batch_size}, ent_coef={args.ent_coef}, "
         f"clip={args.clip}, target_kl={args.target_kl}, "
         f"batch_games={args.batch_games}, max_rollout_lag={args.max_rollout_lag}, "
-        f"allow_legacy={args.allow_legacy_rollouts}, verbose={VERBOSE}")
+        f"allow_legacy={args.allow_legacy_rollouts}, device={device}, verbose={VERBOSE}")
 
     trainer = PPOTrainer(
-        obs_size=OBS_SIZE, n_actions=NUM_ACTIONS, device="cpu",
+        obs_size=OBS_SIZE, n_actions=NUM_ACTIONS, device=device,
         lr=args.lr, n_epochs=args.epochs, batch_size=args.batch_size,
         ent_coef=args.ent_coef, clip_range=args.clip, net_arch=(256, 256),
         target_kl=args.target_kl,

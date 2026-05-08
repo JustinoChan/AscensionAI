@@ -174,7 +174,7 @@ def main() -> None:
         import matplotlib.pyplot as plt
     except ImportError:
         print("\nmatplotlib not installed; install with: pip install matplotlib", file=sys.stderr)
-        return
+        raise SystemExit(1)
 
     fig, axes = plt.subplots(3, 2, figsize=(12, 9))
     subtitle = f"primary rolling window = {w}"

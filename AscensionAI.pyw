@@ -471,6 +471,9 @@ class AscensionApp:
         self.use_bc_chk = ttk.Checkbutton(row2, text="Use BC Checkpoint", variable=self.use_bc_var)
         self.use_bc_chk.pack(side="left", padx=(0, 10))
 
+        self.gpu_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(row2, text="GPU Trainer", variable=self.gpu_var).pack(side="left", padx=(0, 10))
+
         self.status_var = tk.StringVar(value="Idle")
         ttk.Label(row2, textvariable=self.status_var, font=("Segoe UI", 10, "italic")).pack(side="left")
 
@@ -1420,6 +1423,7 @@ class AscensionApp:
                     "--data", str(ROOT / "rollouts_shared"),
                     "--delete-consumed",
                     "--ent-coef", str(self._ent_value),
+                    "--device", "gpu" if self.gpu_var.get() else "cpu",
                 ]
                 if self.verbose_var.get():
                     trainer_cmd.append("--verbose")

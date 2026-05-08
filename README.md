@@ -66,6 +66,19 @@ pip install -r requirements.txt
 pip install -e external/spirecomm
 ```
 
+For AMD Radeon GPU trainer support on Windows, create the venv with Python 3.12 and install the ROCm wheels before the base requirements:
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip wheel setuptools
+.\.venv\Scripts\python.exe -m pip install -r requirements-rocm-windows.txt
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m pip install -e external\spirecomm
+.\.venv\Scripts\python.exe -c "import torch; print(torch.__version__); print(torch.version.hip); print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'no gpu')"
+```
+
+ROCm PyTorch still uses torch's `cuda` device name/API, so `torch.cuda.is_available() == True` is expected on a working AMD install.
+
 ## Quick Start
 
 The easiest way to use AscensionAI is through the **Control Panel** GUI:
@@ -169,11 +182,12 @@ Training an RL agent on Slay the Spire is compute-bound by real-time game simula
 ### Scaling with hardware
 
 - **Parallel Workers** — the Control Panel auto-detects RAM/CPU and recommends a worker count. If CPU usage stays under 70% during training, bump workers manually for roughly linear throughput.
+- **GPU Trainer** — with a ROCm-enabled AMD or CUDA-enabled NVIDIA PyTorch build, the offline trainer can run PPO updates on GPU. Live STS workers remain CPU-bound, so this mainly reduces trainer update overhead.
 - **Multiple machines** — see the Collaborating section. A secondary machine running "Collect Rollouts (No Training)" adds rollout data at zero cost to the main trainer's responsiveness.
 
 ### What's NOT worth optimizing
 
-- **A GPU is unnecessary** — the policy/value network is a tiny 256×256 MLP; CPU inference is fast. The code explicitly disables CUDA.
+- **GPU rollout workers** — the live STS Java instances and CommunicationMod bridge are still CPU-bound. GPU support only helps the offline PPO trainer, not the game simulation load.
 - **STS graphics settings** — animations are the bottleneck, not rendering quality. Leave graphics on whatever is stable.
 
 ## Command-Line Alternative
