@@ -78,7 +78,12 @@ def render_heading(pdf: FPDF, text: str, level: int):
     sz = sizes.get(level, 10)
     spacing_above = {1: 6, 2: 6, 3: 4, 4: 3}.get(level, 2)
     spacing_below = {1: 4, 2: 3, 3: 2, 4: 2}.get(level, 1)
-    if pdf.get_y() > MARGIN + 4:
+    # Avoid orphan headings: if there isn't enough room for the heading plus
+    # a couple of lines of body content, push to the next page.
+    min_room_below = {1: 60, 2: 40, 3: 30, 4: 25}.get(level, 20)
+    if pdf.get_y() + spacing_above + sz * 0.5 + min_room_below > PAGE_H - MARGIN:
+        pdf.add_page()
+    elif pdf.get_y() > MARGIN + 4:
         pdf.ln(spacing_above)
     pdf.set_font(FONT_BODY, "B", sz)
     clean = _ascii_safe(text.replace("**", ""))
@@ -171,10 +176,16 @@ def render_table(pdf: FPDF, header_cells, rows):
             max_lines = max(max_lines, lines)
         return max_lines * line_h
 
+    # If the header + at least one row wouldn't fit on this page, push to next
+    header_h = estimate_row_height(header_cells)
+    first_row_h = estimate_row_height(rows[0]) if rows else 0
+    if pdf.get_y() + header_h + first_row_h > PAGE_H - MARGIN:
+        pdf.add_page()
+
     # Header
     pdf.set_font(FONT_BODY, "B", 9)
     pdf.set_fill_color(225, 225, 230)
-    h = estimate_row_height(header_cells)
+    h = header_h
     _draw_table_row(pdf, header_cells, col_w, h, fill=True)
 
     pdf.set_font(FONT_BODY, "", 9)
