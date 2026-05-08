@@ -78,9 +78,11 @@ from sts_gym_env import (
     _CHOOSE_START, _PROCEED, _LEAVE, _NOOP,
     MAX_HAND, MAX_MONSTERS, MAX_POTIONS,
     SPAWNER_IDS,
-    is_terminal_state,
+    is_terminal_state, is_victory_state,
 )
 
+from bc_stats import append_bc_stats
+from fight_tracker import FightTracker
 from game_data import POTION_EFFECTS
 from game_data import CARD_MECHANICS
 from screen_handler import (
@@ -88,7 +90,7 @@ from screen_handler import (
     pick_card_reward, pick_combat_reward_obj, pick_combat_reward_str,
     pick_rest, pick_event, pick_boss_relic, pick_hand_select,
     pick_grid_card, _pick_grid_upgrade, _is_matching_grid, _pick_grid_match,
-    _pick_from_unselected,
+    _pick_from_unselected, _looks_like_smith_grid,
     pick_map,
     pick_shop_item,
     recover_from_command_error,
@@ -380,6 +382,7 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
             for_upgrade = bool(getattr(scr, "for_upgrade", False)) if scr else False
             for_transform = bool(getattr(scr, "for_transform", False)) if scr else False
             any_number = bool(getattr(scr, "any_number", False)) if scr else False
+            smith_grid = _looks_like_smith_grid(gs, scr, grid_choices, cancel_avail)
             if _is_matching_grid(gs, scr, grid_choices):
                 idx = _pick_grid_match(grid_choices, scr, gs)
                 if idx is not None:
@@ -389,7 +392,7 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
                 if cancel_avail:
                     return Action("leave"), _LEAVE
                 return Action("state"), _NOOP
-            if for_upgrade:
+            if for_upgrade or smith_grid:
                 idx = _pick_grid_upgrade(grid_choices)
                 return ChooseAction(choice_index=idx), _CHOOSE_START + idx
             if for_transform:
@@ -685,12 +688,19 @@ def _remove_if_exists(path: str) -> None:
 # ---------------------------------------------------------------------------
 class DemoCollector:
     def __init__(self, max_games: int, checkpoint_path: Optional[str] = None,
-                 resume_checkpoint: bool = True):
+                 resume_checkpoint: bool = True, save_path: str = ""):
         self.max_games = max_games
         self.games_done = 0
         self.total_steps = 0
         self.initialized = False
         self.checkpoint_path = checkpoint_path
+        self.save_path = save_path
+        self.run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.skipped_samples = 0
+        self._game_start_steps = 0
+        self._game_start_sample_len = 0
+        self._game_start_skipped = 0
+        self.fight_tracker = FightTracker(source="bc", worker="bc", log=log)
 
         self.observations: List[np.ndarray] = []
         self.actions: List[int] = []
@@ -711,7 +721,9 @@ class DemoCollector:
                 action_masks=np.array(self.masks, dtype=np.bool_),
                 games_done=np.array(self.games_done, dtype=np.int64),
                 total_steps=np.array(self.total_steps, dtype=np.int64),
+                skipped_samples=np.array(self.skipped_samples, dtype=np.int64),
                 max_games=np.array(self.max_games, dtype=np.int64),
+                run_id=np.array(self.run_id),
                 saved_at=np.array(datetime.now().isoformat()),
             )
             os.replace(tmp, self.checkpoint_path)
@@ -728,9 +740,13 @@ class DemoCollector:
                 self.masks = [x for x in data["action_masks"]]
                 self.games_done = int(data["games_done"].item())
                 self.total_steps = int(data["total_steps"].item())
+                if "skipped_samples" in data.files:
+                    self.skipped_samples = int(data["skipped_samples"].item())
+                if "run_id" in data.files:
+                    self.run_id = str(data["run_id"].item())
             self.games_done = min(self.games_done, self.max_games)
             log(f"Resumed BC progress checkpoint: games={self.games_done}/{self.max_games} "
-                f"samples={len(self.actions)} path={path}")
+                f"samples={len(self.actions)} skipped={self.skipped_samples} path={path}")
         except Exception as e:
             log(f"Failed to load BC progress checkpoint {path}: {e}")
 
@@ -745,9 +761,16 @@ class DemoCollector:
     def _handle(self, gs) -> Action:
         screen = _screen_name(gs)
         terminal = is_terminal_state(gs)
+        victory = is_victory_state(gs)
+        self.fight_tracker.observe(
+            gs, game=self.games_done + 1, terminal=terminal, victory=victory,
+        )
 
         if not self.initialized:
             self.initialized = True
+            self._game_start_steps = self.total_steps
+            self._game_start_sample_len = len(self.observations)
+            self._game_start_skipped = self.skipped_samples
             log(f"Demo game #{self.games_done + 1} started, floor={getattr(gs, 'floor', '?')}")
 
         if terminal:
@@ -755,8 +778,35 @@ class DemoCollector:
             self.initialized = False
             _visited_shop_floors.clear()
             _skipped_card_reward_keys.clear()
+            fight_stats = self.fight_tracker.finish_game(
+                gs, game=self.games_done, victory=victory
+            )
+            steps_this_game = max(0, self.total_steps - self._game_start_steps)
+            samples_this_game = max(0, len(self.observations) - self._game_start_sample_len)
+            skipped_this_game = max(0, self.skipped_samples - self._game_start_skipped)
             log(f"Demo game #{self.games_done} ended. "
                 f"Samples so far: {len(self.observations)}, total_steps={self.total_steps}")
+            append_bc_stats({
+                "run_id": self.run_id,
+                "source": "bc",
+                "game": self.games_done,
+                "target_games": self.max_games,
+                "steps": steps_this_game,
+                "samples": samples_this_game,
+                "skipped_samples": skipped_this_game,
+                "final_hp": int(getattr(gs, "current_hp", 0) or 0),
+                "final_max_hp": int(getattr(gs, "max_hp", 0) or 0),
+                "final_floor": int(getattr(gs, "floor", 0) or 0),
+                "final_act": int(getattr(gs, "act", 0) or 0),
+                "victory": int(victory),
+                "terminated": 1,
+                "elites_fought": fight_stats["elites_fought"],
+                "elites_won": fight_stats["elites_won"],
+                "bosses_fought": fight_stats["bosses_fought"],
+                "bosses_won": fight_stats["bosses_won"],
+                "checkpoint_path": self.checkpoint_path or "",
+                "model_path": self.save_path,
+            }, log=log)
             self._save_checkpoint()
             proceed_avail = bool(getattr(gs, "proceed_available", False))
             if proceed_avail:
@@ -776,9 +826,11 @@ class DemoCollector:
             self.observations.append(obs)
             self.actions.append(action_id)
             self.masks.append(mask)
-        elif VERBOSE:
-            log(f"BC VERBOSE skipped sample: screen={screen} action_id={action_id} "
-                f"mask_sum={int(mask.sum())} action={_action_desc(spire_action)}")
+        else:
+            self.skipped_samples += 1
+            if VERBOSE:
+                log(f"BC VERBOSE skipped sample: screen={screen} action_id={action_id} "
+                    f"mask_sum={int(mask.sum())} action={_action_desc(spire_action)}")
 
         self.total_steps += 1
         if VERBOSE:
@@ -788,10 +840,10 @@ class DemoCollector:
                 f"hp={getattr(gs, 'current_hp', '?')}/{getattr(gs, 'max_hp', '?')} "
                 f"screen={screen} choices={choice_list[:8]} action_id={action_id} "
                 f"action={_action_desc(spire_action)} mask_ok={mask_ok} "
-                f"samples={len(self.observations)}")
+                f"samples={len(self.observations)} skipped={self.skipped_samples}")
         elif self.total_steps % 100 == 0:
             log(f"  step={self.total_steps} samples={len(self.observations)} "
-                f"games={self.games_done}/{self.max_games}")
+                f"skipped={self.skipped_samples} games={self.games_done}/{self.max_games}")
 
         return spire_action
 
@@ -933,6 +985,7 @@ def main():
         max_games=args.games,
         checkpoint_path=bc_checkpoint,
         resume_checkpoint=args.resume_bc,
+        save_path=save_path,
     )
 
     if collector.games_done < args.games:

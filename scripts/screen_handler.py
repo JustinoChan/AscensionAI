@@ -77,6 +77,9 @@ _PURGE_PRIORITY = {
     "strike": 5, "defend": 4,
 }
 
+_CANNOT_REST_RELICS = {"coffee dripper"}
+_CANNOT_SMITH_RELICS = {"fusion hammer"}
+
 
 # ---------------------------------------------------------------------------
 # Per-screen pick helpers
@@ -85,6 +88,41 @@ def _act_floor_index(gs) -> int:
     floor = int(getattr(gs, "floor", 0) or 0)
     act = int(getattr(gs, "act", 1) or 1)
     return max(1, floor - {1: 0, 2: 17, 3: 34}.get(act, 0))
+
+
+def _norm_label(value) -> str:
+    return str(value or "").lower().strip()
+
+
+def _choice_is_locked(label: str) -> bool:
+    label = _norm_label(label)
+    return (
+        "locked" in label
+        or "disabled" in label
+        or "unavailable" in label
+        or "requires" in label
+    )
+
+
+def _has_relic(gs, names: set[str]) -> bool:
+    for relic in list(getattr(gs, "relics", []) or []):
+        candidates = {
+            _norm_label(getattr(relic, "name", "")),
+            _norm_label(getattr(relic, "relic_id", "")),
+            _norm_label(getattr(relic, "id", "")),
+        }
+        candidates = {c.replace("_", " ").replace("-", " ") for c in candidates if c}
+        if any(c in names for c in candidates):
+            return True
+    return False
+
+
+def _choice_indices(lower: list[str], keyword: str, *, blocked: bool = False) -> list[int]:
+    out = []
+    for i, label in enumerate(lower):
+        if keyword in label and _choice_is_locked(label) == blocked:
+            out.append(i)
+    return out
 
 
 def pick_card_reward(choice_list: list, gs=None) -> int:
@@ -126,6 +164,7 @@ def pick_card_reward(choice_list: list, gs=None) -> int:
 
 _CARD_REWARD_OPEN_KEYS: set[tuple[int, int]] = set()
 _SHOP_VISITED_KEYS: set[tuple[int, int]] = set()
+_REST_SMITH_GRID_KEYS: set[tuple[int, int]] = set()
 _LAST_SCREEN_POS: tuple[int, int] | None = None
 
 
@@ -146,12 +185,24 @@ def _reset_screen_memory_if_new_run(gs) -> None:
         if floor <= 1 and last_floor > 1:
             _CARD_REWARD_OPEN_KEYS.clear()
             _SHOP_VISITED_KEYS.clear()
+            _REST_SMITH_GRID_KEYS.clear()
             _MATCH_MEMORY.clear()
         elif act < last_act or (act == last_act and floor < last_floor):
             _CARD_REWARD_OPEN_KEYS.clear()
             _SHOP_VISITED_KEYS.clear()
+            _REST_SMITH_GRID_KEYS.clear()
             _MATCH_MEMORY.clear()
     _LAST_SCREEN_POS = pos
+
+
+def note_rest_choice(gs, choice_label) -> None:
+    """Remember smith selections so the following unflagged grid is upgraded."""
+    label = _norm_label(choice_label)
+    key = _screen_memory_key(gs)
+    if "smith" in label:
+        _REST_SMITH_GRID_KEYS.add(key)
+    elif "rest" in label:
+        _REST_SMITH_GRID_KEYS.discard(key)
 
 
 def _reward_type_name(reward) -> str:
@@ -260,18 +311,37 @@ def recover_from_command_error(err: str) -> Action:
 
 def pick_rest(choice_list: list, gs) -> int:
     lower = [str(c).lower() for c in choice_list]
+    can_rest = not _has_relic(gs, _CANNOT_REST_RELICS)
+    can_smith = not _has_relic(gs, _CANNOT_SMITH_RELICS)
+    rest_choices = _choice_indices(lower, "rest") if can_rest else []
+    smith_choices = _choice_indices(lower, "smith") if can_smith else []
     hp_pct = int(getattr(gs, "current_hp", 0) or 0) / max(
         1, int(getattr(gs, "max_hp", 1) or 1))
     act = int(getattr(gs, "act", 0) or 0)
     floor = int(getattr(gs, "floor", 0) or 0)
     pre_boss = floor >= {1: 15, 2: 32, 3: 49}.get(act, 999)
     heal_threshold = 0.7 if pre_boss else 0.6
-    if hp_pct < heal_threshold and "rest" in lower:
-        return lower.index("rest")
-    if "smith" in lower:
-        return lower.index("smith")
-    if "rest" in lower:
-        return lower.index("rest")
+    if hp_pct < heal_threshold and rest_choices:
+        idx = rest_choices[0]
+        note_rest_choice(gs, lower[idx])
+        return idx
+    if smith_choices:
+        idx = smith_choices[0]
+        note_rest_choice(gs, lower[idx])
+        return idx
+    if rest_choices:
+        idx = rest_choices[0]
+        note_rest_choice(gs, lower[idx])
+        return idx
+    for keyword in ("dig", "recall", "lift", "toke", "sleep"):
+        for i, label in enumerate(lower):
+            if keyword in label and not _choice_is_locked(label):
+                note_rest_choice(gs, label)
+                return i
+    for i, label in enumerate(lower):
+        if not _choice_is_locked(label):
+            note_rest_choice(gs, label)
+            return i
     return 0
 
 
@@ -352,6 +422,25 @@ def _pick_grid_upgrade(choice_list: list) -> int:
         if str(c).lower().rstrip("+") in OK_CARDS:
             return i
     return 0
+
+
+def _looks_like_smith_grid(gs, scr, choice_list: list, cancel_avail: bool) -> bool:
+    """Detect campfire smith grids when CommunicationMod omits for_upgrade."""
+    if not cancel_avail or scr is None:
+        return False
+    if bool(getattr(scr, "for_upgrade", False)):
+        return True
+    if any(bool(getattr(scr, attr, False)) for attr in (
+        "any_number", "for_transform", "for_purge",
+    )):
+        return False
+    num_needed = int(getattr(scr, "num_cards", 1) or 1)
+    if num_needed != 1:
+        return False
+    current_action = _norm_label(getattr(gs, "current_action", ""))
+    if any(word in current_action for word in ("smith", "upgrade", "campfire")):
+        return True
+    return _screen_memory_key(gs) in _REST_SMITH_GRID_KEYS
 
 
 _HIDDEN_MATCH_NAMES = frozenset({
@@ -671,6 +760,7 @@ def auto_handle_screen(
             for_upgrade = bool(getattr(scr, "for_upgrade", False)) if scr else False
             for_transform = bool(getattr(scr, "for_transform", False)) if scr else False
             any_number = bool(getattr(scr, "any_number", False)) if scr else False
+            smith_grid = _looks_like_smith_grid(gs, scr, grid_choices, cancel_avail)
             if _is_matching_grid(gs, scr, grid_choices):
                 idx = _pick_grid_match(grid_choices, scr, gs)
                 if idx is not None:
@@ -680,11 +770,12 @@ def auto_handle_screen(
                 if cancel_avail:
                     return Action("leave")
                 return Action("state")
-            if for_upgrade:
+            if for_upgrade or smith_grid:
                 unsel = [(i, c) for i, c in enumerate(grid_choices)
                          if str(c).lower() not in selected_names]
                 if unsel:
-                    best_idx = _pick_from_unselected(unsel, scr)
+                    best_idx = _pick_grid_upgrade([c for _, c in unsel])
+                    best_idx = unsel[best_idx][0]
                     return ChooseAction(choice_index=best_idx)
                 return ChooseAction(choice_index=_pick_grid_upgrade(grid_choices))
             if for_transform:

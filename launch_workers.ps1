@@ -8,7 +8,7 @@
     the process to start, then swaps in the next config.
 
     Run train_offline.py separately to consume the rollout data:
-        python scripts\train_offline.py --model models\ppo_sts.pt --data rollouts_shared --delete-consumed --ent-coef 0.01
+        python scripts\train_offline.py --model models\ppo_sts.pt --data rollouts_shared --delete-consumed --ent-coef 0.001
 
 .PARAMETER NumWorkers
     Number of STS instances to launch (default: 3).
@@ -109,7 +109,7 @@ function Get-Command-For-Train {
 }
 
 function Get-Command-For-BC {
-    return "$PyEsc $RootEsc/scripts/behavior_clone.py --games $BCGames --save models/ppo_sts.pt"
+    return "$PyEsc $RootEsc/scripts/behavior_clone.py --games $BCGames --save models/ppo_sts_bc.pt"
 }
 
 function Get-Command-For-BCPPO {
@@ -148,7 +148,7 @@ switch ($Mode) {
         Write-Host "Mode: Parallel rollout workers ($NumWorkers instances)" -ForegroundColor Green
         Write-Host ""
         Write-Host "IMPORTANT: Start the offline trainer in a separate terminal:" -ForegroundColor Yellow
-        Write-Host "  python scripts\train_offline.py --model models\ppo_sts.pt --data rollouts_shared --delete-consumed --ent-coef 0.01" -ForegroundColor Yellow
+        Write-Host "  python scripts\train_offline.py --model models\ppo_sts.pt --data rollouts_shared --delete-consumed --ent-coef 0.001" -ForegroundColor Yellow
         Write-Host ""
 
         for ($i = 1; $i -le $NumWorkers; $i++) {

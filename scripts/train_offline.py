@@ -216,7 +216,7 @@ def main():
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--epochs", type=int, default=4)
     parser.add_argument("--batch-size", type=int, default=64)
-    parser.add_argument("--ent-coef", type=float, default=0.01,
+    parser.add_argument("--ent-coef", type=float, default=0.001,
                         help="Entropy bonus coefficient (higher = more exploration)")
     parser.add_argument("--clip", type=float, default=0.15,
                         help="PPO clip range (default: 0.15)")

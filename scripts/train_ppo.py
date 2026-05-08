@@ -467,7 +467,7 @@ def main():
                         help="Accumulate N games of transitions per PPO update (default: 4)")
     parser.add_argument("--lr", type=float, default=1e-4,
                         help="PPO learning rate (default: 1e-4)")
-    parser.add_argument("--ent-coef", type=float, default=0.01,
+    parser.add_argument("--ent-coef", type=float, default=0.001,
                         help="Entropy bonus coefficient (higher = more exploration)")
     parser.add_argument("--target-kl", type=float, default=0.03,
                         help="Stop PPO epochs early when approx KL exceeds this value")

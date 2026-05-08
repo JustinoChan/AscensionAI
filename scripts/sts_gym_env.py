@@ -38,6 +38,7 @@ from obs_encoder import (
     encode_game_state,
     living_monsters,
 )
+from screen_handler import note_rest_choice
 
 
 # ---------------------------------------------------------------------------
@@ -143,6 +144,33 @@ def _event_choice_targets(gs: Any) -> Dict[int, int]:
     return targets
 
 
+def _norm_label(value) -> str:
+    return str(value or "").lower().strip()
+
+
+def _choice_is_locked(label: str) -> bool:
+    label = _norm_label(label)
+    return (
+        "locked" in label
+        or "disabled" in label
+        or "unavailable" in label
+        or "requires" in label
+    )
+
+
+def _has_relic(gs: Any, names: set[str]) -> bool:
+    for relic in list(getattr(gs, "relics", []) or []):
+        candidates = {
+            _norm_label(getattr(relic, "name", "")),
+            _norm_label(getattr(relic, "relic_id", "")),
+            _norm_label(getattr(relic, "id", "")),
+        }
+        candidates = {c.replace("_", " ").replace("-", " ") for c in candidates if c}
+        if any(c in names for c in candidates):
+            return True
+    return False
+
+
 def compute_action_mask(gs: Any) -> np.ndarray:
     """Build a boolean mask of legal actions for the current game state."""
     mask = np.zeros(NUM_ACTIONS, dtype=np.bool_)
@@ -225,6 +253,14 @@ def compute_action_mask(gs: Any) -> np.ndarray:
         for idx in range(min(n_choices, MAX_CHOICES)):
             if st_name == "EVENT" and idx not in event_choice_targets:
                 continue
+            if st_name == "REST" and idx < len(choice_list):
+                label = _norm_label(choice_list[idx])
+                if _choice_is_locked(label):
+                    continue
+                if "rest" in label and _has_relic(gs, {"coffee dripper"}):
+                    continue
+                if "smith" in label and _has_relic(gs, {"fusion hammer"}):
+                    continue
             if st_name == "COMBAT_REWARD" and potions_full:
                 is_potion = False
                 if idx < len(combat_rewards):
@@ -309,6 +345,9 @@ def flat_action_to_spire_action(action_id: int, gs: Any) -> Action:
         screen_type = getattr(gs, "screen_type", None)
         st_name = getattr(screen_type, "name", "") if screen_type else ""
         scr = getattr(gs, "screen", None)
+        choice_list = list(getattr(gs, "choice_list", []) or [])
+        if st_name == "REST" and choice_idx < len(choice_list):
+            note_rest_choice(gs, choice_list[choice_idx])
         if st_name == "EVENT" and scr is not None:
             event_choice_targets = _event_choice_targets(gs)
             if choice_idx in event_choice_targets:

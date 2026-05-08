@@ -173,7 +173,7 @@ def write_config(command: str | None = None, *, verbose: bool = True):
 
 def build_command(mode: str, worker_id: int = 1, games: int = 20,
                   bc_games: int = 150, ppo_games: int = 200,
-                  ent_coef: float = 0.01, verbose: bool = False) -> str:
+                  ent_coef: float = 0.001, verbose: bool = False) -> str:
     py = escape_properties_path(VENV_PYTHON)
     root = escape_properties_path(ROOT)
     verbose_flag = " --verbose" if verbose else ""
@@ -184,7 +184,7 @@ def build_command(mode: str, worker_id: int = 1, games: int = 20,
     elif mode == "bc_ppo":
         cmd = f"{py} {root}/scripts/train_bc_ppo.py --bc-games {bc_games} --ppo-games {ppo_games} --save models/ppo_sts.pt --ent-start {ent_coef}{verbose_flag}"
     elif mode == "bc":
-        cmd = f"{py} {root}/scripts/behavior_clone.py --games {bc_games} --save models/ppo_sts.pt{verbose_flag}"
+        cmd = f"{py} {root}/scripts/behavior_clone.py --games {bc_games} --save models/ppo_sts_bc.pt{verbose_flag}"
     elif mode == "eval":
         cmd = f"{py} {root}/scripts/eval_model.py --model models/ppo_sts.pt --games {games}{verbose_flag}"
     elif mode == "logger":
@@ -480,8 +480,8 @@ class AscensionApp:
 
         self.ent_label = ttk.Label(self.ent_row, text="Entropy Coef:")
         self.ent_label.pack(side="left", padx=(0, 5))
-        self._ent_value = 0.01
-        self.ent_var = tk.StringVar(value="0.010")
+        self._ent_value = 0.001
+        self.ent_var = tk.StringVar(value="0.001")
         self.ent_minus = ttk.Button(self.ent_row, text="-", width=3, command=self._dec_ent)
         self.ent_minus.pack(side="left")
         self.ent_display = ttk.Label(self.ent_row, textvariable=self.ent_var, width=5,
@@ -519,12 +519,15 @@ class AscensionApp:
 
         self.stats_vars = {
             "train_line": tk.StringVar(value="Training:  no data yet"),
+            "bc_line": tk.StringVar(value="BC:        no baseline yet"),
             "detail_line": tk.StringVar(value=""),
             "combat_line": tk.StringVar(value=""),
             "eval_line": tk.StringVar(value="Eval:  no data yet"),
         }
         ttk.Label(stats_frame, textvariable=self.stats_vars["train_line"],
                   font=("Consolas", 10)).pack(anchor="w")
+        ttk.Label(stats_frame, textvariable=self.stats_vars["bc_line"],
+                  font=("Consolas", 10)).pack(anchor="w", pady=(2, 0))
         ttk.Label(stats_frame, textvariable=self.stats_vars["detail_line"],
                   font=("Consolas", 10)).pack(anchor="w", pady=(2, 0))
         ttk.Label(stats_frame, textvariable=self.stats_vars["combat_line"],
@@ -603,13 +606,13 @@ class AscensionApp:
         return value
 
     def _inc_ent(self):
-        v = round(self._ent_value + 0.005, 3)
+        v = round(self._ent_value + 0.001, 3)
         if v <= 0.10:
             self._ent_value = v
             self.ent_var.set(f"{v:.3f}")
 
     def _dec_ent(self):
-        v = round(self._ent_value - 0.005, 3)
+        v = round(self._ent_value - 0.001, 3)
         if v >= 0.0:
             self._ent_value = v
             self.ent_var.set(f"{v:.3f}")
@@ -617,13 +620,13 @@ class AscensionApp:
     _ENT_TOOLTIP_TEXT = (
         "Controls how much the agent explores vs. exploits.\n"
         "\n"
-        "Higher (0.03-0.10): More random actions, but can\n"
+        "Higher (0.01-0.10): More random actions, but can\n"
         "destabilize a behavior-cloned warm start.\n"
         "\n"
-        "Lower (0.00-0.02): More deterministic, better for\n"
+        "Lower (0.00-0.005): More deterministic, better for\n"
         "testing whether PPO improves the BC policy.\n"
         "\n"
-        "Recommended after BC: 0.005-0.02. Raise only if\n"
+        "Recommended after BC: 0.001-0.005. Raise only if\n"
         "entropy collapses too early."
     )
 
@@ -729,7 +732,7 @@ class AscensionApp:
 
         for r in rows:
             source = str(r.get("source") or "")
-            if not include_eval and source == "eval":
+            if not include_eval and source in {"bc", "eval"}:
                 continue
             fight_type = str(r.get("fight_type") or "").lower()
             room_type = str(r.get("room_type") or "")
@@ -887,6 +890,12 @@ class AscensionApp:
                 trainer_transition_rows += 1
             except Exception:
                 pass
+            try:
+                u = int(float(r.get("total_updates") or 0))
+                if u > updates:
+                    updates = u
+            except Exception:
+                pass
 
         display_transitions = trainer_transitions if trainer_transitions else total_transitions
 
@@ -939,6 +948,100 @@ class AscensionApp:
             "elites_won": fight_stats["elites_won"],
             "bosses_fought": fight_stats["bosses_fought"],
             "bosses_won": fight_stats["bosses_won"],
+        }
+
+    def _load_bc_stats(self) -> dict | None:
+        csv_path = ROOT / "logs" / "bc_stats.csv"
+        if not csv_path.exists():
+            return None
+        try:
+            with open(csv_path, "r", encoding="utf-8", newline="") as f:
+                rows = list(_csv.DictReader(f))
+        except Exception as e:
+            _logger.warning(f"Failed to parse bc_stats.csv: {e}")
+            return None
+
+        rows = [r for r in rows if r.get("final_floor") not in (None, "")]
+        if not rows:
+            return None
+
+        latest_run = ""
+        for r in reversed(rows):
+            latest_run = str(r.get("run_id") or "")
+            if latest_run:
+                break
+        run_rows = [r for r in rows if str(r.get("run_id") or "") == latest_run] if latest_run else rows
+
+        floors, victories = [], []
+        best_floor, best_act = 0, 0
+        samples, steps, skipped = 0, 0, 0
+        elites_fought = elites_won = bosses_fought = bosses_won = 0
+        target_games = 0
+        sources: set[str] = set()
+        for r in run_rows:
+            try:
+                fl = float(r.get("final_floor") or 0)
+                floors.append(fl)
+                best_floor = max(best_floor, int(fl))
+            except Exception:
+                pass
+            try:
+                act = int(float(r.get("final_act") or 0))
+                best_act = max(best_act, act)
+                v_raw = int(float(r.get("victory") or 0))
+                fl = float(r.get("final_floor") or 0)
+                victories.append(1 if v_raw and (act >= 3 or fl >= 50) else 0)
+            except Exception:
+                victories.append(0)
+            for key, total_name in (
+                ("samples", "samples"),
+                ("steps", "steps"),
+                ("skipped_samples", "skipped"),
+            ):
+                try:
+                    value = int(float(r.get(key) or 0))
+                except Exception:
+                    value = 0
+                if total_name == "samples":
+                    samples += value
+                elif total_name == "steps":
+                    steps += value
+                else:
+                    skipped += value
+            try:
+                target_games = max(target_games, int(float(r.get("target_games") or 0)))
+            except Exception:
+                pass
+            try:
+                elites_fought += int(float(r.get("elites_fought") or 0))
+                elites_won += int(float(r.get("elites_won") or 0))
+                bosses_fought += int(float(r.get("bosses_fought") or 0))
+                bosses_won += int(float(r.get("bosses_won") or 0))
+            except Exception:
+                pass
+            source = str(r.get("source") or "")
+            if source:
+                sources.add(source)
+
+        recent_floors = floors[-20:]
+        return {
+            "run_id": latest_run,
+            "sources": ",".join(sorted(sources)) if sources else "bc",
+            "games": len(run_rows),
+            "target_games": target_games,
+            "wins": sum(victories),
+            "win_rate": sum(victories) / len(victories) if victories else 0.0,
+            "avg_floor": sum(floors) / len(floors) if floors else 0.0,
+            "recent_avg_floor": sum(recent_floors) / len(recent_floors) if recent_floors else 0.0,
+            "best_floor": best_floor,
+            "best_act": best_act,
+            "samples": samples,
+            "steps": steps,
+            "skipped": skipped,
+            "elites_fought": elites_fought,
+            "elites_won": elites_won,
+            "bosses_fought": bosses_fought,
+            "bosses_won": bosses_won,
         }
 
     def _load_eval_stats(self) -> dict | None:
@@ -1024,6 +1127,28 @@ class AscensionApp:
                     self.stats_vars["combat_line"].set(
                         "Fights:  waiting for post-fix fight data"
                     )
+            else:
+                self.stats_vars["train_line"].set("Training:  no data yet")
+                self.stats_vars["detail_line"].set("")
+                self.stats_vars["combat_line"].set("")
+
+            bs = self._load_bc_stats()
+            if bs:
+                target = f"/{bs['target_games']}" if bs["target_games"] else ""
+                bc_parts = [
+                    f"BC:        {bs['games']}{target} games",
+                    f"Avg Floor: {bs['avg_floor']:.1f}",
+                    f"Last20: {bs['recent_avg_floor']:.1f}",
+                    f"Best: Floor {bs['best_floor']} Act {bs['best_act']}",
+                    f"Samples: {bs['samples']:,}",
+                ]
+                if bs["wins"]:
+                    bc_parts.append(f"Wins: {bs['wins']} ({bs['win_rate']:.0%})")
+                if bs["skipped"]:
+                    bc_parts.append(f"Skipped: {bs['skipped']:,}")
+                self.stats_vars["bc_line"].set("  |  ".join(bc_parts))
+            else:
+                self.stats_vars["bc_line"].set("BC:        no baseline yet")
 
             es = self._load_eval_stats()
             if es:

@@ -112,6 +112,8 @@ python scripts\eval_model.py --model models\ppo_sts.pt --games 200 --seed-file s
 
 During a healthy first run, you should see live output in the Control Panel tabs, new log files appear under `logs/`, and the trained checkpoint saved to `models/ppo_sts.pt`.
 
+The progress panel keeps the current PPO run and the latest BC baseline separate. `training_stats.csv` can be archived for fresh PPO charts without losing the BC floor/sample summary in `bc_stats.csv`.
+
 ### Long-running reliability
 
 AscensionAI is designed to run multiple live STS instances for many hours, but modded STS can still crash or expose awkward intermediate screens. The launcher and screen handler include guardrails for the common stuck states:
@@ -160,7 +162,7 @@ Training an RL agent on Slay the Spire is compute-bound by real-time game simula
 
 - **Batched PPO updates** — the trainer accumulates 4 games of transitions per gradient update (`--games-per-update 4`). Larger batches mean less noisy gradients and less time spent blocked on updates. Raise to `8` if you have plenty of memory; drop to `2` for faster feedback during debugging.
 - **4 PPO epochs per update** — down from a conservative 10. Each update trains ~2.5× faster with minimal quality loss.
-- **Conservative exploration defaults** — the Control Panel uses entropy `0.01` by default for PPO-style modes. After BC, the practical range to test is usually `0.005` to `0.02`; higher values such as `0.03+` should be treated as explicit exploration experiments because they can damage a behavior-cloned policy.
+- **Conservative post-BC exploration defaults** — the Control Panel and offline trainer now default to entropy `0.001` for PPO fine-tuning. This protects the behavior-cloned prior when advantages are noisy: recent runs showed entropy rising steadily while reward, floor, and win rate stayed flat, which means the entropy bonus was the most consistent actor gradient. Raise toward `0.005` only if entropy collapses too early; treat `0.01+` as an explicit exploration experiment.
 - **PPO drift guardrails** — PPO updates log `approx_kl`, `clip_fraction`, `explained_variance`, advantage stats, invalid actions, chosen-action probability, and BC anchor loss. Updates stop PPO epochs early when KL exceeds the target, and BC demos are kept as a small imitation anchor during PPO.
 - **Rollout freshness checks** — parallel rollouts include checkpoint/update metadata. The offline trainer rejects stale or legacy rollout files by default so old games do not poison a newer checkpoint.
 
@@ -193,7 +195,7 @@ If you prefer the terminal, use `launch_workers.ps1`:
 For parallel mode, start the offline trainer in a separate terminal:
 
 ```bash
-python scripts\train_offline.py --model models\ppo_sts.pt --data rollouts_shared --delete-consumed --ent-coef 0.01 --clip 0.15 --target-kl 0.03
+python scripts\train_offline.py --model models\ppo_sts.pt --data rollouts_shared --delete-consumed --ent-coef 0.001 --clip 0.15 --target-kl 0.03
 ```
 
 ## Manual Configuration
@@ -205,19 +207,19 @@ If you prefer not to use the launcher, edit the CommunicationMod config directly
 ### BC → PPO end-to-end
 
 ```properties
-command=C\:/AscensionAI/.venv/Scripts/python.exe C\:/AscensionAI/scripts/train_bc_ppo.py --bc-games 150 --ppo-games 200 --save models/ppo_sts.pt --ent-start 0.01 --target-kl 0.03
+command=C\:/AscensionAI/.venv/Scripts/python.exe C\:/AscensionAI/scripts/train_bc_ppo.py --bc-games 150 --ppo-games 200 --save models/ppo_sts.pt --ent-start 0.001 --ent-end 0.001 --target-kl 0.03
 ```
 
 ### Single-instance PPO training
 
 ```properties
-command=C\:/AscensionAI/.venv/Scripts/python.exe C\:/AscensionAI/scripts/train_ppo.py --save models/ppo_sts.pt --resume models/ppo_sts.pt --save-every 5 --ent-coef 0.01 --target-kl 0.03
+command=C\:/AscensionAI/.venv/Scripts/python.exe C\:/AscensionAI/scripts/train_ppo.py --save models/ppo_sts.pt --resume models/ppo_sts.pt --save-every 5 --ent-coef 0.001 --target-kl 0.03
 ```
 
 ### Behavior cloning only
 
 ```properties
-command=C\:/AscensionAI/.venv/Scripts/python.exe C\:/AscensionAI/scripts/behavior_clone.py --games 150 --save models/ppo_sts.pt
+command=C\:/AscensionAI/.venv/Scripts/python.exe C\:/AscensionAI/scripts/behavior_clone.py --games 150 --save models/ppo_sts_bc.pt
 ```
 
 ### Parallel rollout workers
@@ -231,7 +233,7 @@ command=C\:/AscensionAI/.venv/Scripts/python.exe C\:/AscensionAI/scripts/rollout
 Then run the offline trainer separately:
 
 ```bash
-python scripts/train_offline.py --model models/ppo_sts.pt --data rollouts_shared --delete-consumed --ent-coef 0.01 --clip 0.15 --target-kl 0.03
+python scripts/train_offline.py --model models/ppo_sts.pt --data rollouts_shared --delete-consumed --ent-coef 0.001 --clip 0.15 --target-kl 0.03
 ```
 
 Append `--verbose` to any manual command when you want step-by-step decision logging.
@@ -254,6 +256,7 @@ When **Verbose Logs** is enabled in the Control Panel, or when a script is launc
 | `logs/bug_debug.log` | Stuck-state detection dumps for debugging freezes |
 | `logs/control_panel_debug.log` | `AscensionAI.pyw` — GUI launch, process PIDs, kill results, errors |
 | `logs/training_stats.csv` | Per-game training metrics (floor, HP, reward, loss, elite/boss stats) |
+| `logs/bc_stats.csv` | Latest behavior-cloning baseline metrics (floor, samples, skipped samples, elite/boss stats) |
 | `logs/fight_stats.csv` | Per-fight elite and boss encounter details (monsters, HP before/after, win/loss, terminal loss handling) |
 | `logs/elite_stats.csv` | Legacy per-fight elite/boss log kept for older tooling compatibility |
 
@@ -298,6 +301,7 @@ AscensionAI/
 │   ├── analyze_training_rewards.py # Reward/outcome correlation report
 │   ├── game_logger.py        # Passive game state recorder
 │   ├── plot_training.py      # Training stats visualization
+│   ├── bc_stats.py           # Behavior-cloning baseline CSV writer
 │   └── analyze_trace.py      # Game logger trace analyzer
 ├── logs/                     # Debug logs, training stats, stuck-state dumps
 ├── seeds/                    # Fixed seed lists for controlled evaluation
@@ -319,7 +323,7 @@ AscensionAI/
 
    **Combat analytics**: Elite and boss fight outcomes are tracked per-game in `training_stats.csv` and per-fight in `fight_stats.csv`, including which monsters were fought, HP before/after, win/loss, and whether the fight ended through a terminal death state. The Control Panel progress panel shows aggregate elite and boss win rates from the per-fight log.
 
-4. **Behavior cloning** (`behavior_clone.py`): A hand-coded heuristic plays full games covering every decision surface. The neural network trains on these demonstrations via cross-entropy loss to get a reasonable starting policy.
+4. **Behavior cloning** (`behavior_clone.py`): A hand-coded heuristic plays full games covering every decision surface. The neural network trains on these demonstrations via cross-entropy loss to get a reasonable starting policy. BC game outcomes are logged separately in `bc_stats.csv` so a clean PPO chart can still be compared against the latest BC baseline.
 
 5. **PPO fine-tuning** (`train_ppo.py` / `train_bc_ppo.py`): The BC-initialized policy improves through online RL. PPO updates use GAE advantages, clipped surrogate loss, a conservative entropy bonus, target-KL early stopping, and optional BC imitation anchor loss.
 

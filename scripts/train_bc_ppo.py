@@ -196,6 +196,7 @@ from sts_gym_env import (
 from ppo_model import PPOTrainer, GameBuffer
 from screen_handler import auto_handle_screen, recover_from_command_error
 from behavior_clone import heuristic_action
+from bc_stats import append_bc_stats
 from fight_tracker import FightTracker
 
 # Re-patch after behavior_clone import (its module-level code overwrites
@@ -236,8 +237,8 @@ class BCPPOAgent:
         bc_epochs: int = 30,
         bc_lr: float = 1e-3,
         ppo_lr: float = 1e-4,
-        ent_start: float = 0.01,
-        ent_end: float = 0.01,
+        ent_start: float = 0.001,
+        ent_end: float = 0.001,
         clip_range: float = 0.15,
         target_kl: float = 0.03,
         resume_path: Optional[str] = None,
@@ -277,7 +278,9 @@ class BCPPOAgent:
         self.bc_steps = 0
         self._bc_game_start_steps = 0
         self._bc_game_start_demo_len = 0
+        self._bc_game_start_skipped = 0
         self.bc_skipped_samples = 0
+        self.bc_run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.bc_initialized = False
         self.total_games = 0
 
@@ -315,8 +318,9 @@ class BCPPOAgent:
         self._stuck_floor: int = -1
         self._stuck_count: int = 0
         self._last_issue_key: str = ""
+        tracker_source = "bc_ppo" if self.phase == self.PHASE_PPO else "bc"
         self.fight_tracker = FightTracker(
-            source="bc_ppo", worker="bc_ppo", log=log
+            source=tracker_source, worker="bc_ppo", log=log
         )
         if self.phase == self.PHASE_BC and self.resume_bc:
             self._try_load_bc_progress()
@@ -374,6 +378,7 @@ class BCPPOAgent:
                 bc_steps=np.array(self.bc_steps, dtype=np.int64),
                 skipped_samples=np.array(self.bc_skipped_samples, dtype=np.int64),
                 target_games=np.array(self.bc_games, dtype=np.int64),
+                run_id=np.array(self.bc_run_id),
                 saved_at=np.array(datetime.now().isoformat()),
             )
             os.replace(tmp, self.bc_checkpoint_path)
@@ -394,6 +399,8 @@ class BCPPOAgent:
                 self.total_games = int(data["total_games"].item()) if "total_games" in data.files else self.bc_games_done
                 self.bc_steps = int(data["bc_steps"].item())
                 self.bc_skipped_samples = int(data["skipped_samples"].item())
+                if "run_id" in data.files:
+                    self.bc_run_id = str(data["run_id"].item())
             self.bc_games_done = min(self.bc_games_done, self.bc_games)
             self.total_games = max(self.total_games, self.bc_games_done)
             log(f"Resumed BC progress checkpoint: games={self.bc_games_done}/{self.bc_games} "
@@ -425,6 +432,7 @@ class BCPPOAgent:
             self.bc_initialized = True
             self._bc_game_start_steps = self.bc_steps
             self._bc_game_start_demo_len = len(self.demo_obs)
+            self._bc_game_start_skipped = self.bc_skipped_samples
             log(f"BC game #{self.bc_games_done + 1}/{self.bc_games} started, "
                 f"floor={getattr(gs, 'floor', '?')}")
 
@@ -438,18 +446,22 @@ class BCPPOAgent:
             )
             steps_this_game = max(0, self.bc_steps - self._bc_game_start_steps)
             demos_this_game = max(0, len(self.demo_obs) - self._bc_game_start_demo_len)
+            skipped_this_game = max(0, self.bc_skipped_samples - self._bc_game_start_skipped)
 
             log(f"BC game #{self.bc_games_done} ended: "
                 f"floor={getattr(gs, 'floor', '?')} victory={victory} "
                 f"samples={demos_this_game} total_samples={len(self.demo_obs)} "
                 f"skipped={self.bc_skipped_samples}")
 
-            # Log BC game stats (no PPO losses yet)
-            _append_stats_csv({
+            append_bc_stats({
                 "timestamp": datetime.now().isoformat(),
+                "run_id": self.bc_run_id,
+                "source": "bc_ppo",
                 "game": self.total_games,
+                "target_games": self.bc_games,
                 "steps": steps_this_game,
-                "transitions": demos_this_game,
+                "samples": demos_this_game,
+                "skipped_samples": skipped_this_game,
                 "final_hp": int(getattr(gs, "current_hp", 0) or 0),
                 "final_max_hp": int(getattr(gs, "max_hp", 0) or 0),
                 "final_floor": int(getattr(gs, "floor", 0) or 0),
@@ -460,7 +472,9 @@ class BCPPOAgent:
                 "elites_won": fight_stats["elites_won"],
                 "bosses_fought": fight_stats["bosses_fought"],
                 "bosses_won": fight_stats["bosses_won"],
-            })
+                "checkpoint_path": self.bc_checkpoint_path,
+                "model_path": self.save_path.replace(".pt", "_bc.pt"),
+            }, log=log)
 
             self._save_bc_progress()
 
@@ -566,6 +580,7 @@ class BCPPOAgent:
         self.demo_masks.clear()
 
         self.phase = self.PHASE_PPO
+        self.fight_tracker.source = "bc_ppo"
         log(f"=== PPO PHASE STARTED (lr={self.ppo_lr}, ent={self.ent_start}, "
             f"clip={self.clip_range}) ===")
 
@@ -950,10 +965,10 @@ def main():
                      help="PPO games; 0 = unlimited (default: 0)")
     ppo.add_argument("--ppo-lr", type=float, default=1e-4,
                      help="PPO learning rate (default: 1e-4)")
-    ppo.add_argument("--ent-start", type=float, default=0.01,
-                     help="Initial entropy coefficient (default: 0.01)")
-    ppo.add_argument("--ent-end", type=float, default=0.01,
-                     help="Final entropy coefficient (default: 0.01)")
+    ppo.add_argument("--ent-start", type=float, default=0.001,
+                     help="Initial entropy coefficient (default: 0.001)")
+    ppo.add_argument("--ent-end", type=float, default=0.001,
+                     help="Final entropy coefficient (default: 0.001)")
     ppo.add_argument("--clip", type=float, default=0.15,
                      help="PPO clip range (default: 0.15)")
     ppo.add_argument("--target-kl", type=float, default=0.03,
