@@ -249,13 +249,13 @@ def main():
                         help="Model checkpoint path (load + save)")
     parser.add_argument("--data", type=str, default="rollouts_shared",
                         help="Directory where workers write .npz files")
-    parser.add_argument("--batch-games", type=int, default=20,
+    parser.add_argument("--batch-games", type=int, default=60,
                         help="Minimum game files before triggering a PPO update")
     parser.add_argument("--poll-interval", type=float, default=10.0,
                         help="Seconds between checking for new data")
     parser.add_argument("--delete-consumed", action="store_true",
                         help="Delete .npz files after training on them")
-    parser.add_argument("--lr", type=float, default=3e-5)
+    parser.add_argument("--lr", type=float, default=1e-5)
     parser.add_argument("--epochs", type=int, default=4)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--ent-coef", type=float, default=0.001,
@@ -270,7 +270,7 @@ def main():
                         help="Allow rollout files without checkpoint metadata")
     parser.add_argument("--bc-demo", type=str, default=None,
                         help="Optional BC demo npz for imitation anchor loss")
-    parser.add_argument("--bc-coef", type=float, default=0.15,
+    parser.add_argument("--bc-coef", type=float, default=1.0,
                         help="BC anchor coefficient if --bc-demo exists")
     parser.add_argument("--device", type=str, default="auto",
                         choices=["auto", "cpu", "gpu"],
