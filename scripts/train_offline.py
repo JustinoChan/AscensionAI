@@ -260,6 +260,8 @@ def main():
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--ent-coef", type=float, default=0.001,
                         help="Entropy bonus coefficient (higher = more exploration)")
+    parser.add_argument("--auto-tune", action="store_true",
+                        help="Dynamically adjust ent_coef and bc_coef based on live entropy levels")
     parser.add_argument("--clip", type=float, default=0.15,
                         help="PPO clip range (default: 0.15)")
     parser.add_argument("--target-kl", type=float, default=0.03,
@@ -434,6 +436,24 @@ def main():
             total_updates = int(getattr(trainer, "total_updates", total_updates + 1) or 0)
 
             if stats:
+                # --- NEW AUTO-TUNE LOGIC ---
+                if getattr(args, "auto_tune", False):
+                    current_entropy = stats.get("entropy", 0.0)
+                    
+                    # Target Goldilocks Zone: 0.35 to 0.50
+                    if current_entropy < 0.35:
+                        # Too rigid: increase exploration, loosen BC anchor
+                        trainer.ent_coef = min(trainer.ent_coef * 1.1, 0.05)  # Cap at 0.05
+                        trainer.bc_coef = max(trainer.bc_coef * 0.9, 0.0)     # Decay BC towards 0
+                        log(f"Auto-Tune (Low Ent): Increased ent_coef to {trainer.ent_coef:.5f}, Decayed bc_coef to {trainer.bc_coef:.4f}")
+                        
+                    elif current_entropy > 0.50:
+                        # Too chaotic: decrease exploration, tighten BC anchor slightly
+                        trainer.ent_coef = max(trainer.ent_coef * 0.9, 0.001) # Floor at 0.001
+                        trainer.bc_coef = min(trainer.bc_coef + 0.05, 1.0)    # Nudge BC up
+                        log(f"Auto-Tune (High Ent): Decreased ent_coef to {trainer.ent_coef:.5f}, Raised bc_coef to {trainer.bc_coef:.4f}")
+                # ---------------------------
+
                 log(f"Update #{total_updates}: pg={stats['pg_loss']:.4f} "
                     f"vf={stats['vf_loss']:.4f} ent={stats['entropy']:.4f} "
                     f"kl={stats.get('approx_kl', 0.0):.5f} "
