@@ -63,19 +63,12 @@ DEBUG_LOG = os.path.join(_root, "logs", "train_bc_ppo_debug.log")
 STATS_CSV = os.path.join(_root, "logs", "training_stats.csv")
 VERBOSE = os.environ.get("ASCENSION_VERBOSE", "0") == "1"
 
-# Same columns as train_ppo.py for plot_training.py compatibility
-_STATS_COLUMNS = [
-    "timestamp", "game", "total_updates", "steps", "transitions",
-    "total_reward", "final_hp", "final_max_hp", "final_floor", "final_act",
-    "victory", "terminated", "pg_loss", "vf_loss", "entropy", "worker",
-    "elites_fought", "elites_won", "bosses_fought", "bosses_won",
-    "approx_kl", "clip_fraction", "explained_variance",
-    "mean_advantage", "std_advantage", "invalid_action_count",
-    "mean_chosen_action_prob", "bc_loss", "bc_coef", "early_stop",
-    "stale_rollouts", "legacy_rollouts", "skipped_rollouts",
-    "batch_model_updates", "batch_checkpoint_ids",
-]
-
+# Shared training stats CSV (same file the GUI reads for progress display)
+from training_stats_schema import (
+    TRAINING_STATS_COLUMNS as _STATS_COLUMNS,
+    append_training_stats_csv,
+    ensure_training_stats_csv,
+)
 
 def log(msg: str):
     try:
@@ -84,6 +77,12 @@ def log(msg: str):
             f.flush()
     except Exception:
         pass
+
+def _init_stats_csv() -> None:
+    ensure_training_stats_csv(STATS_CSV, log_fn=log)
+
+def _append_stats_csv(row: dict) -> None:
+    append_training_stats_csv(STATS_CSV, row, log_fn=log)
 
 
 def _action_desc(action: Action) -> str:
@@ -858,6 +857,7 @@ class BCPPOAgent:
                 log(f"  PPO update #{self.trainer.total_updates}: "
                     f"pg={stats['pg_loss']:.4f} vf={stats['vf_loss']:.4f} "
                     f"ent={stats['entropy']:.4f} "
+                    f"norm_ent={stats.get('normalized_entropy', 0.0):.3f} "
                     f"kl={stats.get('approx_kl', 0.0):.5f} "
                     f"clip={stats.get('clip_fraction', 0.0):.3f} "
                     f"ev={stats.get('explained_variance', 0.0):.3f} "
@@ -893,6 +893,9 @@ class BCPPOAgent:
             "pg_loss": round(stats.get("pg_loss", 0.0), 6) if stats else "",
             "vf_loss": round(stats.get("vf_loss", 0.0), 6) if stats else "",
             "entropy": round(stats.get("entropy", 0.0), 6) if stats else "",
+            "normalized_entropy": round(stats.get("normalized_entropy", 0.0), 6) if stats else "",
+            "lr": f"{self.trainer.get_lr():.8g}",
+            "ent_coef": f"{float(getattr(self.trainer, 'ent_coef', 0.0) or 0.0):.8g}",
             "elites_fought": fight_stats["elites_fought"],
             "elites_won": fight_stats["elites_won"],
             "bosses_fought": fight_stats["bosses_fought"],

@@ -6,7 +6,8 @@ and draws rolling-average curves for:
     - Final floor reached
     - Total episode reward
     - Win rate
-    - Entropy (exploration)
+    - Normalized entropy (exploration scaled by legal actions)
+    - PPO KL / clip fraction
     - Policy / value loss
 
 Usage:
@@ -109,7 +110,13 @@ def main() -> None:
         raise SystemExit(f"{csv_path} has no rows yet")
 
     episode_rows = [r for r in rows if r.get("final_floor") not in (None, "")]
-    update_rows = [r for r in rows if any(r.get(k) not in (None, "") for k in ("pg_loss", "vf_loss", "entropy"))]
+    update_rows = [
+        r for r in rows
+        if any(
+            r.get(k) not in (None, "")
+            for k in ("pg_loss", "vf_loss", "entropy", "normalized_entropy", "approx_kl", "clip_fraction")
+        )
+    ]
     if not episode_rows:
         raise SystemExit(f"{csv_path} has no episode rows yet")
 
@@ -129,7 +136,15 @@ def main() -> None:
         victories.append(1.0 if v and (act >= 3 or floor >= 50) else 0.0)
     pg = [_num(r.get("pg_loss")) for r in update_rows]
     vf = [_num(r.get("vf_loss")) for r in update_rows]
-    ent = [_num(r.get("entropy")) for r in update_rows]
+    raw_ent = [_num(r.get("entropy")) for r in update_rows]
+    has_norm_entropy = any(r.get("normalized_entropy") not in (None, "") for r in update_rows)
+    ent = [
+        _num(r.get("normalized_entropy" if has_norm_entropy else "entropy"))
+        for r in update_rows
+    ]
+    ent_label = "Normalized policy entropy" if has_norm_entropy else "Raw policy entropy"
+    kl = [_num(r.get("approx_kl")) for r in update_rows]
+    clip = [_num(r.get("clip_fraction")) for r in update_rows]
 
     w = max(1, args.window)
     sw = max(0, args.short_window)
@@ -144,6 +159,11 @@ def main() -> None:
     win_lifetime = _expanding(victories)
     ent_avg = _rolling(ent, w)
     ent_short = _rolling(ent, sw) if sw else []
+    raw_ent_avg = _rolling(raw_ent, w)
+    kl_avg = _rolling(kl, w)
+    kl_short = _rolling(kl, sw) if sw else []
+    clip_avg = _rolling(clip, w)
+    clip_short = _rolling(clip, sw) if sw else []
     pg_avg = _rolling(pg, w)
     pg_short = _rolling(pg, sw) if sw else []
     vf_avg = _rolling(vf, w)
@@ -176,7 +196,7 @@ def main() -> None:
         print("\nmatplotlib not installed; install with: pip install matplotlib", file=sys.stderr)
         raise SystemExit(1)
 
-    fig, axes = plt.subplots(3, 2, figsize=(12, 9))
+    fig, axes = plt.subplots(4, 2, figsize=(13, 12))
     subtitle = f"primary rolling window = {w}"
     if sw and sw != w:
         subtitle += f", short window = {sw}"
@@ -198,16 +218,41 @@ def main() -> None:
     ax.set_xlabel("Game #")
 
     ax = axes[1][1]
+    if has_norm_entropy:
+        ax.axhspan(0.25, 0.50, color="#9467bd", alpha=0.08, label="target 0.25–0.50")
+        ax.plot(updates, raw_ent_avg, color="#bbb", lw=0.8, alpha=0.45, label=f"raw entropy avg{w}")
     if sw and sw != w:
         ax.plot(updates, ent_short, color="#c5b0d5", lw=1.1, alpha=0.65,
                 label=f"entropy avg{sw}")
     ax.plot(updates, ent_avg, color="#9467bd", lw=2.3, label=f"entropy avg{w}")
-    ax.set_ylabel("Policy entropy")
+    ax.set_ylabel(ent_label)
     ax.set_xlabel("PPO update #")
     ax.legend(loc="upper left", fontsize=8)
     ax.grid(alpha=0.3)
 
     ax = axes[2][0]
+    if sw and sw != w:
+        ax.plot(updates, kl_short, color="#ffbb78", lw=1.1, alpha=0.65,
+                label=f"approx_kl avg{sw}")
+    ax.plot(updates, kl_avg, color="#ff7f0e", lw=2.3, label=f"approx_kl avg{w}")
+    ax.axhline(0.03, color="#555", lw=1.0, ls="--", alpha=0.65, label="target_kl 0.03")
+    ax.set_ylabel("Approx KL")
+    ax.set_xlabel("PPO update #")
+    ax.legend(loc="upper left", fontsize=8)
+    ax.grid(alpha=0.3)
+
+    ax = axes[2][1]
+    if sw and sw != w:
+        ax.plot(updates, clip_short, color="#98df8a", lw=1.1, alpha=0.65,
+                label=f"clip_fraction avg{sw}")
+    ax.plot(updates, clip_avg, color="#2ca02c", lw=2.3, label=f"clip_fraction avg{w}")
+    ax.axhspan(0.05, 0.25, color="#2ca02c", alpha=0.08, label="healthy-ish 0.05–0.25")
+    ax.set_ylabel("Clip fraction")
+    ax.set_xlabel("PPO update #")
+    ax.legend(loc="upper left", fontsize=8)
+    ax.grid(alpha=0.3)
+
+    ax = axes[3][0]
     if sw and sw != w:
         ax.plot(updates, pg_short, color="#ffbb78", lw=1.1, alpha=0.65,
                 label=f"pg_loss avg{sw}")
@@ -217,7 +262,7 @@ def main() -> None:
     ax.legend(loc="upper left", fontsize=8)
     ax.grid(alpha=0.3)
 
-    ax = axes[2][1]
+    ax = axes[3][1]
     if sw and sw != w:
         ax.plot(updates, vf_short, color="#9edae5", lw=1.1, alpha=0.65,
                 label=f"vf_loss avg{sw}")

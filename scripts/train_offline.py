@@ -52,35 +52,17 @@ from ppo_model import PPOTrainer, GameBuffer
 
 # Shared training stats CSV (same file the GUI reads for progress display)
 _STATS_CSV = os.path.join(_root, "logs", "training_stats.csv")
-_STATS_COLUMNS = [
-    "timestamp", "game", "total_updates", "steps", "transitions",
-    "total_reward", "final_hp", "final_max_hp", "final_floor", "final_act",
-    "victory", "terminated", "pg_loss", "vf_loss", "entropy", "worker",
-    "elites_fought", "elites_won", "bosses_fought", "bosses_won",
-    "approx_kl", "clip_fraction", "explained_variance",
-    "mean_advantage", "std_advantage", "invalid_action_count",
-    "mean_chosen_action_prob", "bc_loss", "bc_coef", "early_stop",
-    "stale_rollouts", "legacy_rollouts", "skipped_rollouts",
-    "batch_model_updates", "batch_checkpoint_ids",
-    "normalized_entropy", "lr", "ent_coef", "auto_tune_action",
-]
+from training_stats_schema import (
+    TRAINING_STATS_COLUMNS as _STATS_COLUMNS,
+    append_training_stats_csv,
+    ensure_training_stats_csv,
+)
 
 def _init_stats_csv():
-    try:
-        os.makedirs(os.path.dirname(_STATS_CSV), exist_ok=True)
-        if not os.path.exists(_STATS_CSV):
-            with open(_STATS_CSV, "w", encoding="utf-8") as f:
-                f.write(",".join(_STATS_COLUMNS) + "\n")
-    except Exception:
-        pass
+    ensure_training_stats_csv(_STATS_CSV, log_fn=log)
 
 def _append_training_stats(row: dict):
-    try:
-        _init_stats_csv()
-        with open(_STATS_CSV, "a", encoding="utf-8") as f:
-            f.write(",".join(str(row.get(c, "")) for c in _STATS_COLUMNS) + "\n")
-    except Exception as e:
-        log(f"stats csv append failed: {e}")
+    append_training_stats_csv(_STATS_CSV, row, log_fn=log)
 
 
 def _torch_backend_summary() -> str:
@@ -425,8 +407,8 @@ def main():
     parser.add_argument("--auto-high-kl", type=float, default=0.030)
     parser.add_argument("--auto-low-clip", type=float, default=0.03)
     parser.add_argument("--auto-high-clip", type=float, default=0.25)
-    parser.add_argument("--auto-low-norm-entropy", type=float, default=0.10)
-    parser.add_argument("--auto-high-norm-entropy", type=float, default=0.35)
+    parser.add_argument("--auto-low-norm-entropy", type=float, default=0.20)
+    parser.add_argument("--auto-high-norm-entropy", type=float, default=0.50)
     parser.add_argument("--device", type=str, default="auto",
                         choices=["auto", "cpu", "gpu"],
                         help="Device for training: auto (GPU if available), cpu, or gpu")

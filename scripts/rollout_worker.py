@@ -185,34 +185,17 @@ def _dump_stuck_state(gs, screen_name: str, worker_id: str, stuck_count: int,
 
 # Shared training stats CSV (same format the GUI reads for progress display)
 _STATS_CSV = os.path.join(_root, "logs", "training_stats.csv")
-_STATS_COLUMNS = [
-    "timestamp", "game", "total_updates", "steps", "transitions",
-    "total_reward", "final_hp", "final_max_hp", "final_floor", "final_act",
-    "victory", "terminated", "pg_loss", "vf_loss", "entropy", "worker",
-    "elites_fought", "elites_won", "bosses_fought", "bosses_won",
-    "approx_kl", "clip_fraction", "explained_variance",
-    "mean_advantage", "std_advantage", "invalid_action_count",
-    "mean_chosen_action_prob", "bc_loss", "bc_coef", "early_stop",
-    "stale_rollouts", "legacy_rollouts", "skipped_rollouts",
-    "batch_model_updates", "batch_checkpoint_ids",
-]
+from training_stats_schema import (
+    TRAINING_STATS_COLUMNS as _STATS_COLUMNS,
+    append_training_stats_csv,
+    ensure_training_stats_csv,
+)
 
 def _init_stats_csv():
-    try:
-        os.makedirs(os.path.dirname(_STATS_CSV), exist_ok=True)
-        if not os.path.exists(_STATS_CSV):
-            with open(_STATS_CSV, "w", encoding="utf-8") as f:
-                f.write(",".join(_STATS_COLUMNS) + "\n")
-    except Exception:
-        pass
+    ensure_training_stats_csv(_STATS_CSV, log_fn=log)
 
 def _append_training_stats(row: dict):
-    try:
-        _init_stats_csv()
-        with open(_STATS_CSV, "a", encoding="utf-8") as f:
-            f.write(",".join(str(row.get(c, "")) for c in _STATS_COLUMNS) + "\n")
-    except Exception as e:
-        log(f"stats csv append failed: {e}")
+    append_training_stats_csv(_STATS_CSV, row, log_fn=log)
 
 
 # ---------------------------------------------------------------------------
