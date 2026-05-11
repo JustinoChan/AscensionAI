@@ -46,6 +46,7 @@ import argparse
 import traceback
 import time
 import random
+import csv
 from datetime import datetime
 from typing import Any, List, Optional, Tuple
 
@@ -862,12 +863,112 @@ class DemoCollector:
 # ---------------------------------------------------------------------------
 # Supervised training
 # ---------------------------------------------------------------------------
+BC_TRAIN_STATS_CSV = os.path.join(_root, "logs", "bc_train_stats.csv")
+
+
+def _action_group(action_id: int) -> str:
+    """Coarse action group for BC diagnostics."""
+    if _PLAY_TARGETED_START <= action_id < _PLAY_TARGETED_START + MAX_HAND * MAX_MONSTERS:
+        return "card_targeted"
+    if _PLAY_UNTARGETED_START <= action_id < _PLAY_UNTARGETED_START + MAX_HAND:
+        return "card_untargeted"
+    if action_id == _END_TURN:
+        return "end_turn"
+    if _POTION_TARGETED_START <= action_id < _POTION_TARGETED_START + MAX_POTIONS * MAX_MONSTERS:
+        return "potion_targeted"
+    if _POTION_UNTARGETED_START <= action_id < _POTION_UNTARGETED_START + MAX_POTIONS:
+        return "potion_untargeted"
+    if _CHOOSE_START <= action_id < _CHOOSE_START + 40:
+        return "choice"
+    if action_id == _PROCEED:
+        return "proceed"
+    if action_id == _LEAVE:
+        return "leave"
+    if action_id == _NOOP:
+        return "noop"
+    return "other"
+
+
+def _append_bc_train_stats(row: dict) -> None:
+    columns = [
+        "timestamp", "epoch", "epochs", "samples", "train_samples", "val_samples",
+        "train_loss", "train_acc", "val_loss", "val_acc", "best_val_loss",
+        "lr", "batch_size", "weight_decay", "label_smoothing", "patience",
+        "choice_acc", "card_targeted_acc", "card_untargeted_acc", "end_turn_acc",
+        "potion_targeted_acc", "potion_untargeted_acc", "proceed_acc", "leave_acc",
+    ]
+    try:
+        os.makedirs(os.path.dirname(BC_TRAIN_STATS_CSV), exist_ok=True)
+        exists = os.path.exists(BC_TRAIN_STATS_CSV)
+        with open(BC_TRAIN_STATS_CSV, "a", encoding="utf-8", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=columns, extrasaction="ignore")
+            if not exists:
+                writer.writeheader()
+            out = {c: row.get(c, "") for c in columns}
+            out["timestamp"] = out["timestamp"] or datetime.now().isoformat()
+            writer.writerow(out)
+    except Exception as e:
+        log(f"bc train stats append failed: {e}")
+
+
+def _eval_bc_metrics(trainer, obs_t, act_t, mask_t, indices, loss_fn, batch_size: int) -> tuple[float, float, dict]:
+    if len(indices) == 0:
+        return float("nan"), float("nan"), {}
+    total_loss = 0.0
+    total_examples = 0
+    correct = 0
+    group_total: dict[str, int] = {}
+    group_correct: dict[str, int] = {}
+
+    with torch.no_grad():
+        for start in range(0, len(indices), batch_size):
+            idx = indices[start:start + batch_size]
+            b_obs = obs_t[idx]
+            b_act = act_t[idx]
+            b_mask = mask_t[idx]
+            features = trainer.shared(b_obs)
+            logits = trainer.policy_head(features).masked_fill(~b_mask, -1e8)
+            loss = loss_fn(logits, b_act)
+            pred = logits.argmax(dim=-1)
+            n_batch = len(idx)
+            total_loss += float(loss.item()) * n_batch
+            total_examples += n_batch
+            correct += int((pred == b_act).sum().item())
+
+            for action, ok in zip(b_act.cpu().numpy().tolist(), (pred == b_act).cpu().numpy().tolist()):
+                group = _action_group(int(action))
+                group_total[group] = group_total.get(group, 0) + 1
+                group_correct[group] = group_correct.get(group, 0) + int(bool(ok))
+
+    group_acc = {
+        f"{group}_acc": (group_correct.get(group, 0) / max(1, total) * 100.0)
+        for group, total in group_total.items()
+    }
+    return total_loss / max(1, total_examples), correct / max(1, total_examples) * 100.0, group_acc
+
+
+def _restore_trainer_state(trainer, state: dict) -> None:
+    if not state:
+        return
+    trainer.shared.load_state_dict(state["shared"])
+    trainer.policy_head.load_state_dict(state["policy_head"])
+    trainer.value_head.load_state_dict(state["value_head"])
+
+
 def train_supervised(obs_list, action_list, mask_list, save_path: str,
-                     epochs: int = 30, lr: float = 1e-3, batch_size: int = 128):
+                     epochs: int = 50, lr: float = 5e-4, batch_size: int = 256,
+                     val_split: float = 0.10, patience: int = 12,
+                     weight_decay: float = 1e-5, label_smoothing: float = 0.02,
+                     seed: int = 20260511):
     from ppo_model import PPOTrainer
 
     n = len(obs_list)
-    log(f"Training supervised on {n} samples, {epochs} epochs...")
+    rng = np.random.default_rng(seed)
+    log(
+        f"Training supervised on {n} samples, {epochs} epochs "
+        f"lr={lr} batch={batch_size} val_split={val_split} "
+        f"patience={patience} weight_decay={weight_decay} label_smoothing={label_smoothing}"
+    )
 
     trainer = PPOTrainer(
         obs_size=OBS_SIZE, n_actions=NUM_ACTIONS, device="cpu",
@@ -878,54 +979,105 @@ def train_supervised(obs_list, action_list, mask_list, save_path: str,
     act_t = torch.as_tensor(np.array(action_list, dtype=np.int64))
     mask_t = torch.as_tensor(np.array(mask_list, dtype=np.bool_))
 
-    optimizer = torch.optim.Adam(
+    all_indices = rng.permutation(n)
+    val_n = int(round(n * max(0.0, min(0.4, val_split))))
+    if n < 1000:
+        val_n = min(val_n, max(0, n // 10))
+    val_idx = all_indices[:val_n]
+    train_idx = all_indices[val_n:] if val_n > 0 else all_indices
+
+    params = (
         list(trainer.shared.parameters())
         + list(trainer.policy_head.parameters())
-        + list(trainer.value_head.parameters()),
-        lr=lr,
+        + list(trainer.value_head.parameters())
     )
-    loss_fn = torch.nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(params, lr=lr, weight_decay=weight_decay)
+    loss_fn = torch.nn.CrossEntropyLoss(label_smoothing=label_smoothing)
+
+    best_metric = float("inf")
+    best_state = None
+    best_epoch = 0
+    stale_epochs = 0
 
     for epoch in range(epochs):
-        indices = np.random.permutation(n)
+        indices = rng.permutation(train_idx)
         total_loss = 0.0
+        total_examples = 0
         correct = 0
-        batches = 0
 
-        for start in range(0, n, batch_size):
-            end = min(start + batch_size, n)
-            idx = indices[start:end]
-
+        for start in range(0, len(indices), batch_size):
+            idx = indices[start:start + batch_size]
             b_obs = obs_t[idx]
             b_act = act_t[idx]
             b_mask = mask_t[idx]
 
             features = trainer.shared(b_obs)
-            logits = trainer.policy_head(features)
-            logits = logits.masked_fill(~b_mask, -1e8)
-
+            logits = trainer.policy_head(features).masked_fill(~b_mask, -1e8)
             loss = loss_fn(logits, b_act)
 
             optimizer.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(
-                list(trainer.shared.parameters())
-                + list(trainer.policy_head.parameters())
-                + list(trainer.value_head.parameters()),
-                1.0,
-            )
+            torch.nn.utils.clip_grad_norm_(params, 1.0)
             optimizer.step()
 
-            total_loss += loss.item()
-            correct += (logits.argmax(dim=-1) == b_act).sum().item()
-            batches += 1
+            n_batch = len(idx)
+            total_loss += float(loss.item()) * n_batch
+            total_examples += n_batch
+            correct += int((logits.argmax(dim=-1) == b_act).sum().item())
 
-        acc = correct / n * 100
-        avg_loss = total_loss / max(1, batches)
-        log(f"  Epoch {epoch+1}/{epochs}: loss={avg_loss:.4f} acc={acc:.1f}%")
+        train_loss = total_loss / max(1, total_examples)
+        train_acc = correct / max(1, total_examples) * 100.0
+        val_loss, val_acc, group_acc = _eval_bc_metrics(
+            trainer, obs_t, act_t, mask_t, val_idx, loss_fn, batch_size
+        ) if val_n > 0 else (float("nan"), float("nan"), {})
 
+        metric = val_loss if val_n > 0 and val_loss == val_loss else train_loss
+        if metric < best_metric - 1e-5:
+            best_metric = metric
+            best_epoch = epoch + 1
+            stale_epochs = 0
+            best_state = {
+                "shared": {k: v.detach().cpu().clone() for k, v in trainer.shared.state_dict().items()},
+                "policy_head": {k: v.detach().cpu().clone() for k, v in trainer.policy_head.state_dict().items()},
+                "value_head": {k: v.detach().cpu().clone() for k, v in trainer.value_head.state_dict().items()},
+            }
+        else:
+            stale_epochs += 1
+
+        row = {
+            "epoch": epoch + 1,
+            "epochs": epochs,
+            "samples": n,
+            "train_samples": len(train_idx),
+            "val_samples": len(val_idx),
+            "train_loss": f"{train_loss:.6f}",
+            "train_acc": f"{train_acc:.3f}",
+            "val_loss": f"{val_loss:.6f}" if val_loss == val_loss else "",
+            "val_acc": f"{val_acc:.3f}" if val_acc == val_acc else "",
+            "best_val_loss": f"{best_metric:.6f}",
+            "lr": lr,
+            "batch_size": batch_size,
+            "weight_decay": weight_decay,
+            "label_smoothing": label_smoothing,
+            "patience": patience,
+        }
+        row.update({k: f"{v:.3f}" for k, v in group_acc.items()})
+        _append_bc_train_stats(row)
+
+        if (epoch + 1) % 5 == 0 or epoch == 0 or stale_epochs == patience:
+            val_part = f" val_loss={val_loss:.4f} val_acc={val_acc:.1f}%" if val_n > 0 else ""
+            log(
+                f"  Epoch {epoch+1}/{epochs}: train_loss={train_loss:.4f} "
+                f"train_acc={train_acc:.1f}%{val_part} best_epoch={best_epoch}"
+            )
+
+        if patience > 0 and val_n > 0 and stale_epochs >= patience:
+            log(f"Early stopping BC at epoch {epoch+1}; best_epoch={best_epoch} best_val_loss={best_metric:.4f}")
+            break
+
+    _restore_trainer_state(trainer, best_state)
     trainer.save(save_path)
-    log(f"Warm-started model saved to {save_path}")
+    log(f"Warm-started model saved to {save_path} (best_epoch={best_epoch})")
     return trainer
 
 
@@ -944,6 +1096,52 @@ def save_demo_dataset(obs_list, action_list, mask_list, path: str) -> None:
     log(f"BC demo dataset saved to {path} ({len(action_list)} samples)")
 
 
+def load_demo_dataset(path: str) -> tuple[list, list, list]:
+    """Load a saved BC demo .npz file."""
+    with np.load(path, allow_pickle=False) as data:
+        obs = [x for x in data["observations"]]
+        actions = [int(x) for x in data["actions"]]
+        masks = [x for x in data["action_masks"]]
+    if len(obs) != len(actions) or len(obs) != len(masks):
+        raise ValueError(
+            f"demo length mismatch in {path}: obs={len(obs)} "
+            f"actions={len(actions)} masks={len(masks)}"
+        )
+    return obs, actions, masks
+
+
+def load_demo_dir(path: str) -> tuple[list, list, list]:
+    """Merge every saved BC demo .npz file in a directory."""
+    import glob
+
+    files = sorted(glob.glob(os.path.join(path, "*.npz")))
+    obs_all: list = []
+    action_all: list = []
+    mask_all: list = []
+    loaded = 0
+
+    for f in files:
+        name = os.path.basename(f).lower()
+        # Progress checkpoints may contain compatible arrays, but they can
+        # represent incomplete collection state. Only consume explicit demo
+        # datasets so partial checkpoints do not silently enter training.
+        if "progress" in name or "checkpoint" in name:
+            continue
+        try:
+            obs, actions, masks = load_demo_dataset(f)
+        except Exception as e:
+            log(f"Skipping demo file {f}: {e}")
+            continue
+        obs_all.extend(obs)
+        action_all.extend(actions)
+        mask_all.extend(masks)
+        loaded += 1
+        log(f"Loaded demo file: {f} samples={len(actions)}")
+
+    log(f"Merged {loaded} demo file(s) from {path}: samples={len(action_all)}")
+    return obs_all, action_all, mask_all
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -960,7 +1158,30 @@ def main():
                         help="Per-game BC progress checkpoint path")
     parser.add_argument("--no-resume-bc", dest="resume_bc", action="store_false",
                         help="Ignore any existing BC progress checkpoint")
-    parser.add_argument("--epochs", type=int, default=30)
+    parser.add_argument("--epochs", type=int, default=50,
+                        help="Supervised BC epochs (default: 50)")
+    parser.add_argument("--lr", type=float, default=5e-4,
+                        help="Supervised BC learning rate (default: 5e-4)")
+    parser.add_argument("--batch-size", type=int, default=256,
+                        help="Supervised BC batch size (default: 256)")
+    parser.add_argument("--val-split", type=float, default=0.10,
+                        help="Holdout validation split for BC training (default: 0.10)")
+    parser.add_argument("--patience", type=int, default=12,
+                        help="Early-stop patience on validation loss; 0 disables (default: 12)")
+    parser.add_argument("--weight-decay", type=float, default=1e-5,
+                        help="Adam weight decay for BC training (default: 1e-5)")
+    parser.add_argument("--label-smoothing", type=float, default=0.02,
+                        help="Cross-entropy label smoothing for BC (default: 0.02)")
+    parser.add_argument("--seed", type=int, default=20260511,
+                        help="RNG seed for train/validation split and shuffling")
+    parser.add_argument("--collect-only", action="store_true",
+                        help="Collect demos and save them, but skip supervised training")
+    parser.add_argument("--worker-id", type=str, default="1",
+                        help="Identifier used in demo filenames for parallel BC collection")
+    parser.add_argument("--demo-dir", type=str, default=None,
+                        help="Directory for collect-only demo files")
+    parser.add_argument("--train-demo-dir", type=str, default=None,
+                        help="Skip live collection and train from all demo .npz files in this directory")
     parser.add_argument("--verbose", action="store_true",
                         help="Write detailed per-state/per-action debug logs")
     args = parser.parse_args()
@@ -970,9 +1191,38 @@ def main():
 
     save_path = os.path.join(_root, args.save)
     os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
+
+    if args.train_demo_dir:
+        demo_dir = args.train_demo_dir
+        if not os.path.isabs(demo_dir):
+            demo_dir = os.path.join(_root, demo_dir)
+        obs_list, action_list, mask_list = load_demo_dir(demo_dir)
+        if len(action_list) < 50:
+            log(f"Too few samples in demo dir {demo_dir}, skipping training")
+            return
+        train_supervised(
+            obs_list, action_list, mask_list, save_path,
+            epochs=args.epochs, lr=args.lr, batch_size=args.batch_size,
+            val_split=args.val_split, patience=args.patience,
+            weight_decay=args.weight_decay, label_smoothing=args.label_smoothing,
+            seed=args.seed,
+        )
+        log("=== BEHAVIOR CLONE TRAIN-FROM-DEMO-DIR COMPLETE ===")
+        return
+
     demo_save = args.demo_save
     if demo_save is None:
-        demo_save = save_path.replace(".pt", "_bc_demos.npz")
+        if args.demo_dir:
+            demo_dir = args.demo_dir
+            if not os.path.isabs(demo_dir):
+                demo_dir = os.path.join(_root, demo_dir)
+            os.makedirs(demo_dir, exist_ok=True)
+            demo_save = os.path.join(
+                demo_dir,
+                f"bc_demo_worker_{args.worker_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.npz",
+            )
+        else:
+            demo_save = save_path.replace(".pt", "_bc_demos.npz")
     elif not os.path.isabs(demo_save):
         demo_save = os.path.join(_root, demo_save)
     bc_checkpoint = args.bc_checkpoint
@@ -995,7 +1245,10 @@ def main():
         coord.register_command_error_callback(collector.on_error)
 
         log(f"Starting demo collection: {args.games} games "
-            f"save={args.save} epochs={args.epochs} verbose={VERBOSE} "
+            f"save={args.save} epochs={args.epochs} lr={args.lr} "
+            f"batch={args.batch_size} val_split={args.val_split} "
+            f"patience={args.patience} collect_only={args.collect_only} "
+            f"worker_id={args.worker_id} demo_save={demo_save} verbose={VERBOSE} "
             f"checkpoint={bc_checkpoint} resume={args.resume_bc}")
         coord.signal_ready()
 
@@ -1019,9 +1272,17 @@ def main():
         demo_save,
     )
 
+    if args.collect_only:
+        log(f"Collect-only mode complete. Demo file saved to {demo_save}")
+        _remove_if_exists(bc_checkpoint)
+        return
+
     train_supervised(
         collector.observations, collector.actions, collector.masks,
-        save_path, epochs=args.epochs,
+        save_path, epochs=args.epochs, lr=args.lr, batch_size=args.batch_size,
+        val_split=args.val_split, patience=args.patience,
+        weight_decay=args.weight_decay, label_smoothing=args.label_smoothing,
+        seed=args.seed,
     )
     _remove_if_exists(bc_checkpoint)
     log("=== BEHAVIOR CLONE COMPLETE ===")

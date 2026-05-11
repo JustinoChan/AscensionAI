@@ -16,20 +16,31 @@
 .PARAMETER Mode
     "worker" to run rollout_worker.py (default), "train" to run train_ppo.py,
     "bc-ppo" for end-to-end warm start, "bc" for behavior cloning,
-    "eval" for greedy evaluation, or "logger" for passive logging.
+    "bc-collect" for parallel BC demo collection, "bc-train" to train
+    from collected demo files, "eval" for greedy evaluation, or "logger"
+    for passive logging.
 
 .EXAMPLE
     .\launch_workers.ps1
     .\launch_workers.ps1 -NumWorkers 2
     .\launch_workers.ps1 -Mode bc
+    .\launch_workers.ps1 -Mode bc-collect -NumWorkers 4 -BCGames 400
+    .\launch_workers.ps1 -Mode bc-train -BCEpochs 50
 #>
 
 param(
     [int]$NumWorkers = 3,
-    [ValidateSet("worker", "train", "bc-ppo", "bc", "eval", "logger")]
+    [ValidateSet("worker", "train", "bc-ppo", "bc", "bc-collect", "bc-train", "eval", "logger")]
     [string]$Mode = "worker",
     [int]$Games = 20,
-    [int]$BCGames = 150,
+    [int]$BCGames = 400,
+    [int]$BCEpochs = 50,
+    [double]$BCLr = 5e-4,
+    [int]$BCBatchSize = 256,
+    [double]$BCValSplit = 0.10,
+    [int]$BCPatience = 12,
+    [double]$BCWeightDecay = 1e-5,
+    [double]$BCLabelSmoothing = 0.02,
     [string]$SeedFile = "",
     [int]$TopActions = 0,
     [switch]$HeuristicEval
@@ -86,6 +97,12 @@ if (-not (Test-Path $ConfigDir)) {
 $RolloutsDir = Join-Path $ProjectRoot "rollouts_shared"
 if ($Mode -eq "worker" -and -not (Test-Path $RolloutsDir)) {
     New-Item -ItemType Directory -Path $RolloutsDir -Force | Out-Null
+}
+
+# Shared directory for parallel BC demo collection.
+$BCDemosDir = Join-Path $ProjectRoot "bc_demos_shared"
+if (($Mode -eq "bc-collect" -or $Mode -eq "bc-train") -and -not (Test-Path $BCDemosDir)) {
+    New-Item -ItemType Directory -Path $BCDemosDir -Force | Out-Null
 }
 
 # Ensure models dir exists
@@ -149,11 +166,19 @@ function Get-Command-For-Train {
 }
 
 function Get-Command-For-BC {
-    return "$PyEsc $RootEsc/scripts/behavior_clone.py --games $BCGames --save models/ppo_sts_bc.pt"
+    return "$PyEsc $RootEsc/scripts/behavior_clone.py --games $BCGames --save models/ppo_sts_bc.pt --epochs $BCEpochs --lr $BCLr --batch-size $BCBatchSize --val-split $BCValSplit --patience $BCPatience --weight-decay $BCWeightDecay --label-smoothing $BCLabelSmoothing"
+}
+
+function Get-Command-For-BCCollect($workerId, $gamesForWorker) {
+    return "$PyEsc $RootEsc/scripts/behavior_clone.py --games $gamesForWorker --save models/ppo_sts_bc_worker_$workerId.pt --collect-only --worker-id $workerId --demo-dir bc_demos_shared --bc-checkpoint models/ppo_sts_bc_progress_worker_$workerId.npz --lr $BCLr --batch-size $BCBatchSize --val-split $BCValSplit --patience $BCPatience --weight-decay $BCWeightDecay --label-smoothing $BCLabelSmoothing"
+}
+
+function Get-Command-For-BCTrain {
+    return "$PyEsc $RootEsc/scripts/behavior_clone.py --train-demo-dir bc_demos_shared --save models/ppo_sts_bc.pt --epochs $BCEpochs --lr $BCLr --batch-size $BCBatchSize --val-split $BCValSplit --patience $BCPatience --weight-decay $BCWeightDecay --label-smoothing $BCLabelSmoothing"
 }
 
 function Get-Command-For-BCPPO {
-    return "$PyEsc $RootEsc/scripts/train_bc_ppo.py --bc-games $BCGames --ppo-games 200 --save models/ppo_sts.pt"
+    return "$PyEsc $RootEsc/scripts/train_bc_ppo.py --bc-games $BCGames --bc-epochs $BCEpochs --bc-lr 5e-4 --ppo-games 200 --save models/ppo_sts.pt"
 }
 
 function Get-Command-For-Eval {
@@ -218,7 +243,7 @@ switch ($Mode) {
         Write-Host "PID: $($proc.Id)" -ForegroundColor DarkGray
     }
     "bc" {
-        Write-Host "Mode: Behavior cloning ($BCGames heuristic games)" -ForegroundColor Green
+        Write-Host "Mode: Behavior cloning ($BCGames heuristic games, $BCEpochs BC epochs)" -ForegroundColor Green
         $NumWorkers = 1
         $cmd = Get-Command-For-BC
         Write-Config $cmd
@@ -227,8 +252,42 @@ switch ($Mode) {
         $launched += $proc
         Write-Host "PID: $($proc.Id)" -ForegroundColor DarkGray
     }
+    "bc-collect" {
+        $gamesPerWorker = [math]::Ceiling($BCGames / [double]$NumWorkers)
+        $estimatedTotal = $gamesPerWorker * $NumWorkers
+        Write-Host "Mode: Parallel BC demo collection" -ForegroundColor Green
+        Write-Host "Workers: $NumWorkers | Requested total games: $BCGames | Per worker: $gamesPerWorker | Actual max total: $estimatedTotal" -ForegroundColor Yellow
+        Write-Host "Demo files will be written to: $BCDemosDir" -ForegroundColor Yellow
+        Write-Host "After all workers finish, run:" -ForegroundColor Yellow
+        Write-Host "  .\launch_workers.ps1 -Mode bc-train -BCEpochs $BCEpochs" -ForegroundColor Yellow
+        Write-Host ""
+
+        for ($i = 1; $i -le $NumWorkers; $i++) {
+            $cmd = Get-Command-For-BCCollect $i $gamesPerWorker
+            Write-Host "[$i/$NumWorkers] Setting config for BC collector $i..." -ForegroundColor Cyan
+            Write-Config $cmd
+
+            Write-Host "[$i/$NumWorkers] Launching STS instance (BC collector $i)..." -ForegroundColor Cyan
+            $proc = Launch-STS
+            $launched += $proc
+            Write-Host "[$i/$NumWorkers] PID: $($proc.Id)" -ForegroundColor DarkGray
+
+            if ($i -lt $NumWorkers) {
+                Write-Host "  Waiting 15 seconds for ModTheSpire to read config..." -ForegroundColor DarkGray
+                Start-Sleep -Seconds 15
+            }
+        }
+    }
+    "bc-train" {
+        Write-Host "Mode: Train BC model from saved demo files" -ForegroundColor Green
+        Write-Host "Demo dir: $BCDemosDir" -ForegroundColor Yellow
+        Write-Host "Epochs: $BCEpochs | LR: $BCLr | Batch size: $BCBatchSize" -ForegroundColor Yellow
+        $cmd = Get-Command-For-BCTrain
+        Write-Host "Running: $cmd" -ForegroundColor DarkGray
+        & $PythonExe (Join-Path $ProjectRoot "scripts\behavior_clone.py") --train-demo-dir "bc_demos_shared" --save "models/ppo_sts_bc.pt" --epochs $BCEpochs --lr $BCLr --batch-size $BCBatchSize --val-split $BCValSplit --patience $BCPatience --weight-decay $BCWeightDecay --label-smoothing $BCLabelSmoothing
+    }
     "bc-ppo" {
-        Write-Host "Mode: BC -> PPO end-to-end ($BCGames BC games + 200 PPO games)" -ForegroundColor Green
+        Write-Host "Mode: BC -> PPO end-to-end ($BCGames BC games, $BCEpochs BC epochs + 200 PPO games)" -ForegroundColor Green
         $NumWorkers = 1
         $cmd = Get-Command-For-BCPPO
         Write-Config $cmd
@@ -281,6 +340,16 @@ switch ($Mode) {
     }
     "bc" {
         Write-Host "  BC       : bc_debug.log" -ForegroundColor DarkGray
+    }
+    "bc-collect" {
+        for ($i = 1; $i -le $NumWorkers; $i++) {
+            Write-Host "  BC $i    : bc_debug.log" -ForegroundColor DarkGray
+        }
+        Write-Host "  Demos    : bc_demos_shared\*.npz" -ForegroundColor DarkGray
+    }
+    "bc-train" {
+        Write-Host "  BC train : bc_debug.log" -ForegroundColor DarkGray
+        Write-Host "  Stats    : bc_train_stats.csv" -ForegroundColor DarkGray
     }
     "eval" {
         Write-Host "  Eval     : eval_debug.log" -ForegroundColor DarkGray

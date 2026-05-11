@@ -115,6 +115,7 @@ MODES = {
     "BC \u2192 PPO (End-to-End)": "bc_ppo",
     "Behavior Cloning": "bc",
     "Evaluation (Greedy)": "eval",
+    "Evaluate on Seed Set": "eval_set",
     "Game Logger (Passive)": "logger",
     "Play Game (No AI)": "play",
 }
@@ -124,9 +125,10 @@ SPINNER_CONFIG = {
     "worker":  ("Workers:", 1, 8, None),
     "collect": ("Workers:", 1, 8, None),
     "train":   (None, 0, 0, 0),
-    "bc_ppo":  ("BC Games:", 10, 300, 150),
-    "bc":      ("BC Games:", 10, 300, 150),
+    "bc_ppo":  ("BC Games:", 10, 1000, 400),
+    "bc":      ("BC Games:", 10, 1000, 400),
     "eval":    ("Games:", 1, 100, 20),
+    "eval_set": ("Games:", 1, 1000, 200),
     "logger":  (None, 0, 0, 0),
     "play":    (None, 0, 0, 0),
 }
@@ -210,8 +212,9 @@ def write_config(command: str | None = None, *, verbose: bool = True):
 
 
 def build_command(mode: str, worker_id: int = 1, games: int = 20,
-                  bc_games: int = 150, ppo_games: int = 200,
-                  ent_coef: float = 0.001, verbose: bool = False) -> str:
+                  bc_games: int = 400, ppo_games: int = 200,
+                  bc_epochs: int = 50, ent_coef: float = 0.001,
+                  verbose: bool = False) -> str:
     py = escape_properties_path(VENV_PYTHON)
     root = escape_properties_path(ROOT)
     verbose_flag = " --verbose" if verbose else ""
@@ -220,9 +223,19 @@ def build_command(mode: str, worker_id: int = 1, games: int = 20,
     elif mode == "train":
         cmd = f"{py} {root}/scripts/train_ppo.py --save models/ppo_sts.pt --resume models/ppo_sts.pt --save-every 5 --ent-coef {ent_coef}{verbose_flag}"
     elif mode == "bc_ppo":
-        cmd = f"{py} {root}/scripts/train_bc_ppo.py --bc-games {bc_games} --ppo-games {ppo_games} --save models/ppo_sts.pt --ent-start {ent_coef}{verbose_flag}"
+        cmd = (
+            f"{py} {root}/scripts/train_bc_ppo.py --bc-games {bc_games} "
+            f"--bc-epochs {bc_epochs} --bc-lr 5e-4 "
+            f"--ppo-games {ppo_games} --save models/ppo_sts.pt "
+            f"--ent-start {ent_coef}{verbose_flag}"
+        )
     elif mode == "bc":
-        cmd = f"{py} {root}/scripts/behavior_clone.py --games {bc_games} --save models/ppo_sts_bc.pt{verbose_flag}"
+        cmd = (
+            f"{py} {root}/scripts/behavior_clone.py --games {bc_games} "
+            f"--save models/ppo_sts_bc.pt --epochs {bc_epochs} "
+            f"--lr 5e-4 --batch-size 256 --val-split 0.10 "
+            f"--patience 12 --weight-decay 1e-5 --label-smoothing 0.02{verbose_flag}"
+        )
     elif mode == "eval":
         cmd = f"{py} {root}/scripts/eval_model.py --model models/ppo_sts.pt --games {games}{verbose_flag}"
     elif mode == "logger":
@@ -231,8 +244,39 @@ def build_command(mode: str, worker_id: int = 1, games: int = 20,
         _logger.error(f"build_command: unknown mode '{mode}'")
         cmd = ""
     _logger.info(f"build_command(mode={mode}, worker_id={worker_id}, games={games}, "
-                 f"bc_games={bc_games}, ppo_games={ppo_games}, "
+                 f"bc_games={bc_games}, bc_epochs={bc_epochs}, ppo_games={ppo_games}, "
                  f"ent_coef={ent_coef}, verbose={verbose}) -> {cmd}")
+    return cmd
+
+
+def build_eval_command(*, policy: str, games: int, seed_file: str, run_tag: str,
+                       model: str | None = None, top_actions: int = 0,
+                       verbose: bool = False) -> str:
+    """Build a CommunicationMod command for one fixed-seed eval run."""
+    py = escape_properties_path(VENV_PYTHON)
+    root = escape_properties_path(ROOT)
+    verbose_flag = " --verbose" if verbose else ""
+    safe_seed_file = str(seed_file).replace("\\", "/")
+    cmd = (
+        f"{py} {root}/scripts/eval_model.py "
+        f"--games {int(games)} "
+        f"--seed-file {safe_seed_file} "
+        f"--run-tag {run_tag}"
+    )
+    if policy == "heuristic":
+        cmd += " --policy heuristic"
+    else:
+        safe_model = str(model or "models/ppo_sts.pt").replace("\\", "/")
+        cmd += f" --model {safe_model}"
+        if int(top_actions) > 0:
+            cmd += f" --top-actions {int(top_actions)}"
+    cmd += verbose_flag
+    _logger.info(
+        "build_eval_command("
+        f"policy={policy}, games={games}, seed_file={seed_file}, "
+        f"run_tag={run_tag}, model={model}, top_actions={top_actions}, "
+        f"verbose={verbose}) -> {cmd}"
+    )
     return cmd
 
 
@@ -397,8 +441,8 @@ class AscensionApp:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("AscensionAI Control Panel")
-        self.root.geometry("820x740")
-        self.root.minsize(700, 600)
+        self.root.geometry("900x820")
+        self.root.minsize(760, 680)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
         self.processes: list[subprocess.Popen] = []
@@ -414,6 +458,7 @@ class AscensionApp:
         self._worker_launch_time: dict[int, float] = {}
         self._parallel_launch_started_at: float = 0.0
         self._n_workers: int = 0
+        self._eval_set_started_at: float = 0.0
 
         self.hw = detect_hardware()
 
@@ -470,11 +515,17 @@ class AscensionApp:
         self.workers_var = tk.IntVar(value=self.hw["recommended_workers"])
         self.spin_minus = ttk.Button(row1, text="-", width=3, command=self._dec_workers)
         self.spin_minus.pack(side="left")
-        self.workers_label = ttk.Label(row1, textvariable=self.workers_var, width=3,
-                                       anchor="center", font=("Consolas", 11, "bold"))
-        self.workers_label.pack(side="left", padx=2)
+        self.workers_entry = ttk.Entry(row1, textvariable=self.workers_var, width=6,
+                                       justify="center", font=("Consolas", 11, "bold"))
+        self.workers_entry.pack(side="left", padx=2)
+        self.workers_entry.bind("<Return>", lambda _e: self._normalize_spinner_value())
+        self.workers_entry.bind("<FocusOut>", lambda _e: self._normalize_spinner_value())
         self.spin_plus = ttk.Button(row1, text="+", width=3, command=self._inc_workers)
         self.spin_plus.pack(side="left")
+        self.spin_step_var = tk.StringVar(value="")
+        self.spin_step_label = ttk.Label(row1, textvariable=self.spin_step_var,
+                                         foreground="gray")
+        self.spin_step_label.pack(side="left", padx=(6, 0))
 
         row2 = ttk.Frame(ctrl_frame)
         row2.pack(fill="x")
@@ -525,6 +576,22 @@ class AscensionApp:
         self.ent_help.bind("<Enter>", self._show_ent_tooltip)
         self.ent_help.bind("<Leave>", self._hide_ent_tooltip)
 
+        # Behavior-cloning training controls.
+        self.bc_epochs_row = ttk.Frame(ctrl_frame)
+        self.bc_epochs_row.pack(fill="x", pady=(6, 0))
+        ttk.Label(self.bc_epochs_row, text="BC Epochs:").pack(side="left", padx=(0, 5))
+        self.bc_epochs_var = tk.IntVar(value=50)
+        self.bc_epochs_spin = ttk.Spinbox(
+            self.bc_epochs_row,
+            from_=1,
+            to=200,
+            increment=5,
+            textvariable=self.bc_epochs_var,
+            width=7,
+        )
+        self.bc_epochs_spin.pack(side="left")
+        ttk.Label(self.bc_epochs_row, text="default 50; early stopping may stop sooner").pack(side="left", padx=(8, 0))
+
         # BC -> PPO run-length controls.
         self.ppo_games_row = ttk.Frame(ctrl_frame)
         self.ppo_games_row.pack(fill="x", pady=(6, 0))
@@ -540,6 +607,26 @@ class AscensionApp:
         )
         self.ppo_games_spin.pack(side="left")
         ttk.Label(self.ppo_games_row, text="0 = keep running").pack(side="left", padx=(8, 0))
+
+        # Fixed-seed evaluation controls. Visible only for Evaluate on Seed Set.
+        self.eval_seed_row = ttk.Frame(ctrl_frame)
+        self.eval_seed_row.pack(fill="x", pady=(6, 0))
+        ttk.Label(self.eval_seed_row, text="Seed File:").pack(side="left", padx=(0, 5))
+        self.eval_seed_file_var = tk.StringVar(value="seeds/eval_200.txt")
+        self.eval_seed_combo = ttk.Combobox(
+            self.eval_seed_row,
+            textvariable=self.eval_seed_file_var,
+            values=self._seed_file_options(),
+            width=34,
+        )
+        self.eval_seed_combo.pack(side="left", padx=(0, 6))
+        ttk.Button(self.eval_seed_row, text="Refresh", command=self._refresh_seed_file_options).pack(side="left", padx=(0, 8))
+        self.eval_generate_seed_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            self.eval_seed_row,
+            text="Generate/overwrite before run",
+            variable=self.eval_generate_seed_var,
+        ).pack(side="left")
 
         # Progress panel
         stats_frame = ttk.LabelFrame(self.root, text="  Progress  ", padding=10)
@@ -608,21 +695,59 @@ class AscensionApp:
 
     # ----- Spinner controls -----
 
-    def _inc_workers(self):
+    def _spinner_bounds(self):
         mode = MODES.get(self.mode_var.get(), "worker")
-        _, _, hi, _ = SPINNER_CONFIG.get(mode, (None, 1, 8, None))
-        step = 10 if mode in ("bc_ppo", "bc") else 1
-        v = self.workers_var.get()
+        _label, lo, hi, default = SPINNER_CONFIG.get(mode, (None, 1, 8, 1))
+        return mode, int(lo), int(hi), default
+
+    def _spinner_step(self, mode: str) -> int:
+        """Return the +/- step for the main numeric control.
+
+        Worker counts should move one at a time, but game-count modes become
+        painful with a step of 1.  The entry box remains editable for exact
+        values like 8 games.
+        """
+        if mode in ("bc_ppo", "bc"):
+            return 10
+        if mode == "eval":
+            return 5
+        if mode == "eval_set":
+            return 25
+        return 1
+
+    def _normalize_spinner_value(self) -> int:
+        mode, lo, hi, default = self._spinner_bounds()
+        try:
+            value = int(self.workers_var.get())
+        except (tk.TclError, ValueError):
+            value = int(default if default is not None else max(1, lo))
+        lo = max(1, lo)
+        value = max(lo, min(hi, value))
+        self.workers_var.set(value)
+        return value
+
+    def _update_spinner_step_hint(self):
+        mode = MODES.get(self.mode_var.get(), "worker")
+        step = self._spinner_step(mode)
+        if mode in ("bc_ppo", "bc", "eval", "eval_set"):
+            self.spin_step_var.set(f"+/- {step}; type exact value")
+        else:
+            self.spin_step_var.set("")
+
+    def _inc_workers(self):
+        mode, _lo, hi, _default = self._spinner_bounds()
+        step = self._spinner_step(mode)
+        v = self._normalize_spinner_value()
         if v < hi:
             self.workers_var.set(min(hi, v + step))
 
     def _dec_workers(self):
-        mode = MODES.get(self.mode_var.get(), "worker")
-        _, lo, _, _ = SPINNER_CONFIG.get(mode, (None, 1, 8, None))
-        step = 10 if mode in ("bc_ppo", "bc") else 1
-        v = self.workers_var.get()
-        if v > max(1, lo):
-            self.workers_var.set(max(max(1, lo), v - step))
+        mode, lo, _hi, _default = self._spinner_bounds()
+        step = self._spinner_step(mode)
+        v = self._normalize_spinner_value()
+        floor = max(1, lo)
+        if v > floor:
+            self.workers_var.set(max(floor, v - step))
 
     def _get_ppo_games(self) -> int:
         try:
@@ -631,6 +756,45 @@ class AscensionApp:
             value = 200
         value = max(0, min(5000, value))
         self.ppo_games_var.set(value)
+        return value
+
+    def _get_bc_epochs(self) -> int:
+        try:
+            value = int(self.bc_epochs_var.get())
+        except (tk.TclError, ValueError):
+            value = 50
+        value = max(1, min(200, value))
+        self.bc_epochs_var.set(value)
+        return value
+
+    def _seed_file_options(self) -> list[str]:
+        seeds_dir = ROOT / "seeds"
+        options: list[str] = []
+        try:
+            if seeds_dir.exists():
+                for path in sorted(seeds_dir.glob("*.txt")):
+                    try:
+                        options.append(str(path.relative_to(ROOT)).replace("\\", "/"))
+                    except ValueError:
+                        options.append(str(path))
+        except OSError as e:
+            _logger.warning(f"Failed to scan seed files: {e}")
+        if "seeds/eval_200.txt" not in options:
+            options.insert(0, "seeds/eval_200.txt")
+        return options
+
+    def _refresh_seed_file_options(self):
+        values = self._seed_file_options()
+        self.eval_seed_combo.configure(values=values)
+        if not self.eval_seed_file_var.get().strip() and values:
+            self.eval_seed_file_var.set(values[0])
+
+    def _selected_seed_file(self, games: int) -> str:
+        value = self.eval_seed_file_var.get().strip()
+        if not value:
+            value = f"seeds/eval_{games}.txt"
+            self.eval_seed_file_var.set(value)
+        value = value.replace("\\", "/")
         return value
 
     def _inc_ent(self):
@@ -685,14 +849,18 @@ class AscensionApp:
             self.spinner_label_var.set(label)
             self.spin_minus.configure(state="normal")
             self.spin_plus.configure(state="normal")
+            self.workers_entry.configure(state="normal")
             if default is not None:
                 self.workers_var.set(default)
             elif mode in ("worker", "collect"):
                 self.workers_var.set(self.hw["recommended_workers"])
+            self._normalize_spinner_value()
         else:
             self.spinner_label_var.set("")
             self.spin_minus.configure(state="disabled")
             self.spin_plus.configure(state="disabled")
+            self.workers_entry.configure(state="disabled")
+        self._update_spinner_step_hint()
 
         bc_path = ROOT / "models" / "ppo_sts_bc.pt"
         if mode in ("worker", "collect", "train", "eval") and bc_path.exists():
@@ -706,10 +874,21 @@ class AscensionApp:
         else:
             self.ent_row.pack_forget()
 
+        if mode in ("bc", "bc_ppo"):
+            self.bc_epochs_row.pack(fill="x", pady=(6, 0))
+        else:
+            self.bc_epochs_row.pack_forget()
+
         if mode == "bc_ppo":
             self.ppo_games_row.pack(fill="x", pady=(6, 0))
         else:
             self.ppo_games_row.pack_forget()
+
+        if mode == "eval_set":
+            self._refresh_seed_file_options()
+            self.eval_seed_row.pack(fill="x", pady=(6, 0))
+        else:
+            self.eval_seed_row.pack_forget()
 
     # ----- Logging -----
 
@@ -1256,7 +1435,7 @@ class AscensionApp:
         os.environ["ASCENSION_VERBOSE"] = "1" if verbose else "0"
 
         mode = MODES.get(self.mode_var.get(), "worker")
-        n = self.workers_var.get()
+        n = self._normalize_spinner_value()
 
         model_path = ROOT / "models" / "ppo_sts.pt"
         _logger.info(f"Mode: {mode} | Spinner: {n} | Verbose: {verbose}")
@@ -1308,6 +1487,9 @@ class AscensionApp:
         elif mode == "eval":
             self.status_var.set(f"Launching evaluation ({n} games)...")
             threading.Thread(target=self._launch_single, args=("eval", n), daemon=True).start()
+        elif mode == "eval_set":
+            self.status_var.set(f"Launching fixed-seed eval set ({n} games each)...")
+            threading.Thread(target=self._launch_eval_set, args=(n,), daemon=True).start()
         elif mode == "logger":
             self.status_var.set("Launching passive game logger...")
             threading.Thread(target=self._launch_single, args=("logger",), daemon=True).start()
@@ -1316,13 +1498,186 @@ class AscensionApp:
             threading.Thread(target=self._launch_play, daemon=True).start()
         _logger.info(f"Launch thread started for mode={mode}")
 
-    def _launch_single(self, mode: str, games: int = 20, ppo_games: int = 200):
-        _logger.info(f"_launch_single: mode={mode}, games={games}, ppo_games={ppo_games}")
+    def _generate_seed_file(self, seed_file: str, games: int) -> bool:
+        out_path = ROOT / seed_file if not os.path.isabs(seed_file) else Path(seed_file)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        cmd = [
+            str(VENV_PYTHON), str(SCRIPTS / "make_eval_seeds.py"),
+            "--count", str(int(games)),
+            "--out", str(out_path),
+        ]
+        _logger.info(f"Generating eval seed file: {cmd}")
+        self._append_log("Eval Set", f"Generating seed file: {out_path}")
+        try:
+            result = subprocess.run(
+                cmd, cwd=str(ROOT), check=True, timeout=60,
+                capture_output=True, creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            if result.stdout:
+                self._append_log("Eval Set", result.stdout.decode(errors="replace").strip())
+            if result.stderr:
+                _logger.debug(f"Seed generation stderr: {result.stderr.decode(errors='replace')[:500]}")
+            self._refresh_seed_file_options()
+            return True
+        except Exception as e:
+            _logger.error(f"Seed generation failed: {traceback.format_exc()}")
+            self._append_log("Eval Set", f"ERROR generating seed file: {e}")
+            return False
+
+    def _count_eval_rows_for_run(self, run_tag: str) -> int:
+        csv_path = ROOT / "logs" / "eval_stats.csv"
+        if not csv_path.exists():
+            return 0
+        try:
+            with open(csv_path, "r", encoding="utf-8", newline="") as f:
+                return sum(1 for r in _csv.DictReader(f) if r.get("run") == run_tag)
+        except Exception as e:
+            _logger.warning(f"Failed to count eval rows for {run_tag}: {e}")
+            return 0
+
+    def _wait_for_eval_complete(self, run_tag: str, games: int, proc: subprocess.Popen,
+                                timeout_sec: int) -> bool:
+        start = time.time()
+        last_count = -1
+        while self.running:
+            count = self._count_eval_rows_for_run(run_tag)
+            if count != last_count:
+                _logger.info(f"Eval run {run_tag}: {count}/{games} games recorded")
+                self._append_log("Eval Set", f"{run_tag}: {count}/{games} games recorded")
+                last_count = count
+            if count >= games:
+                return True
+            if time.time() - start > timeout_sec:
+                _logger.warning(f"Eval run {run_tag} timed out after {timeout_sec}s with {count}/{games} games")
+                self._append_log("Eval Set", f"TIMEOUT: {run_tag} only reached {count}/{games} games")
+                return False
+            if proc.poll() is not None and count == 0 and time.time() - start > 120:
+                _logger.warning(f"Eval STS process exited before writing rows for {run_tag} (rc={proc.poll()})")
+                self._append_log("Eval Set", f"ERROR: STS exited early for {run_tag} (rc={proc.poll()})")
+                return False
+            time.sleep(5.0)
+        return False
+
+    def _cleanup_eval_instance(self, proc: subprocess.Popen | None, label: str):
+        try:
+            if proc is not None:
+                if proc in self.processes:
+                    self.processes.remove(proc)
+                if proc.poll() is None:
+                    _logger.info(f"Closing eval STS process for {label}: PID {proc.pid}")
+                    self._kill_process_tree(proc.pid)
+        except Exception as e:
+            _logger.warning(f"Failed to close eval STS process for {label}: {e}")
+        # ModTheSpire can detach the actual game JVM from the Popen handle. Sweep
+        # after each eval so the next policy gets a clean CommunicationMod launch.
+        try:
+            self._kill_orphan_sts_instances()
+            self._kill_orphan_python_scripts()
+        except Exception as e:
+            _logger.warning(f"Eval cleanup sweep failed for {label}: {e}")
+
+    def _launch_eval_set(self, games: int):
+        _logger.info(f"_launch_eval_set: games={games}")
+        eval_tailer = None
+        try:
+            verbose = bool(self.verbose_var.get())
+            seed_file = self._selected_seed_file(games)
+            seed_path = ROOT / seed_file if not os.path.isabs(seed_file) else Path(seed_file)
+            self.root.after(0, lambda: self._add_log_tab("Eval Set"))
+            time.sleep(0.1)
+
+            if self.eval_generate_seed_var.get() or not seed_path.exists():
+                if not self._generate_seed_file(seed_file, games):
+                    self.root.after(0, lambda: messagebox.showerror(
+                        "Seed Generation Failed",
+                        "Could not generate the eval seed file. Check Eval Set logs."
+                    ))
+                    return
+            else:
+                self._append_log("Eval Set", f"Using existing seed file: {seed_file}")
+
+            self.root.after(0, lambda: self._add_log_tab("Evaluation"))
+            eval_tailer = LogTailer(ROOT / "logs" / "eval_debug.log",
+                                    lambda line: self._append_log("Evaluation", line))
+            eval_tailer.start()
+            self.tailers.append(eval_tailer)
+
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            runs = [
+                {"label": "Heuristic", "policy": "heuristic", "model": None,
+                 "tag": f"heuristic_{games}_{ts}", "top_actions": 0},
+                {"label": "BC", "policy": "model", "model": "models/ppo_sts_bc.pt",
+                 "tag": f"bc_{games}_{ts}", "top_actions": 5},
+                {"label": "PPO Current", "policy": "model", "model": "models/ppo_sts.pt",
+                 "tag": f"ppo_current_{games}_{ts}", "top_actions": 5},
+            ]
+
+            self._eval_set_started_at = time.time()
+            self._append_log(
+                "Eval Set",
+                f"Starting fixed-seed eval set: {games} games each, seed_file={seed_file}"
+            )
+
+            for run in runs:
+                if not self.running:
+                    break
+                model = run["model"]
+                if model and not (ROOT / model).exists():
+                    msg = f"Skipping {run['label']}: missing checkpoint {model}"
+                    _logger.warning(msg)
+                    self._append_log("Eval Set", msg)
+                    continue
+
+                cmd = build_eval_command(
+                    policy=run["policy"], games=games, seed_file=seed_file,
+                    run_tag=run["tag"], model=model,
+                    top_actions=int(run["top_actions"]), verbose=verbose,
+                )
+                self._append_log("Eval Set", f"Launching {run['label']} eval: {run['tag']}")
+                self._append_log("Eval Set", cmd)
+                write_config(cmd, verbose=verbose)
+                proc = None
+                try:
+                    proc = launch_sts(skip_launcher=True)
+                    self.processes.append(proc)
+                    _logger.info(f"Eval set {run['label']} STS launched: PID {proc.pid}")
+                    self.root.after(0, lambda label=run['label']: self.status_var.set(
+                        f"Evaluating {label} ({games} games)..."
+                    ))
+                    timeout = max(900, int(games) * 180)
+                    ok = self._wait_for_eval_complete(run["tag"], games, proc, timeout)
+                    self._append_log("Eval Set", f"{run['label']} eval {'complete' if ok else 'stopped/failed'}")
+                    if not ok and self.running:
+                        # Stop the sequence on a real failure. The user can inspect
+                        # eval_debug.log, fix the issue, and rerun from the GUI.
+                        break
+                finally:
+                    self._cleanup_eval_instance(proc, run["label"])
+                    time.sleep(3.0)
+
+            self.running = False
+            self.root.after(0, lambda: self.start_btn.configure(state="normal"))
+            self.root.after(0, lambda: self.stop_btn.configure(state="disabled"))
+            self.root.after(0, lambda: self.graceful_btn.configure(state="disabled"))
+            self.root.after(0, lambda: self.status_var.set("Eval set complete"))
+            self._append_log("Eval Set", "Fixed-seed eval set finished.")
+            _logger.info("_launch_eval_set complete")
+        except Exception as e:
+            _logger.error(f"_launch_eval_set FAILED: {traceback.format_exc()}")
+            self._append_log("Eval Set", f"ERROR launching eval set: {e}")
+            self.running = False
+            self.root.after(0, lambda: self.start_btn.configure(state="normal"))
+            self.root.after(0, lambda: self.stop_btn.configure(state="disabled"))
+            self.root.after(0, lambda: self.graceful_btn.configure(state="disabled"))
+            self.root.after(0, lambda: self.status_var.set("Eval set failed"))
+
+    def _launch_single(self, mode: str, games: int = 20, ppo_games: int = 200, bc_epochs: int = 50):
+        _logger.info(f"_launch_single: mode={mode}, games={games}, ppo_games={ppo_games}, bc_epochs={bc_epochs}")
         try:
             verbose = bool(self.verbose_var.get())
             cmd = build_command(mode, games=games, bc_games=games,
-                                ppo_games=ppo_games, ent_coef=self._ent_value,
-                                verbose=verbose)
+                                ppo_games=ppo_games, bc_epochs=bc_epochs,
+                                ent_coef=self._ent_value, verbose=verbose)
             write_config(cmd, verbose=verbose)
 
             _mode_info = {
@@ -2282,6 +2637,13 @@ class AscensionApp:
                 "Install Mod the Spire via Steam Workshop, or set "
                 "ASCENSIONAI_MTS_JAR to the full ModTheSpire.jar path."
             )
+        if mode == "eval_set":
+            seed_file = self._selected_seed_file(self._normalize_spinner_value())
+            if not seed_file.lower().endswith(".txt"):
+                issues.append("Seed file must be a .txt file, for example seeds/eval_200.txt")
+            for rel in ("models/ppo_sts_bc.pt", "models/ppo_sts.pt"):
+                if not (ROOT / rel).exists():
+                    issues.append(f"Required eval checkpoint not found:\n  {ROOT / rel}")
         if issues:
             _logger.warning(f"Validation failed: {len(issues)} issue(s)")
         else:
