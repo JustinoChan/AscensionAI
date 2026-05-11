@@ -473,6 +473,9 @@ class AscensionApp:
 
         self.gpu_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(row2, text="GPU Trainer", variable=self.gpu_var).pack(side="left", padx=(0, 10))
+        
+        self.auto_tune_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(row2, text="Auto-Tune", variable=self.auto_tune_var).pack(side="left", padx=(0, 10))
 
         self.status_var = tk.StringVar(value="Idle")
         ttk.Label(row2, textvariable=self.status_var, font=("Segoe UI", 10, "italic")).pack(side="left")
@@ -1425,6 +1428,8 @@ class AscensionApp:
                     "--ent-coef", str(self._ent_value),
                     "--device", "gpu" if self.gpu_var.get() else "cpu",
                 ]
+                if self.auto_tune_var.get():
+                    trainer_cmd.append("--auto-tune")
                 if self.verbose_var.get():
                     trainer_cmd.append("--verbose")
                 self._trainer_cmd = trainer_cmd
