@@ -8,7 +8,7 @@
     the process to start, then swaps in the next config.
 
     Run train_offline.py separately to consume the rollout data:
-        python scripts\train_offline.py --model models\ppo_sts.pt --data rollouts_shared --delete-consumed --ent-coef 0.001
+        python scripts\train_offline.py --model models\ppo_sts.pt --data rollouts_shared --delete-consumed --batch-games 8 --lr 3e-5 --bc-coef 0.10 --max-rollout-lag 4 --ent-coef 0.001 --auto-tune
 
 .PARAMETER NumWorkers
     Number of STS instances to launch (default: 3).
@@ -41,8 +41,31 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot   = $PSScriptRoot
 $PythonExe     = Join-Path $ProjectRoot ".venv\Scripts\python.exe"
 $StsDir        = "C:\Program Files (x86)\Steam\steamapps\common\SlayTheSpire"
-$MtsLauncher   = Join-Path $StsDir "mts-launcher.jar"
 $JavaExe       = Join-Path $StsDir "jre\bin\java.exe"
+
+# Use the real Steam Workshop ModTheSpire.jar instead of the common
+# SlayTheSpire\mts-launcher.jar wrapper. The wrapper may still open the
+# launcher menu even when --skip-launcher / --profile are passed.
+$DefaultMtsJar = "C:\Program Files (x86)\Steam\steamapps\workshop\content\646570\1605060445\ModTheSpire.jar"
+if ($env:ASCENSIONAI_MTS_JAR -and $env:ASCENSIONAI_MTS_JAR.Trim() -ne "") {
+    $MtsLauncher = $env:ASCENSIONAI_MTS_JAR.Trim()
+} elseif (Test-Path $DefaultMtsJar) {
+    $MtsLauncher = $DefaultMtsJar
+} else {
+    $MtsLauncher = Join-Path $StsDir "mts-launcher.jar"
+}
+
+$MtsProfile = if ($env:ASCENSIONAI_MTS_PROFILE -and $env:ASCENSIONAI_MTS_PROFILE.Trim() -ne "") {
+    $env:ASCENSIONAI_MTS_PROFILE.Trim()
+} else {
+    "AscensionAI"
+}
+$MtsMods = if ($env:ASCENSIONAI_MTS_MODS -and $env:ASCENSIONAI_MTS_MODS.Trim() -ne "") {
+    $env:ASCENSIONAI_MTS_MODS.Trim()
+} else {
+    ""
+}
+
 $ConfigDir     = Join-Path $env:LOCALAPPDATA "ModTheSpire\CommunicationMod"
 $ConfigFile    = Join-Path $ConfigDir "config.properties"
 
@@ -52,7 +75,7 @@ if (-not (Test-Path $PythonExe)) {
     exit 1
 }
 if (-not (Test-Path $MtsLauncher)) {
-    Write-Error "ModTheSpire not found at $MtsLauncher. Is STS installed via Steam?"
+    Write-Error "ModTheSpire jar not found at $MtsLauncher. Install Mod the Spire via Steam Workshop or set ASCENSIONAI_MTS_JAR."
     exit 1
 }
 if (-not (Test-Path $ConfigDir)) {
@@ -91,7 +114,24 @@ runAtGameStart=true
 }
 
 function Launch-STS {
-    $args = @("-jar", "`"$MtsLauncher`"", "--skip-launcher")
+    $args = @("-jar", "`"$MtsLauncher`"")
+
+    if ($MtsMods -ne "") {
+        # --mods implies skip-launcher on supported ModTheSpire versions.
+        $args += @("--mods", $MtsMods)
+    } elseif ($MtsProfile -ne "") {
+        $args += @("--skip-launcher", "--profile", $MtsProfile)
+    } else {
+        $args += @("--skip-launcher")
+    }
+
+    Write-Host "Launching with ModTheSpire jar: $MtsLauncher" -ForegroundColor DarkGray
+    if ($MtsMods -ne "") {
+        Write-Host "Using ModTheSpire --mods: $MtsMods" -ForegroundColor DarkGray
+    } elseif ($MtsProfile -ne "") {
+        Write-Host "Using ModTheSpire profile: $MtsProfile" -ForegroundColor DarkGray
+    }
+
     $proc = Start-Process -FilePath $JavaExe `
         -ArgumentList $args `
         -WorkingDirectory $StsDir `
@@ -148,7 +188,7 @@ switch ($Mode) {
         Write-Host "Mode: Parallel rollout workers ($NumWorkers instances)" -ForegroundColor Green
         Write-Host ""
         Write-Host "IMPORTANT: Start the offline trainer in a separate terminal:" -ForegroundColor Yellow
-        Write-Host "  python scripts\train_offline.py --model models\ppo_sts.pt --data rollouts_shared --delete-consumed --ent-coef 0.001" -ForegroundColor Yellow
+        Write-Host "  python scripts\train_offline.py --model models\ppo_sts.pt --data rollouts_shared --delete-consumed --batch-games 8 --lr 3e-5 --bc-coef 0.10 --max-rollout-lag 4 --ent-coef 0.001 --auto-tune" -ForegroundColor Yellow
         Write-Host ""
 
         for ($i = 1; $i -le $NumWorkers; $i++) {

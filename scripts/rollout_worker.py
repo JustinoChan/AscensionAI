@@ -293,6 +293,9 @@ class WorkerAgent:
         self._stuck_key = ""
         self._stuck_count = 0
         self._stuck_dumped_key = ""
+        self._progress_key = ""
+        self._no_progress_count = 0
+        self._progress_dumped_key = ""
         self._recent_actions: list[str] = []
         self._model_mtime = 0.0
         if os.path.isfile(self.model_path):
@@ -318,6 +321,7 @@ class WorkerAgent:
             log(f"Model reload failed: {e}")
 
     _STUCK_HARD_LIMIT = 50
+    _NO_PROGRESS_HARD_LIMIT = 35
 
     def _track_stuck(self, screen_name: str, action_cmd: str, in_combat: bool):
         key = f"{screen_name}:{action_cmd}"
@@ -328,6 +332,83 @@ class WorkerAgent:
             self._stuck_count = 1
         if in_combat:
             self._stuck_count = 0
+
+    def _state_progress_key(self, gs, screen_name: str) -> str:
+        """Fingerprint non-combat state to catch loops where actions vary but nothing changes."""
+        scr = getattr(gs, "screen", None)
+        choice_list = tuple(str(c) for c in (getattr(gs, "choice_list", []) or []))
+        selected = tuple(
+            str(getattr(c, "name", c))
+            for c in (getattr(scr, "selected_cards", []) or [])
+        ) if scr is not None else ()
+        cards = tuple(
+            str(getattr(c, "name", c))
+            for c in (getattr(scr, "cards", []) or [])[:8]
+        ) if scr is not None else ()
+        commands = tuple(sorted(str(c) for c in (getattr(gs, "available_commands", []) or [])))
+        return repr((
+            screen_name,
+            int(getattr(gs, "act", 0) or 0),
+            int(getattr(gs, "floor", 0) or 0),
+            bool(getattr(gs, "proceed_available", False)),
+            bool(getattr(gs, "cancel_available", False)),
+            commands,
+            choice_list,
+            bool(getattr(scr, "confirm_up", False)) if scr is not None else False,
+            int(getattr(scr, "num_cards", 0) or 0) if scr is not None else 0,
+            selected,
+            cards,
+        ))
+
+    def _track_state_progress(self, gs, screen_name: str, in_combat: bool) -> int:
+        if in_combat:
+            self._progress_key = ""
+            self._no_progress_count = 0
+            return 0
+        key = self._state_progress_key(gs, screen_name)
+        if key == self._progress_key:
+            self._no_progress_count += 1
+        else:
+            self._progress_key = key
+            self._no_progress_count = 1
+        return self._no_progress_count
+
+    def _first_enabled_event_choice(self, gs):
+        scr = getattr(gs, "screen", None)
+        options = list(getattr(scr, "options", []) or []) if scr else []
+        for i, opt in enumerate(options):
+            if bool(getattr(opt, "disabled", False)):
+                continue
+            choice_idx = getattr(opt, "choice_index", None)
+            try:
+                return int(choice_idx) if choice_idx is not None else i
+            except Exception:
+                return i
+        return 0
+
+    def _force_progress_action(self, gs, screen_name: str, why: str) -> Action:
+        commands = set(getattr(gs, "available_commands", []) or [])
+        choice_list = list(getattr(gs, "choice_list", []) or [])
+        log(f"{why} on {screen_name}; forcing progress "
+            f"commands={sorted(commands)} choices={choice_list[:5]}")
+
+        # GRID/forge confirmation frequently exposes only the `confirm` command.
+        if "confirm" in commands:
+            return Action("confirm")
+        if bool(getattr(gs, "proceed_available", False)) or "proceed" in commands:
+            return Action("proceed")
+
+        if screen_name == "EVENT":
+            return ChooseAction(choice_index=self._first_enabled_event_choice(gs))
+        if "choose" in commands or choice_list:
+            return ChooseAction(choice_index=0)
+
+        for cmd in ("cancel", "leave", "return", "skip"):
+            if cmd in commands:
+                return Action(cmd)
+        if bool(getattr(gs, "cancel_available", False)):
+            return Action("leave")
+        return Action("state")
 
     def on_state_change(self, gs) -> Action:
         try:
@@ -397,6 +478,16 @@ class WorkerAgent:
             proceed_avail = bool(getattr(gs, "proceed_available", False))
             return Action("proceed") if proceed_avail else Action("state")
 
+        no_progress = self._track_state_progress(gs, screen_name, in_combat)
+        if no_progress >= 12 and self._progress_key != self._progress_dumped_key:
+            _dump_stuck_state(gs, screen_name, self.worker_id,
+                              no_progress, self._recent_actions)
+            log(f"NO PROGRESS on {screen_name} — dumped to bug_debug.log")
+            self._progress_dumped_key = self._progress_key
+        if no_progress >= self._NO_PROGRESS_HARD_LIMIT:
+            self._no_progress_count = 0
+            return self._force_progress_action(gs, screen_name, "HARD NO-PROGRESS")
+
         auto = self._auto_handle_screen(gs, screen_name)
         if auto is not None:
             if VERBOSE:
@@ -416,13 +507,8 @@ class WorkerAgent:
                 if cancel_avail:
                     return Action("leave")
                 if self._stuck_count >= self._STUCK_HARD_LIMIT:
-                    if screen_name == "EVENT" and list(getattr(gs, "choice_list", []) or []):
-                        log(f"HARD STUCK ({self._stuck_count} iters) on EVENT — choosing first enabled option")
-                        self._stuck_count = 0
-                        return ChooseAction(choice_index=0)
-                    log(f"HARD STUCK ({self._stuck_count} iters) on {screen_name} — polling state")
                     self._stuck_count = 0
-                    return Action("state")
+                    return self._force_progress_action(gs, screen_name, "HARD STUCK heuristic")
             return auto
 
         action, log_prob, value = self.trainer.predict(obs, mask)
@@ -439,13 +525,8 @@ class WorkerAgent:
                 _dump_stuck_state(gs, screen_name, self.worker_id,
                                   self._stuck_count, self._recent_actions)
                 self._stuck_dumped_key = self._stuck_key
-            if screen_name == "EVENT" and list(getattr(gs, "choice_list", []) or []):
-                log(f"HARD STUCK RL ({self._stuck_count} iters) on EVENT — choosing first enabled option")
-                self._stuck_count = 0
-                return ChooseAction(choice_index=0)
-            log(f"HARD STUCK RL ({self._stuck_count} iters) on {screen_name} — polling state")
             self._stuck_count = 0
-            return Action("state")
+            return self._force_progress_action(gs, screen_name, "HARD STUCK RL")
 
         if VERBOSE:
             log(f"  -> RL: action={action} ({spire_action.command}) "
@@ -543,6 +624,9 @@ class WorkerAgent:
             self._stuck_key = ""
             self._stuck_count = 0
             self._stuck_dumped_key = ""
+            self._progress_key = ""
+            self._no_progress_count = 0
+            self._progress_dumped_key = ""
             self.fight_tracker.reset_game()
             self._recent_actions.clear()
             self.initialized = False

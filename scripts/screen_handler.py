@@ -287,6 +287,8 @@ def recover_from_command_error(err: str) -> Action:
     # available. Choosing index 0 advances; returning just reopens the loop.
     if "choose" in possible and ("invalid command: proceed" in lower or "proceed" in lower):
         return ChooseAction(choice_index=0)
+    if "confirm" in possible:
+        return Action("confirm")
     if "state" in possible:
         return Action("state")
     if "return" in possible:
@@ -722,12 +724,12 @@ def auto_handle_screen(
     # ---- HAND_SELECT ----
     if screen_name == "HAND_SELECT":
         if scr and getattr(scr, "can_pick_zero", False) and proceed_avail:
-            return Action("proceed")
+            return _proceed_or_state(gs)
         selected = list(getattr(scr, "selected_cards", []) or [])
         num_needed = int(getattr(scr, "num_cards", 1) or 1) if scr else 1
         if len(selected) >= num_needed:
             if proceed_avail:
-                return Action("proceed")
+                return _proceed_or_state(gs)
             return Action("state")
         cards = choice_list or [c.name for c in getattr(scr, "cards", []) or []]
         if heuristic_all:
@@ -744,13 +746,13 @@ def auto_handle_screen(
     # ---- GRID ----
     if screen_name == "GRID":
         if scr and getattr(scr, "confirm_up", False):
-            return Action("proceed")
+            return _proceed_or_state(gs)
         num_needed = int(getattr(scr, "num_cards", 1) or 1) if scr else 1
         selected = list(getattr(scr, "selected_cards", []) or []) if scr else []
         already = len(selected)
         if already >= num_needed:
             if proceed_avail:
-                return Action("proceed")
+                return _proceed_or_state(gs)
             return Action("state")
         selected_names = {getattr(c, "name", "").lower() for c in selected}
         grid_choices = choice_list or [
@@ -766,7 +768,7 @@ def auto_handle_screen(
                 if idx is not None:
                     return ChooseAction(choice_index=idx)
                 if proceed_avail:
-                    return Action("proceed")
+                    return _proceed_or_state(gs)
                 if cancel_avail:
                     return Action("leave")
                 return Action("state")
@@ -782,7 +784,7 @@ def auto_handle_screen(
                 return ChooseAction(choice_index=0)
             if any_number:
                 if proceed_avail:
-                    return Action("proceed")
+                    return _proceed_or_state(gs)
                 return ChooseAction(choice_index=0)
             unselected = [(i, c) for i, c in enumerate(grid_choices)
                           if str(c).lower() not in selected_names]
@@ -791,7 +793,7 @@ def auto_handle_screen(
             best_idx = _pick_from_unselected(unselected, scr)
             return ChooseAction(choice_index=best_idx)
         if proceed_avail:
-            return Action("proceed")
+            return _proceed_or_state(gs)
         if cancel_avail:
             return Action("leave")
         return Action("state")
@@ -846,10 +848,10 @@ def auto_handle_screen(
                     _SHOP_VISITED_KEYS.add(shop_key)
                     return ChooseAction(choice_index=i)
         if proceed_avail:
-            return Action("proceed")
+            return _proceed_or_state(gs)
         if cancel_avail:
             return Action("cancel")
-        return Action("proceed")
+        return Action("state")
 
     if screen_name == "SHOP_SCREEN":
         gold = int(getattr(gs, "gold", 0) or 0)
@@ -896,7 +898,7 @@ def auto_handle_screen(
             ]
             if not enabled:
                 if proceed_avail:
-                    return Action("proceed")
+                    return _proceed_or_state(gs)
                 if cancel_avail:
                     return Action("leave")
                 return Action("state")
@@ -906,7 +908,7 @@ def auto_handle_screen(
                 return ChooseAction(choice_index=choice_idx if choice_idx is not None else idx)
             return None
         if proceed_avail:
-            return Action("proceed")
+            return _proceed_or_state(gs)
         return Action("state")
 
     # ---- Decision screens: heuristic_all handles, otherwise RL decides ----
@@ -915,7 +917,7 @@ def auto_handle_screen(
         if heuristic_all and choice_list:
             return ChooseAction(choice_index=pick_boss_relic(choice_list))
         if heuristic_all or not choice_list:
-            return Action("proceed") if proceed_avail else Action("state")
+            return _proceed_or_state(gs) if proceed_avail else Action("state")
         return None
 
     if screen_name == "CARD_REWARD":
@@ -924,14 +926,14 @@ def auto_handle_screen(
         if heuristic_all and choice_list:
             return ChooseAction(choice_index=pick_card_reward(choice_list, gs))
         if heuristic_all or not choice_list:
-            return Action("proceed") if proceed_avail else Action("state")
+            return _proceed_or_state(gs) if proceed_avail else Action("state")
         return None
 
     if screen_name == "REST":
         if heuristic_all and choice_list:
             return ChooseAction(choice_index=pick_rest(choice_list, gs))
         if heuristic_all or not choice_list:
-            return Action("proceed") if proceed_avail else Action("state")
+            return _proceed_or_state(gs) if proceed_avail else Action("state")
         return None
 
     # ---- Generic fallback ----
@@ -939,14 +941,14 @@ def auto_handle_screen(
         if choice_list:
             return ChooseAction(choice_index=0)
         if proceed_avail:
-            return Action("proceed")
+            return _proceed_or_state(gs)
         if cancel_avail:
             return Action("leave")
         return Action("state")
 
     if not choice_list and not cancel_avail:
         if proceed_avail:
-            return Action("proceed")
+            return _proceed_or_state(gs)
         return Action("state")
     if not choice_list and cancel_avail and not proceed_avail:
         return Action("leave")
@@ -955,6 +957,6 @@ def auto_handle_screen(
         if choice_list:
             return ChooseAction(choice_index=0)
         if proceed_avail:
-            return Action("proceed")
+            return _proceed_or_state(gs)
 
     return None

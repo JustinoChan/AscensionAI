@@ -44,10 +44,46 @@ ROOT = _ROOT
 SCRIPTS = ROOT / "scripts"
 VENV_PYTHON = ROOT / ".venv" / "Scripts" / "python.exe"
 STS_DIR = Path(r"C:\Program Files (x86)\Steam\steamapps\common\SlayTheSpire")
-MTS_LAUNCHER = STS_DIR / "mts-launcher.jar"
 JAVA_EXE = STS_DIR / "jre" / "bin" / "java.exe"
+JAVAW_EXE = STS_DIR / "jre" / "bin" / "javaw.exe"
+# Use javaw.exe for GUI launches by default so ModTheSpire does not open a
+# duplicate console window. Set ASCENSIONAI_SHOW_MTS_CONSOLE=1 to debug the
+# raw ModTheSpire console with java.exe.
+SHOW_MTS_CONSOLE = os.environ.get("ASCENSIONAI_SHOW_MTS_CONSOLE", "").strip().lower() in {"1", "true", "yes", "on"}
+GAME_JAVA_EXE = JAVA_EXE if SHOW_MTS_CONSOLE or not JAVAW_EXE.exists() else JAVAW_EXE
+
+# Use the real Steam Workshop ModTheSpire.jar when available. The common
+# SlayTheSpire\mts-launcher.jar wrapper can still show the launcher even when
+# --skip-launcher / --profile are passed, while ModTheSpire.jar accepts those
+# flags directly. Override with ASCENSIONAI_MTS_JAR if your Workshop path differs.
+_DEFAULT_MTS_JAR = Path(
+    r"C:\Program Files (x86)\Steam\steamapps\workshop\content\646570\1605060445\ModTheSpire.jar"
+)
+_MTS_JAR_ENV = os.environ.get("ASCENSIONAI_MTS_JAR", "").strip()
+if _MTS_JAR_ENV:
+    MTS_LAUNCHER = Path(_MTS_JAR_ENV)
+elif _DEFAULT_MTS_JAR.exists():
+    MTS_LAUNCHER = _DEFAULT_MTS_JAR
+else:
+    # Fallback for non-Workshop installs. This may show the launcher on some setups.
+    MTS_LAUNCHER = STS_DIR / "mts-launcher.jar"
+
 CONFIG_DIR = Path(os.environ.get("LOCALAPPDATA", "")) / "ModTheSpire" / "CommunicationMod"
 CONFIG_FILE = CONFIG_DIR / "config.properties"
+
+# Safety: do not synthesize global mouse/keyboard input.
+# The ModTheSpire auto-Play fallback used SetForegroundWindow, keybd_event,
+# SetCursorPos, and mouse_event. With multiple workers/restarts, that can steal
+# focus, teleport the cursor, and click outside the game. Keep this False for
+# overnight runs.
+AUTO_PRESS_MTS_PLAY = False
+
+# Optional deterministic launcher controls. Default to your saved ModTheSpire
+# profile so every GUI launch mode skips the launcher and goes straight into STS.
+# Override with ASCENSIONAI_MTS_PROFILE="" to disable profile launching, or use
+# ASCENSIONAI_MTS_MODS="basemod,CommunicationMod,SuperFastMode" for exact mod IDs.
+MTS_PROFILE = os.environ.get("ASCENSIONAI_MTS_PROFILE", "AscensionAI").strip()
+MTS_MODS = os.environ.get("ASCENSIONAI_MTS_MODS", "").strip()
 
 # ---------------------------------------------------------------------------
 # File-based debug logger — always writes, survives GUI crashes
@@ -66,6 +102,8 @@ _logger.info(f"Platform: {platform.platform()}")
 _logger.info(f"ROOT: {ROOT}")
 _logger.info(f"VENV_PYTHON: {VENV_PYTHON}  exists={VENV_PYTHON.exists()}")
 _logger.info(f"JAVA_EXE: {JAVA_EXE}  exists={JAVA_EXE.exists()}")
+_logger.info(f"JAVAW_EXE: {JAVAW_EXE}  exists={JAVAW_EXE.exists()}")
+_logger.info(f"GAME_JAVA_EXE: {GAME_JAVA_EXE}  exists={GAME_JAVA_EXE.exists()} show_console={SHOW_MTS_CONSOLE}")
 _logger.info(f"MTS_LAUNCHER: {MTS_LAUNCHER}  exists={MTS_LAUNCHER.exists()}")
 _logger.info(f"CONFIG_FILE: {CONFIG_FILE}")
 _logger.info(f"STS_DIR: {STS_DIR}  exists={STS_DIR.exists()}")
@@ -199,22 +237,47 @@ def build_command(mode: str, worker_id: int = 1, games: int = 20,
 
 
 def launch_sts(skip_launcher: bool = False) -> subprocess.Popen:
-    args = [str(JAVA_EXE), "-jar", str(MTS_LAUNCHER)]
-    if skip_launcher:
+    args = [str(GAME_JAVA_EXE), "-jar", str(MTS_LAUNCHER)]
+
+    # Prefer ModTheSpire's real CLI flags over any GUI automation.
+    # --mods implies launcher skipping on supported ModTheSpire versions.
+    # If a profile is configured, use it for every launch mode, not only worker
+    # relaunches, so the GUI never pauses on the ModTheSpire menu.
+    if MTS_MODS:
+        args.extend(["--mods", MTS_MODS])
+    elif MTS_PROFILE:
+        args.extend(["--skip-launcher", "--profile", MTS_PROFILE])
+    elif skip_launcher:
         args.append("--skip-launcher")
+
     _logger.info(f"Launching STS: {args}  cwd={STS_DIR}")
-    proc = subprocess.Popen(
-        args,
-        cwd=str(STS_DIR),
-        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
-    )
+    popen_kwargs = {
+        "cwd": str(STS_DIR),
+        "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP,
+    }
+
+    # The GUI already tails AscensionAI logs. Hiding ModTheSpire's raw console
+    # prevents the extra cmd window that duplicates the launcher output.
+    if not SHOW_MTS_CONSOLE:
+        popen_kwargs["creationflags"] |= subprocess.CREATE_NO_WINDOW
+        popen_kwargs["stdin"] = subprocess.DEVNULL
+        popen_kwargs["stdout"] = subprocess.DEVNULL
+        popen_kwargs["stderr"] = subprocess.DEVNULL
+
+    proc = subprocess.Popen(args, **popen_kwargs)
     _logger.info(f"STS process spawned: PID {proc.pid}")
-    if skip_launcher:
+
+    if skip_launcher and AUTO_PRESS_MTS_PLAY:
         threading.Thread(
             target=_auto_press_mts_play,
             args=(proc.pid,),
             daemon=True,
         ).start()
+    elif skip_launcher:
+        _logger.debug(
+            "ModTheSpire auto-Play fallback disabled; no synthetic "
+            "mouse/keyboard input will be sent"
+        )
     return proc
 
 
@@ -260,68 +323,26 @@ def _find_mts_launcher_windows() -> list[int]:
 
 
 def _click_mts_play(hwnd: int) -> bool:
-    """Press Enter/click the Play button on a visible ModTheSpire launcher."""
-    try:
-        import ctypes
-        from ctypes import wintypes
-
-        user32 = ctypes.windll.user32
-        title = _get_window_title(user32, hwnd)
-        if not title.startswith("ModTheSpire") or not user32.IsWindowVisible(wintypes.HWND(hwnd)):
-            return False
-
-        _logger.info(f"ModTheSpire launcher detected ({title}); pressing Play")
-        user32.ShowWindow(wintypes.HWND(hwnd), 9)  # SW_RESTORE
-        user32.SetForegroundWindow(wintypes.HWND(hwnd))
-        time.sleep(0.2)
-
-        # The launcher normally focuses Play by default, so Enter is the least
-        # intrusive path. If focus is elsewhere, fall back to the button area.
-        user32.keybd_event(0x0D, 0, 0, 0)  # VK_RETURN down
-        user32.keybd_event(0x0D, 0, 2, 0)  # KEYEVENTF_KEYUP
-        time.sleep(1.5)
-
-        title = _get_window_title(user32, hwnd)
-        if not title.startswith("ModTheSpire") or not user32.IsWindowVisible(wintypes.HWND(hwnd)):
-            return True
-
-        rect = wintypes.RECT()
-        if not user32.GetWindowRect(wintypes.HWND(hwnd), ctypes.byref(rect)):
-            return False
-
-        width = max(1, rect.right - rect.left)
-        x = rect.left + max(80, min(120, width // 7))
-        y = rect.bottom - 22
-
-        old_pos = wintypes.POINT()
-        have_old_pos = bool(user32.GetCursorPos(ctypes.byref(old_pos)))
-        user32.SetForegroundWindow(wintypes.HWND(hwnd))
-        time.sleep(0.1)
-        user32.SetCursorPos(x, y)
-        time.sleep(0.05)
-        user32.mouse_event(0x0002, 0, 0, 0, 0)  # MOUSEEVENTF_LEFTDOWN
-        user32.mouse_event(0x0004, 0, 0, 0, 0)  # MOUSEEVENTF_LEFTUP
-        if have_old_pos:
-            user32.SetCursorPos(old_pos.x, old_pos.y)
-        return True
-    except Exception as e:
-        _logger.warning(f"Failed to auto-press ModTheSpire Play: {e}")
-        return False
+    """Disabled safety stub: never send global keyboard or mouse input."""
+    _logger.warning(
+        "ModTheSpire auto-Play was requested but is disabled to prevent "
+        "cursor teleporting, focus stealing, and accidental clicks."
+    )
+    return False
 
 
-def _auto_press_mts_play(proc_pid: int, timeout_sec: float = 45.0):
-    """Click Play if --skip-launcher fails and ModTheSpire shows its launcher."""
-    deadline = time.time() + timeout_sec
-    clicked: set[int] = set()
-    while time.time() < deadline:
-        windows = [hwnd for hwnd in _find_mts_launcher_windows() if hwnd not in clicked]
-        if windows:
-            for hwnd in windows:
-                if _click_mts_play(hwnd):
-                    clicked.add(hwnd)
-            return
-        time.sleep(0.5)
-    _logger.debug(f"No ModTheSpire launcher fallback needed for PID {proc_pid}")
+def _auto_press_mts_play(proc_pid: int, timeout_sec: float = 90.0):
+    """Disabled: do not interact with the desktop to press ModTheSpire Play.
+
+    The RL workers communicate through CommunicationMod and do not need mouse or
+    keyboard control. If --skip-launcher fails, the GUI monitor should kill/restart
+    the stuck process instead of sending global input.
+    """
+    _logger.warning(
+        f"ModTheSpire launcher fallback disabled for PID {proc_pid}; "
+        "no mouse/keyboard input was sent"
+    )
+    return
 
 
 # ---------------------------------------------------------------------------
@@ -391,6 +412,7 @@ class AscensionApp:
         self._worker_commands: dict[int, str] = {}
         self._worker_restarts: dict[int, int] = {}
         self._worker_launch_time: dict[int, float] = {}
+        self._parallel_launch_started_at: float = 0.0
         self._n_workers: int = 0
 
         self.hw = detect_hardware()
@@ -1397,6 +1419,7 @@ class AscensionApp:
             self._worker_commands.clear()
             self._worker_restarts.clear()
             self._worker_launch_time.clear()
+            self._parallel_launch_started_at = time.time()
             self._n_workers = 0
             self._with_trainer = with_trainer
             self._trainer_cmd = None
@@ -1425,6 +1448,10 @@ class AscensionApp:
                     "--model", str(ROOT / "models" / "ppo_sts.pt"),
                     "--data", str(ROOT / "rollouts_shared"),
                     "--delete-consumed",
+                    "--batch-games", "8",
+                    "--lr", "3e-5",
+                    "--bc-coef", "0.10",
+                    "--max-rollout-lag", "4",
                     "--ent-coef", str(self._ent_value),
                     "--device", "gpu" if self.gpu_var.get() else "cpu",
                 ]
@@ -1469,6 +1496,7 @@ class AscensionApp:
                 write_config(cmd, verbose=bool(self.verbose_var.get()))
                 self._append_log(tab_name, f"Config written for worker {i}, launching STS...")
 
+                before_java_pids = self._sts_java_pids()
                 proc = launch_sts(skip_launcher=True)
                 self.processes.append(proc)
                 self.worker_launcher_pids[i] = proc.pid
@@ -1481,7 +1509,7 @@ class AscensionApp:
 
                 threading.Thread(
                     target=self._capture_sts_pids_for_worker,
-                    args=(proc.pid, i),
+                    args=(proc.pid, i, before_java_pids),
                     daemon=True,
                 ).start()
                 _logger.debug(f"Worker {i}: PID capture thread started")
@@ -1514,7 +1542,7 @@ class AscensionApp:
 
     # ----- Worker health monitor -----
 
-    _MAX_RESTARTS = 1000
+    _MAX_RESTARTS = 20
     _WORKER_BOOT_GRACE_SEC = 180
     _WORKER_HEARTBEAT_TIMEOUT_SEC = 360
     _MONITOR_INTERVAL_SEC = 30
@@ -1563,6 +1591,7 @@ class AscensionApp:
                     self._stop_single_worker(worker_id)
                     self._relaunch_worker(worker_id)
                     time.sleep(15.0)
+            self._kill_excess_unowned_sts_instances("monitor")
         _logger.info("_monitor_workers: loop ended")
 
     def _monitor_trainer(self):
@@ -1625,6 +1654,7 @@ class AscensionApp:
                 _logger.error(f"_relaunch_worker: no stored command for worker {worker_id}")
                 return
             write_config(cmd, verbose=bool(self.verbose_var.get()))
+            before_java_pids = self._sts_java_pids()
             proc = launch_sts(skip_launcher=True)
             self.processes.append(proc)
             self.worker_launcher_pids[worker_id] = proc.pid
@@ -1637,7 +1667,7 @@ class AscensionApp:
 
             threading.Thread(
                 target=self._capture_sts_pids_for_worker,
-                args=(proc.pid, worker_id),
+                args=(proc.pid, worker_id, before_java_pids),
                 daemon=True,
             ).start()
         except Exception as e:
@@ -1830,6 +1860,97 @@ class AscensionApp:
 
         self.root.after(0, self._stop)
 
+    def _is_sts_java_process(self, proc) -> bool:
+        """Best-effort test for Java processes that belong to Slay the Spire/ModTheSpire."""
+        try:
+            name = proc.name().lower()
+            if name not in ("java.exe", "javaw.exe"):
+                return False
+            sts_dir_lower = str(STS_DIR).lower()
+            cwd = ""
+            try:
+                cwd = (proc.cwd() or "").lower()
+            except Exception:
+                cwd = ""
+            cmdline = " ".join(proc.cmdline() or []).lower()
+            sts_keywords = ("slaythespire", "desktop-1.0.jar",
+                            "mts-launcher", "modthespire")
+            return (sts_dir_lower in cwd) or any(kw in cmdline for kw in sts_keywords)
+        except Exception:
+            return False
+
+    def _sts_java_pids(self) -> set[int]:
+        """Return all visible STS/ModTheSpire java PIDs."""
+        try:
+            import psutil
+        except ImportError:
+            return set()
+        out: set[int] = set()
+        for p in psutil.process_iter(["pid", "name"]):
+            try:
+                if self._is_sts_java_process(p):
+                    out.add(int(p.pid))
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+        return out
+
+    def _kill_excess_unowned_sts_instances(self, reason: str = "monitor") -> int:
+        """Kill extra STS/MTS java processes not attached to live worker Python.
+
+        ModTheSpire can detach from the launcher, so relaunching a worker after a
+        crash used to leave the old game/menu alive. During parallel training we
+        expect roughly one Java process per worker. If there are more, prefer the
+        Java PIDs that are parents of live rollout_worker.py processes and kill
+        newer unmatched Java processes from this training run.
+        """
+        if not getattr(self, "running", False) or int(getattr(self, "_n_workers", 0) or 0) <= 0:
+            return 0
+        try:
+            import psutil
+        except ImportError:
+            return 0
+
+        all_java = self._sts_java_pids()
+        if len(all_java) <= int(getattr(self, "_n_workers", 0) or 0):
+            return 0
+
+        worker_parent_java: set[int] = set()
+        for worker_id in list(self._worker_commands.keys()):
+            java_pids, _py_pids = self._find_pids_for_worker(worker_id)
+            worker_parent_java |= java_pids
+            if java_pids:
+                self.worker_sts_pids.setdefault(worker_id, set()).update(java_pids)
+
+        candidates = sorted(all_java - worker_parent_java)
+        killed = 0
+        for pid in candidates:
+            # Keep pre-existing manually-opened STS sessions if the user had one
+            # before starting the parallel run. Kill only processes born during
+            # this run unless we cannot read create_time.
+            try:
+                proc = psutil.Process(pid)
+                started = float(proc.create_time())
+                run_start = float(getattr(self, "_parallel_launch_started_at", 0.0) or 0.0)
+                if run_start and started < run_start - 10.0:
+                    _logger.info(f"Skipping pre-existing STS java PID {pid} during {reason}")
+                    continue
+                _logger.warning(f"Killing excess STS/MTS java PID {pid} during {reason}; "
+                                f"all={sorted(all_java)} worker_parent_java={sorted(worker_parent_java)}")
+                proc.kill()
+                killed += 1
+                # Remove from any stale cache entry.
+                for cached in self.worker_sts_pids.values():
+                    cached.discard(pid)
+                if len(all_java) - killed <= int(getattr(self, "_n_workers", 0) or 0):
+                    break
+            except psutil.NoSuchProcess:
+                continue
+            except psutil.AccessDenied:
+                _logger.warning(f"Access denied killing excess STS java PID {pid}")
+            except Exception as e:
+                _logger.warning(f"Failed to kill excess STS java PID {pid}: {e}")
+        return killed
+
     def _find_pids_for_worker(self, worker_id: int) -> tuple[set[int], set[int]]:
         """Return (java_pids, python_pids) belonging to a specific worker."""
         java_pids: set[int] = set()
@@ -1882,18 +2003,39 @@ class AscensionApp:
                       f"found java={java_pids}, py={py_pids}")
         return java_pids, py_pids
 
-    def _capture_sts_pids_for_worker(self, launcher_pid: int, worker_id: int):
-        """Best-effort snapshot of worker N's STS java PID once it's running."""
-        _logger.debug(f"_capture_sts_pids: worker {worker_id}, launcher PID {launcher_pid}")
+    def _capture_sts_pids_for_worker(self, launcher_pid: int, worker_id: int,
+                                     before_java_pids: set[int] | None = None):
+        """Best-effort snapshot of worker N's STS/MTS java PIDs once launched.
+
+        A worker can fail before rollout_worker.py starts, leaving only a
+        ModTheSpire launcher/menu. Capture newly-created Java PIDs too, not only
+        Java parents of Python worker processes, so restart/stop can clean them.
+        """
+        before_java_pids = set(before_java_pids or set())
+        _logger.debug(f"_capture_sts_pids: worker {worker_id}, launcher PID {launcher_pid}, "
+                      f"before_java={sorted(before_java_pids)}")
         deadline = time.time() + 180.0
         polls = 0
+        captured_new = False
         while time.time() < deadline and self.running:
             java_pids, _ = self._find_pids_for_worker(worker_id)
+            current_java = self._sts_java_pids()
+            new_java = current_java - before_java_pids
             polls += 1
+            if new_java:
+                self.worker_sts_pids.setdefault(worker_id, set()).update(new_java)
+                if not captured_new:
+                    _logger.info(f"Captured newly spawned STS/MTS PIDs for worker {worker_id}: "
+                                 f"{sorted(new_java)} (after {polls} polls)")
+                    captured_new = True
             if java_pids:
                 self.worker_sts_pids.setdefault(worker_id, set()).update(java_pids)
-                _logger.info(f"Captured STS PIDs for worker {worker_id}: {java_pids} "
-                             f"(after {polls} polls)")
+                _logger.info(f"Captured worker-parent STS PIDs for worker {worker_id}: "
+                             f"{sorted(java_pids)} (after {polls} polls)")
+                return
+            if captured_new and polls >= 5:
+                # We have at least the Java/menu PID. If Python never starts,
+                # health monitoring can kill this cached PID and relaunch cleanly.
                 return
             time.sleep(2.0)
         _logger.warning(f"_capture_sts_pids: worker {worker_id} timed out after {polls} polls "
@@ -2135,7 +2277,11 @@ class AscensionApp:
             issues.append(f"STS Java runtime not found:\n  {JAVA_EXE}\n  Is Slay the Spire installed via Steam?")
         _logger.debug(f"MTS_LAUNCHER: {MTS_LAUNCHER}  exists={MTS_LAUNCHER.exists()}")
         if not MTS_LAUNCHER.exists():
-            issues.append(f"ModTheSpire not found:\n  {MTS_LAUNCHER}\n  Install Mod the Spire via Steam Workshop.")
+            issues.append(
+                f"ModTheSpire jar not found:\n  {MTS_LAUNCHER}\n"
+                "Install Mod the Spire via Steam Workshop, or set "
+                "ASCENSIONAI_MTS_JAR to the full ModTheSpire.jar path."
+            )
         if issues:
             _logger.warning(f"Validation failed: {len(issues)} issue(s)")
         else:

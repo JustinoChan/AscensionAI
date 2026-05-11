@@ -88,6 +88,13 @@ class PPOTrainer:
         self.bc_coef = 0.0
         self.bc_batch_size = batch_size
 
+    def get_lr(self) -> float:
+        """Return the current optimizer learning rate."""
+        try:
+            return float(self.optimizer.param_groups[0].get("lr", 0.0))
+        except Exception:
+            return 0.0
+
     def set_lr(self, lr: float) -> None:
         """Reset optimizer learning rate after loading a checkpoint."""
         for group in self.optimizer.param_groups:
@@ -239,6 +246,7 @@ class PPOTrainer:
         total_pg_loss = 0.0
         total_vf_loss = 0.0
         total_ent = 0.0
+        total_norm_ent = 0.0
         total_kl = 0.0
         total_clip_frac = 0.0
         total_chosen_prob = 0.0
@@ -268,7 +276,14 @@ class PPOTrainer:
                 dist = torch.distributions.Categorical(logits=logits)
 
                 new_lp = dist.log_prob(b_act)
-                entropy = dist.entropy().mean()
+                entropy_per_sample = dist.entropy()
+                entropy = entropy_per_sample.mean()
+                # Raw entropy is hard to compare across STS screens because the
+                # number of legal actions varies wildly. Normalize by log(N legal
+                # actions) so auto-tuning can distinguish "confident" from
+                # "forced by the mask" decisions.
+                legal_counts = b_mask.sum(dim=1).clamp(min=2).float()
+                normalized_entropy = (entropy_per_sample / torch.log(legal_counts)).mean()
                 values = self.value_head(features).squeeze(-1)
 
                 ratio = (new_lp - b_old_lp).exp()
@@ -303,6 +318,7 @@ class PPOTrainer:
                 total_pg_loss += pg_loss.item()
                 total_vf_loss += vf_loss.item()
                 total_ent += entropy.item()
+                total_norm_ent += normalized_entropy.item()
                 with torch.no_grad():
                     batch_kl = (b_old_lp - new_lp).mean().item()
                     total_kl += batch_kl
@@ -330,6 +346,7 @@ class PPOTrainer:
             "pg_loss": total_pg_loss / num_batches,
             "vf_loss": total_vf_loss / num_batches,
             "entropy": total_ent / num_batches,
+            "normalized_entropy": total_norm_ent / num_batches,
             "approx_kl": total_kl / num_batches,
             "clip_fraction": total_clip_frac / num_batches,
             "explained_variance": explained_variance,
@@ -339,6 +356,8 @@ class PPOTrainer:
             "mean_chosen_action_prob": total_chosen_prob / num_batches,
             "bc_loss": total_bc_loss / bc_batches if bc_batches else 0.0,
             "bc_coef": self.bc_coef,
+            "ent_coef": self.ent_coef,
+            "lr": self.get_lr(),
             "early_stop": early_stop,
         }
 

@@ -62,6 +62,7 @@ _STATS_COLUMNS = [
     "mean_chosen_action_prob", "bc_loss", "bc_coef", "early_stop",
     "stale_rollouts", "legacy_rollouts", "skipped_rollouts",
     "batch_model_updates", "batch_checkpoint_ids",
+    "normalized_entropy", "lr", "ent_coef", "auto_tune_action",
 ]
 
 def _init_stats_csv():
@@ -239,6 +240,136 @@ def delete_files(paths: List[str]) -> None:
             log(f"Failed to delete {f}: {e}")
 
 
+def _clamp(value: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, value))
+
+
+def _current_lr(trainer: PPOTrainer) -> float:
+    try:
+        return float(trainer.get_lr())
+    except Exception:
+        try:
+            return float(trainer.optimizer.param_groups[0].get("lr", 0.0))
+        except Exception:
+            return 0.0
+
+
+def _set_trainer_lr(trainer: PPOTrainer, lr: float) -> None:
+    try:
+        trainer.set_lr(lr)
+    except Exception:
+        for group in trainer.optimizer.param_groups:
+            group["lr"] = float(lr)
+
+
+def _set_bc_coef_if_available(trainer: PPOTrainer, value: float, lo: float, hi: float) -> None:
+    """Change BC anchor strength only when a BC reference is actually loaded."""
+    if getattr(trainer, "bc_obs_t", None) is None:
+        trainer.bc_coef = 0.0
+        return
+    trainer.bc_coef = _clamp(float(value), lo, hi)
+
+
+def _apply_auto_tune(trainer: PPOTrainer, stats: dict, args) -> str:
+    """Tune update strength first, then exploration.
+
+    The old entropy-only controller could keep increasing randomness when the
+    real symptom was under-updating. This controller targets a healthy PPO move
+    size using KL/clip fraction, then only adjusts entropy once PPO is moving.
+    """
+    kl = float(stats.get("approx_kl", 0.0) or 0.0)
+    clip = float(stats.get("clip_fraction", 0.0) or 0.0)
+    norm_ent = float(stats.get("normalized_entropy", stats.get("entropy", 0.0)) or 0.0)
+    early_stop = int(stats.get("early_stop", 0) or 0)
+
+    old_lr = _current_lr(trainer)
+    old_ent = float(getattr(trainer, "ent_coef", 0.0) or 0.0)
+    old_bc = float(getattr(trainer, "bc_coef", 0.0) or 0.0)
+
+    action = "hold"
+
+    if kl < args.auto_low_kl and clip < args.auto_low_clip:
+        # The policy barely moved. Make PPO stronger before adding randomness.
+        new_lr = _clamp(old_lr * args.auto_lr_up, args.auto_min_lr, args.auto_max_lr)
+        _set_trainer_lr(trainer, new_lr)
+        _set_bc_coef_if_available(
+            trainer,
+            old_bc * args.auto_bc_decay,
+            args.auto_min_bc_coef,
+            args.auto_max_bc_coef,
+        )
+        action = "under_move:lr_up_bc_down"
+
+    elif early_stop or kl > args.auto_high_kl or clip > args.auto_high_clip:
+        # The update was too aggressive. Back off and lean slightly on BC.
+        new_lr = _clamp(old_lr * args.auto_lr_down, args.auto_min_lr, args.auto_max_lr)
+        _set_trainer_lr(trainer, new_lr)
+        trainer.ent_coef = _clamp(
+            old_ent * args.auto_ent_down,
+            args.auto_min_ent_coef,
+            args.auto_max_ent_coef,
+        )
+        _set_bc_coef_if_available(
+            trainer,
+            max(old_bc * args.auto_bc_raise, old_bc + args.auto_bc_nudge),
+            args.auto_min_bc_coef,
+            args.auto_max_bc_coef,
+        )
+        action = "over_move:lr_down_ent_down_bc_up"
+
+    else:
+        # PPO movement is sane. Slowly relax the BC anchor so the policy can
+        # improve beyond the heuristic, then tune exploration inside this band.
+        _set_bc_coef_if_available(
+            trainer,
+            old_bc * args.auto_bc_slow_decay,
+            args.auto_min_bc_coef,
+            args.auto_max_bc_coef,
+        )
+        if (
+            args.auto_good_kl_low <= kl <= args.auto_good_kl_high
+            and clip < args.auto_high_clip
+        ):
+            if norm_ent < args.auto_low_norm_entropy:
+                trainer.ent_coef = _clamp(
+                    old_ent * args.auto_ent_up,
+                    args.auto_min_ent_coef,
+                    args.auto_max_ent_coef,
+                )
+                action = "healthy_low_entropy:ent_up_bc_slow_down"
+            elif norm_ent > args.auto_high_norm_entropy:
+                trainer.ent_coef = _clamp(
+                    old_ent * args.auto_ent_down,
+                    args.auto_min_ent_coef,
+                    args.auto_max_ent_coef,
+                )
+                action = "healthy_high_entropy:ent_down_bc_slow_down"
+            else:
+                action = "healthy:bc_slow_down"
+        else:
+            action = "middle:bc_slow_down"
+
+    stats["lr"] = _current_lr(trainer)
+    stats["ent_coef"] = float(getattr(trainer, "ent_coef", 0.0) or 0.0)
+    stats["bc_coef"] = float(getattr(trainer, "bc_coef", 0.0) or 0.0)
+    stats["auto_tune_action"] = action
+
+    if (
+        abs(stats["lr"] - old_lr) > 1e-12
+        or abs(stats["ent_coef"] - old_ent) > 1e-12
+        or abs(stats["bc_coef"] - old_bc) > 1e-12
+        or action != "hold"
+    ):
+        log(
+            "Auto-Tune: "
+            f"{action} | kl={kl:.5f} clip={clip:.3f} norm_ent={norm_ent:.3f} "
+            f"lr {old_lr:.2e}->{stats['lr']:.2e} "
+            f"ent_coef {old_ent:.5f}->{stats['ent_coef']:.5f} "
+            f"bc_coef {old_bc:.4f}->{stats['bc_coef']:.4f}"
+        )
+    return action
+
+
 # ---------------------------------------------------------------------------
 # Main training loop
 # ---------------------------------------------------------------------------
@@ -249,31 +380,53 @@ def main():
                         help="Model checkpoint path (load + save)")
     parser.add_argument("--data", type=str, default="rollouts_shared",
                         help="Directory where workers write .npz files")
-    parser.add_argument("--batch-games", type=int, default=60,
+    parser.add_argument("--batch-games", type=int, default=8,
                         help="Minimum game files before triggering a PPO update")
     parser.add_argument("--poll-interval", type=float, default=10.0,
                         help="Seconds between checking for new data")
     parser.add_argument("--delete-consumed", action="store_true",
                         help="Delete .npz files after training on them")
-    parser.add_argument("--lr", type=float, default=1e-5)
+    parser.add_argument("--lr", type=float, default=3e-5)
     parser.add_argument("--epochs", type=int, default=4)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--ent-coef", type=float, default=0.001,
                         help="Entropy bonus coefficient (higher = more exploration)")
     parser.add_argument("--auto-tune", action="store_true",
-                        help="Dynamically adjust ent_coef and bc_coef based on live entropy levels")
+                        help="Dynamically adjust lr, ent_coef, and bc_coef from KL/clip/normalized entropy")
     parser.add_argument("--clip", type=float, default=0.15,
                         help="PPO clip range (default: 0.15)")
     parser.add_argument("--target-kl", type=float, default=0.03,
                         help="Stop PPO epochs early when approx KL exceeds this value")
-    parser.add_argument("--max-rollout-lag", type=int, default=2,
+    parser.add_argument("--max-rollout-lag", type=int, default=4,
                         help="Reject rollouts more than N model updates behind")
     parser.add_argument("--allow-legacy-rollouts", action="store_true",
                         help="Allow rollout files without checkpoint metadata")
     parser.add_argument("--bc-demo", type=str, default=None,
                         help="Optional BC demo npz for imitation anchor loss")
-    parser.add_argument("--bc-coef", type=float, default=1.0,
+    parser.add_argument("--bc-coef", type=float, default=0.10,
                         help="BC anchor coefficient if --bc-demo exists")
+    parser.add_argument("--auto-min-lr", type=float, default=1e-6)
+    parser.add_argument("--auto-max-lr", type=float, default=1e-4)
+    parser.add_argument("--auto-lr-up", type=float, default=1.25)
+    parser.add_argument("--auto-lr-down", type=float, default=0.50)
+    parser.add_argument("--auto-min-ent-coef", type=float, default=1e-5)
+    parser.add_argument("--auto-max-ent-coef", type=float, default=0.005)
+    parser.add_argument("--auto-ent-up", type=float, default=1.10)
+    parser.add_argument("--auto-ent-down", type=float, default=0.80)
+    parser.add_argument("--auto-min-bc-coef", type=float, default=0.01)
+    parser.add_argument("--auto-max-bc-coef", type=float, default=0.20)
+    parser.add_argument("--auto-bc-decay", type=float, default=0.90)
+    parser.add_argument("--auto-bc-slow-decay", type=float, default=0.98)
+    parser.add_argument("--auto-bc-raise", type=float, default=1.10)
+    parser.add_argument("--auto-bc-nudge", type=float, default=0.01)
+    parser.add_argument("--auto-low-kl", type=float, default=0.003)
+    parser.add_argument("--auto-good-kl-low", type=float, default=0.005)
+    parser.add_argument("--auto-good-kl-high", type=float, default=0.020)
+    parser.add_argument("--auto-high-kl", type=float, default=0.030)
+    parser.add_argument("--auto-low-clip", type=float, default=0.03)
+    parser.add_argument("--auto-high-clip", type=float, default=0.25)
+    parser.add_argument("--auto-low-norm-entropy", type=float, default=0.10)
+    parser.add_argument("--auto-high-norm-entropy", type=float, default=0.35)
     parser.add_argument("--device", type=str, default="auto",
                         choices=["auto", "cpu", "gpu"],
                         help="Device for training: auto (GPU if available), cpu, or gpu")
@@ -296,6 +449,7 @@ def main():
         f"batch_size={args.batch_size}, ent_coef={args.ent_coef}, "
         f"clip={args.clip}, target_kl={args.target_kl}, "
         f"batch_games={args.batch_games}, max_rollout_lag={args.max_rollout_lag}, "
+        f"bc_coef={args.bc_coef}, auto_tune={args.auto_tune}, "
         f"allow_legacy={args.allow_legacy_rollouts}, device={device}, verbose={VERBOSE}")
 
     trainer = PPOTrainer(
@@ -436,29 +590,19 @@ def main():
             total_updates = int(getattr(trainer, "total_updates", total_updates + 1) or 0)
 
             if stats:
-                # --- NEW AUTO-TUNE LOGIC ---
+                auto_tune_action = ""
                 if getattr(args, "auto_tune", False):
-                    current_entropy = stats.get("entropy", 0.0)
-                    
-                    # Target Goldilocks Zone: 0.35 to 0.50
-                    if current_entropy < 0.35:
-                        # Too rigid: increase exploration, loosen BC anchor
-                        trainer.ent_coef = min(trainer.ent_coef * 1.1, 0.05)  # Cap at 0.05
-                        trainer.bc_coef = max(trainer.bc_coef * 0.9, 0.0)     # Decay BC towards 0
-                        log(f"Auto-Tune (Low Ent): Increased ent_coef to {trainer.ent_coef:.5f}, Decayed bc_coef to {trainer.bc_coef:.4f}")
-                        
-                    elif current_entropy > 0.50:
-                        # Too chaotic: decrease exploration, tighten BC anchor slightly
-                        trainer.ent_coef = max(trainer.ent_coef * 0.9, 0.001) # Floor at 0.001
-                        trainer.bc_coef = min(trainer.bc_coef + 0.05, 1.0)    # Nudge BC up
-                        log(f"Auto-Tune (High Ent): Decreased ent_coef to {trainer.ent_coef:.5f}, Raised bc_coef to {trainer.bc_coef:.4f}")
-                # ---------------------------
+                    auto_tune_action = _apply_auto_tune(trainer, stats, args)
 
                 log(f"Update #{total_updates}: pg={stats['pg_loss']:.4f} "
                     f"vf={stats['vf_loss']:.4f} ent={stats['entropy']:.4f} "
+                    f"norm_ent={stats.get('normalized_entropy', 0.0):.3f} "
                     f"kl={stats.get('approx_kl', 0.0):.5f} "
                     f"clip={stats.get('clip_fraction', 0.0):.3f} "
                     f"ev={stats.get('explained_variance', 0.0):.3f} "
+                    f"lr={stats.get('lr', _current_lr(trainer)):.2e} "
+                    f"ent_coef={stats.get('ent_coef', trainer.ent_coef):.5f} "
+                    f"bc_coef={stats.get('bc_coef', trainer.bc_coef):.4f} "
                     f"early_stop={stats.get('early_stop', 0)} "
                     f"transitions={n} total={total_transitions}")
                 _append_training_stats({
@@ -484,6 +628,10 @@ def main():
                     "skipped_rollouts": skipped_rollouts_total,
                     "batch_model_updates": ";".join(str(x) for x in sorted(set(batch_updates))),
                     "batch_checkpoint_ids": ";".join(sorted(set(batch_checkpoint_ids))),
+                    "normalized_entropy": round(stats.get("normalized_entropy", 0.0), 6),
+                    "lr": f"{stats.get('lr', _current_lr(trainer)):.8g}",
+                    "ent_coef": f"{stats.get('ent_coef', trainer.ent_coef):.8g}",
+                    "auto_tune_action": stats.get("auto_tune_action", auto_tune_action),
                 })
 
             trainer.save(model_path)
