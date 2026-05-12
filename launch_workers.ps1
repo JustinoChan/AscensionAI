@@ -25,11 +25,13 @@
     .\launch_workers.ps1 -NumWorkers 2
     .\launch_workers.ps1 -Mode bc
     .\launch_workers.ps1 -Mode bc-collect -NumWorkers 4 -BCGames 400
+    .\launch_workers.ps1 -Mode bc-collect -NumWorkers 4 -BCGames 400 -WorkerIds 2
     .\launch_workers.ps1 -Mode bc-train -BCEpochs 50
 #>
 
 param(
     [int]$NumWorkers = 3,
+    [int[]]$WorkerIds = @(),
     [ValidateSet("worker", "train", "bc-ppo", "bc", "bc-collect", "bc-train", "eval", "logger")]
     [string]$Mode = "worker",
     [int]$Games = 20,
@@ -199,6 +201,29 @@ function Get-Command-For-Logger {
     return "$PyEsc $RootEsc/scripts/game_logger.py"
 }
 
+
+function Get-WorkerIdList {
+    param([int]$Count, [int[]]$Ids)
+
+    if ($Ids -and $Ids.Count -gt 0) {
+        $clean = @()
+        foreach ($id in $Ids) {
+            if ($id -lt 1 -or $id -gt $Count) {
+                Write-Error "WorkerIds must be between 1 and NumWorkers ($Count). Got: $id"
+                exit 1
+            }
+            if ($clean -notcontains $id) {
+                $clean += $id
+            }
+        }
+        return $clean
+    }
+
+    return 1..$Count
+}
+
+$SelectedWorkerIds = Get-WorkerIdList -Count $NumWorkers -Ids $WorkerIds
+
 # --- Launch ---
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
@@ -210,23 +235,24 @@ $launched = @()
 
 switch ($Mode) {
     "worker" {
-        Write-Host "Mode: Parallel rollout workers ($NumWorkers instances)" -ForegroundColor Green
+        Write-Host "Mode: Parallel rollout workers ($($SelectedWorkerIds.Count) launch(es), worker id set: $($SelectedWorkerIds -join ',') / total slots=$NumWorkers)" -ForegroundColor Green
         Write-Host ""
         Write-Host "IMPORTANT: Start the offline trainer in a separate terminal:" -ForegroundColor Yellow
         Write-Host "  python scripts\train_offline.py --model models\ppo_sts.pt --data rollouts_shared --delete-consumed --batch-games 8 --lr 3e-5 --bc-coef 0.10 --max-rollout-lag 4 --ent-coef 0.001 --auto-tune" -ForegroundColor Yellow
         Write-Host ""
 
-        for ($i = 1; $i -le $NumWorkers; $i++) {
+        for ($idx = 0; $idx -lt $SelectedWorkerIds.Count; $idx++) {
+            $i = $SelectedWorkerIds[$idx]
             $cmd = Get-Command-For-Worker $i
-            Write-Host "[$i/$NumWorkers] Setting config for worker $i..." -ForegroundColor Cyan
+            Write-Host "[$($idx + 1)/$($SelectedWorkerIds.Count)] Setting config for worker $i..." -ForegroundColor Cyan
             Write-Config $cmd
 
-            Write-Host "[$i/$NumWorkers] Launching STS instance (worker $i)..." -ForegroundColor Cyan
+            Write-Host "[$($idx + 1)/$($SelectedWorkerIds.Count)] Launching STS instance (worker $i)..." -ForegroundColor Cyan
             $proc = Launch-STS
             $launched += $proc
-            Write-Host "[$i/$NumWorkers] PID: $($proc.Id)" -ForegroundColor DarkGray
+            Write-Host "[$($idx + 1)/$($SelectedWorkerIds.Count)] PID: $($proc.Id)" -ForegroundColor DarkGray
 
-            if ($i -lt $NumWorkers) {
+            if ($idx -lt ($SelectedWorkerIds.Count - 1)) {
                 Write-Host "  Waiting 15 seconds for ModTheSpire to read config..." -ForegroundColor DarkGray
                 Start-Sleep -Seconds 15
             }
@@ -256,23 +282,28 @@ switch ($Mode) {
         $gamesPerWorker = [math]::Ceiling($BCGames / [double]$NumWorkers)
         $estimatedTotal = $gamesPerWorker * $NumWorkers
         Write-Host "Mode: Parallel BC demo collection" -ForegroundColor Green
-        Write-Host "Workers: $NumWorkers | Requested total games: $BCGames | Per worker: $gamesPerWorker | Actual max total: $estimatedTotal" -ForegroundColor Yellow
+        Write-Host "Worker id set to launch now: $($SelectedWorkerIds -join ',')" -ForegroundColor Yellow
+        Write-Host "Total worker slots: $NumWorkers | Requested total games: $BCGames | Per worker slot: $gamesPerWorker | Full-run max total: $estimatedTotal" -ForegroundColor Yellow
+        if ($WorkerIds -and $WorkerIds.Count -gt 0) {
+            Write-Host "Resume/relaunch mode: launching only selected worker id(s). Existing running workers are not touched." -ForegroundColor Yellow
+        }
         Write-Host "Demo files will be written to: $BCDemosDir" -ForegroundColor Yellow
         Write-Host "After all workers finish, run:" -ForegroundColor Yellow
         Write-Host "  .\launch_workers.ps1 -Mode bc-train -BCEpochs $BCEpochs" -ForegroundColor Yellow
         Write-Host ""
 
-        for ($i = 1; $i -le $NumWorkers; $i++) {
+        for ($idx = 0; $idx -lt $SelectedWorkerIds.Count; $idx++) {
+            $i = $SelectedWorkerIds[$idx]
             $cmd = Get-Command-For-BCCollect $i $gamesPerWorker
-            Write-Host "[$i/$NumWorkers] Setting config for BC collector $i..." -ForegroundColor Cyan
+            Write-Host "[$($idx + 1)/$($SelectedWorkerIds.Count)] Setting config for BC collector $i..." -ForegroundColor Cyan
             Write-Config $cmd
 
-            Write-Host "[$i/$NumWorkers] Launching STS instance (BC collector $i)..." -ForegroundColor Cyan
+            Write-Host "[$($idx + 1)/$($SelectedWorkerIds.Count)] Launching STS instance (BC collector $i)..." -ForegroundColor Cyan
             $proc = Launch-STS
             $launched += $proc
-            Write-Host "[$i/$NumWorkers] PID: $($proc.Id)" -ForegroundColor DarkGray
+            Write-Host "[$($idx + 1)/$($SelectedWorkerIds.Count)] PID: $($proc.Id)" -ForegroundColor DarkGray
 
-            if ($i -lt $NumWorkers) {
+            if ($idx -lt ($SelectedWorkerIds.Count - 1)) {
                 Write-Host "  Waiting 15 seconds for ModTheSpire to read config..." -ForegroundColor DarkGray
                 Start-Sleep -Seconds 15
             }
@@ -327,7 +358,7 @@ Write-Host "Log files:" -ForegroundColor DarkGray
 
 switch ($Mode) {
     "worker" {
-        for ($i = 1; $i -le $NumWorkers; $i++) {
+        foreach ($i in $SelectedWorkerIds) {
             Write-Host "  Worker $i : worker_${i}_debug.log" -ForegroundColor DarkGray
         }
         Write-Host "  Trainer  : train_offline_debug.log" -ForegroundColor DarkGray
@@ -342,7 +373,7 @@ switch ($Mode) {
         Write-Host "  BC       : bc_debug.log" -ForegroundColor DarkGray
     }
     "bc-collect" {
-        for ($i = 1; $i -le $NumWorkers; $i++) {
+        foreach ($i in $SelectedWorkerIds) {
             Write-Host "  BC $i    : bc_debug.log" -ForegroundColor DarkGray
         }
         Write-Host "  Demos    : bc_demos_shared\*.npz" -ForegroundColor DarkGray

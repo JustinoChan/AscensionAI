@@ -114,6 +114,8 @@ MODES = {
     "Single-Instance Training": "train",
     "BC \u2192 PPO (End-to-End)": "bc_ppo",
     "Behavior Cloning": "bc",
+    "BC Demo Collection": "bc_collect",
+    "BC Train From Demos": "bc_train",
     "Evaluation (Greedy)": "eval",
     "Evaluate on Seed Set": "eval_set",
     "Game Logger (Passive)": "logger",
@@ -127,6 +129,8 @@ SPINNER_CONFIG = {
     "train":   (None, 0, 0, 0),
     "bc_ppo":  ("BC Games:", 10, 1000, 400),
     "bc":      ("BC Games:", 10, 1000, 400),
+    "bc_collect": ("BC Games:", 10, 5000, 400),
+    "bc_train": (None, 0, 0, 0),
     "eval":    ("Games:", 1, 100, 20),
     "eval_set": ("Games:", 1, 1000, 200),
     "logger":  (None, 0, 0, 0),
@@ -246,6 +250,30 @@ def build_command(mode: str, worker_id: int = 1, games: int = 20,
     _logger.info(f"build_command(mode={mode}, worker_id={worker_id}, games={games}, "
                  f"bc_games={bc_games}, bc_epochs={bc_epochs}, ppo_games={ppo_games}, "
                  f"ent_coef={ent_coef}, verbose={verbose}) -> {cmd}")
+    return cmd
+
+
+def build_bc_collect_command(worker_id: int, games: int, *,
+                             demo_save: str, checkpoint: str,
+                             verbose: bool = False) -> str:
+    """Build a CommunicationMod command for one parallel BC demo collector."""
+    py = escape_properties_path(VENV_PYTHON)
+    root = escape_properties_path(ROOT)
+    verbose_flag = " --verbose" if verbose else ""
+    demo_arg = str(demo_save).replace("\\", "/")
+    checkpoint_arg = str(checkpoint).replace("\\", "/")
+    cmd = (
+        f"{py} {root}/scripts/behavior_clone.py --games {int(games)} "
+        f"--save models/ppo_sts_bc.pt --collect-only "
+        f"--worker-id {int(worker_id)} "
+        f"--demo-save {demo_arg} "
+        f"--bc-checkpoint {checkpoint_arg}{verbose_flag}"
+    )
+    _logger.info(
+        "build_bc_collect_command("
+        f"worker_id={worker_id}, games={games}, demo_save={demo_save}, "
+        f"checkpoint={checkpoint}, verbose={verbose}) -> {cmd}"
+    )
     return cmd
 
 
@@ -454,6 +482,9 @@ class AscensionApp:
         self.worker_launcher_pids: dict[int, int] = {}
         self.worker_sts_pids: dict[int, set[int]] = {}
         self._worker_commands: dict[int, str] = {}
+        self._worker_modes: dict[int, str] = {}
+        self._worker_demo_paths: dict[int, Path] = {}
+        self._worker_checkpoint_paths: dict[int, Path] = {}
         self._worker_restarts: dict[int, int] = {}
         self._worker_launch_time: dict[int, float] = {}
         self._parallel_launch_started_at: float = 0.0
@@ -592,6 +623,30 @@ class AscensionApp:
         self.bc_epochs_spin.pack(side="left")
         ttk.Label(self.bc_epochs_row, text="default 50; early stopping may stop sooner").pack(side="left", padx=(8, 0))
 
+        # Parallel BC collection controls.
+        self.bc_workers_row = ttk.Frame(ctrl_frame)
+        self.bc_workers_row.pack(fill="x", pady=(6, 0))
+        ttk.Label(self.bc_workers_row, text="BC Workers:").pack(side="left", padx=(0, 5))
+        self.bc_workers_var = tk.IntVar(value=self.hw["recommended_workers"])
+        self.bc_workers_spin = ttk.Spinbox(
+            self.bc_workers_row,
+            from_=1,
+            to=8,
+            increment=1,
+            textvariable=self.bc_workers_var,
+            width=7,
+        )
+        self.bc_workers_spin.pack(side="left")
+        ttk.Label(self.bc_workers_row, text="total games are split across worker slots").pack(side="left", padx=(8, 0))
+
+        self.worker_ids_row = ttk.Frame(ctrl_frame)
+        self.worker_ids_row.pack(fill="x", pady=(6, 0))
+        ttk.Label(self.worker_ids_row, text="Launch Worker IDs:").pack(side="left", padx=(0, 5))
+        self.worker_ids_var = tk.StringVar(value="")
+        self.worker_ids_entry = ttk.Entry(self.worker_ids_row, textvariable=self.worker_ids_var, width=18)
+        self.worker_ids_entry.pack(side="left")
+        ttk.Label(self.worker_ids_row, text="blank = all; use 2 or 1,3 to relaunch specific slots").pack(side="left", padx=(8, 0))
+
         # BC -> PPO run-length controls.
         self.ppo_games_row = ttk.Frame(ctrl_frame)
         self.ppo_games_row.pack(fill="x", pady=(6, 0))
@@ -707,7 +762,7 @@ class AscensionApp:
         painful with a step of 1.  The entry box remains editable for exact
         values like 8 games.
         """
-        if mode in ("bc_ppo", "bc"):
+        if mode in ("bc_ppo", "bc", "bc_collect"):
             return 10
         if mode == "eval":
             return 5
@@ -729,7 +784,7 @@ class AscensionApp:
     def _update_spinner_step_hint(self):
         mode = MODES.get(self.mode_var.get(), "worker")
         step = self._spinner_step(mode)
-        if mode in ("bc_ppo", "bc", "eval", "eval_set"):
+        if mode in ("bc_ppo", "bc", "bc_collect", "eval", "eval_set"):
             self.spin_step_var.set(f"+/- {step}; type exact value")
         else:
             self.spin_step_var.set("")
@@ -766,6 +821,35 @@ class AscensionApp:
         value = max(1, min(200, value))
         self.bc_epochs_var.set(value)
         return value
+
+    def _get_bc_workers(self) -> int:
+        try:
+            value = int(self.bc_workers_var.get())
+        except (tk.TclError, ValueError):
+            value = int(self.hw.get("recommended_workers", 1) or 1)
+        value = max(1, min(8, value))
+        self.bc_workers_var.set(value)
+        return value
+
+    def _selected_worker_ids(self, total_slots: int) -> list[int]:
+        raw = self.worker_ids_var.get().strip()
+        if not raw:
+            return list(range(1, total_slots + 1))
+        selected: list[int] = []
+        for part in re.split(r"[,\s]+", raw):
+            if not part:
+                continue
+            try:
+                worker_id = int(part)
+            except ValueError as e:
+                raise ValueError(f"Worker ID must be numeric: {part!r}") from e
+            if worker_id < 1 or worker_id > total_slots:
+                raise ValueError(f"Worker ID {worker_id} must be between 1 and {total_slots}")
+            if worker_id not in selected:
+                selected.append(worker_id)
+        if not selected:
+            return list(range(1, total_slots + 1))
+        return selected
 
     def _seed_file_options(self) -> list[str]:
         seeds_dir = ROOT / "seeds"
@@ -874,10 +958,20 @@ class AscensionApp:
         else:
             self.ent_row.pack_forget()
 
-        if mode in ("bc", "bc_ppo"):
+        if mode in ("bc", "bc_ppo", "bc_train"):
             self.bc_epochs_row.pack(fill="x", pady=(6, 0))
         else:
             self.bc_epochs_row.pack_forget()
+
+        if mode == "bc_collect":
+            self.bc_workers_row.pack(fill="x", pady=(6, 0))
+        else:
+            self.bc_workers_row.pack_forget()
+
+        if mode in ("worker", "collect", "bc_collect"):
+            self.worker_ids_row.pack(fill="x", pady=(6, 0))
+        else:
+            self.worker_ids_row.pack_forget()
 
         if mode == "bc_ppo":
             self.ppo_games_row.pack(fill="x", pady=(6, 0))
@@ -1413,6 +1507,15 @@ class AscensionApp:
 
     # ----- Start / Stop -----
 
+    def _start_validation_failed(self, message: str):
+        _logger.error(f"Start input validation failed: {message}")
+        self.running = False
+        self.start_btn.configure(state="normal")
+        self.stop_btn.configure(state="disabled")
+        self.graceful_btn.configure(state="disabled")
+        self.status_var.set("Idle")
+        messagebox.showerror("Cannot Start", message)
+
     def _start(self):
         _logger.info("=" * 40)
         _logger.info("START pressed")
@@ -1436,6 +1539,7 @@ class AscensionApp:
 
         mode = MODES.get(self.mode_var.get(), "worker")
         n = self._normalize_spinner_value()
+        bc_epochs = self._get_bc_epochs()
 
         model_path = ROOT / "models" / "ppo_sts.pt"
         _logger.info(f"Mode: {mode} | Spinner: {n} | Verbose: {verbose}")
@@ -1461,15 +1565,27 @@ class AscensionApp:
             (ROOT / "rollouts_shared").mkdir(exist_ok=True)
             rollout_count = len(list((ROOT / "rollouts_shared").glob("*.npz")))
             _logger.info(f"rollouts_shared/ has {rollout_count} existing .npz files")
-            self.status_var.set(f"Launching {n} workers + trainer...")
-            threading.Thread(target=self._launch_parallel, args=(n,), daemon=True).start()
+            try:
+                worker_ids = self._selected_worker_ids(n)
+            except ValueError as e:
+                self._start_validation_failed(str(e))
+                return
+            self.status_var.set(f"Launching {len(worker_ids)}/{n} workers + trainer...")
+            threading.Thread(target=self._launch_parallel,
+                             args=(n,), kwargs={"worker_ids": worker_ids},
+                             daemon=True).start()
         elif mode == "collect":
             (ROOT / "rollouts_shared").mkdir(exist_ok=True)
             rollout_count = len(list((ROOT / "rollouts_shared").glob("*.npz")))
             _logger.info(f"rollouts_shared/ has {rollout_count} existing .npz files")
-            self.status_var.set(f"Launching {n} collectors (no trainer)...")
+            try:
+                worker_ids = self._selected_worker_ids(n)
+            except ValueError as e:
+                self._start_validation_failed(str(e))
+                return
+            self.status_var.set(f"Launching {len(worker_ids)}/{n} collectors (no trainer)...")
             threading.Thread(target=self._launch_parallel,
-                             args=(n,), kwargs={"with_trainer": False},
+                             args=(n,), kwargs={"with_trainer": False, "worker_ids": worker_ids},
                              daemon=True).start()
         elif mode == "train":
             self.status_var.set("Launching single-instance training...")
@@ -1479,11 +1595,31 @@ class AscensionApp:
             ppo_desc = "continuous PPO" if ppo_games == 0 else f"{ppo_games} PPO games"
             self.status_var.set(f"Launching BC\u2192PPO ({n} BC games, {ppo_desc})...")
             threading.Thread(target=self._launch_single,
-                             args=("bc_ppo", n, ppo_games),
+                             args=("bc_ppo", n, ppo_games, bc_epochs),
                              daemon=True).start()
         elif mode == "bc":
             self.status_var.set(f"Launching behavior cloning ({n} games)...")
-            threading.Thread(target=self._launch_single, args=("bc", n), daemon=True).start()
+            threading.Thread(target=self._launch_single, args=("bc", n, 200, bc_epochs), daemon=True).start()
+        elif mode == "bc_collect":
+            total_slots = self._get_bc_workers()
+            try:
+                worker_ids = self._selected_worker_ids(total_slots)
+            except ValueError as e:
+                self._start_validation_failed(str(e))
+                return
+            self.status_var.set(
+                f"Launching BC collection {len(worker_ids)}/{total_slots} workers "
+                f"({n} total games)..."
+            )
+            threading.Thread(target=self._launch_bc_collect,
+                             args=(total_slots, n, worker_ids),
+                             kwargs={"reset_existing": not self.worker_ids_var.get().strip()},
+                             daemon=True).start()
+        elif mode == "bc_train":
+            self.status_var.set("Training BC from collected demos...")
+            threading.Thread(target=self._launch_bc_train_from_demos,
+                             args=(bc_epochs,),
+                             daemon=True).start()
         elif mode == "eval":
             self.status_var.set(f"Launching evaluation ({n} games)...")
             threading.Thread(target=self._launch_single, args=("eval", n), daemon=True).start()
@@ -1766,12 +1902,37 @@ class AscensionApp:
         self._append_log(tab_name, f"Timed out waiting for worker to be ready ({elapsed:.0f}s).")
         return False
 
-    def _launch_parallel(self, n_workers: int, with_trainer: bool = True):
-        _logger.info(f"_launch_parallel: n_workers={n_workers}, with_trainer={with_trainer}")
+    def _wait_for_worker_process(self, worker_id: int, tab_name: str,
+                                 timeout: int = 120) -> bool:
+        """Block until a worker-specific Python process appears."""
+        _logger.info(f"_wait_for_worker_process: worker={worker_id}, timeout={timeout}s")
+        self._append_log(tab_name, f"Waiting for worker {worker_id} process to start...")
+        start = time.time()
+        while time.time() - start < timeout:
+            if not self.running:
+                return False
+            _java_pids, py_pids = self._find_pids_for_worker(worker_id)
+            if py_pids:
+                elapsed = time.time() - start
+                self._append_log(tab_name, f"Worker process detected ({elapsed:.0f}s).")
+                return True
+            time.sleep(1.0)
+        elapsed = time.time() - start
+        self._append_log(tab_name, f"Timed out waiting for worker process ({elapsed:.0f}s).")
+        return False
+
+    def _launch_parallel(self, n_workers: int, with_trainer: bool = True,
+                         worker_ids: list[int] | None = None):
+        selected_ids = list(worker_ids or range(1, n_workers + 1))
+        _logger.info(f"_launch_parallel: n_workers={n_workers}, with_trainer={with_trainer}, "
+                     f"worker_ids={selected_ids}")
         try:
             self.worker_launcher_pids.clear()
             self.worker_sts_pids.clear()
             self._worker_commands.clear()
+            self._worker_modes.clear()
+            self._worker_demo_paths.clear()
+            self._worker_checkpoint_paths.clear()
             self._worker_restarts.clear()
             self._worker_launch_time.clear()
             self._parallel_launch_started_at = time.time()
@@ -1779,7 +1940,7 @@ class AscensionApp:
             self._with_trainer = with_trainer
             self._trainer_cmd = None
 
-            for i in range(1, n_workers + 1):
+            for i in selected_ids:
                 log_file = ROOT / "logs" / f"worker_{i}_debug.log"
                 heartbeat_file = self._worker_heartbeat_path(i)
                 try:
@@ -1836,7 +1997,7 @@ class AscensionApp:
                     "Rollouts will accumulate in rollouts_shared/ — "
                     "zip and send to the trainer when done.")
 
-            for i in range(1, n_workers + 1):
+            for idx, i in enumerate(selected_ids, start=1):
                 if not self.running:
                     _logger.info(f"_launch_parallel: aborted at worker {i} (self.running=False)")
                     break
@@ -1848,6 +2009,7 @@ class AscensionApp:
                 cmd = build_command("worker", worker_id=i,
                                     verbose=bool(self.verbose_var.get()))
                 self._worker_commands[i] = cmd
+                self._worker_modes[i] = "worker"
                 write_config(cmd, verbose=bool(self.verbose_var.get()))
                 self._append_log(tab_name, f"Config written for worker {i}, launching STS...")
 
@@ -1877,23 +2039,181 @@ class AscensionApp:
                 self.root.after(0, lambda idx=i: self.status_var.set(
                     f"Waiting for worker {idx}/{n_workers} to be ready..."))
 
-                if i < n_workers:
+                if idx < len(selected_ids):
                     ready = self._wait_for_ready(log_file, tab_name, timeout=120)
                     _logger.info(f"Worker {i} ready={ready}, proceeding to next worker")
 
             if self.running:
                 self._n_workers = n_workers
                 suffix = "workers + trainer" if with_trainer else "collectors (no trainer)"
-                _logger.info(f"All {n_workers} workers launched ({suffix})")
+                _logger.info(f"Launched worker ids {selected_ids} of {n_workers} slots ({suffix})")
                 _logger.info(f"Launcher PIDs: {self.worker_launcher_pids}")
                 _logger.info(f"STS PIDs (captured so far): {dict(self.worker_sts_pids)}")
                 self.root.after(0, lambda: self.status_var.set(
-                    f"Running ({n_workers} {suffix})"))
+                    f"Running ({len(selected_ids)}/{n_workers} {suffix})"))
                 threading.Thread(target=self._monitor_workers, daemon=True).start()
                 _logger.info("Worker health monitor started")
         except Exception as e:
             _logger.error(f"_launch_parallel FAILED: {traceback.format_exc()}")
             self._append_log("All", f"ERROR in parallel launch: {e}")
+
+    def _launch_bc_collect(self, total_slots: int, total_games: int,
+                           worker_ids: list[int], *,
+                           reset_existing: bool = True):
+        _logger.info(f"_launch_bc_collect: total_slots={total_slots}, "
+                     f"total_games={total_games}, worker_ids={worker_ids}, "
+                     f"reset_existing={reset_existing}")
+        try:
+            self.worker_launcher_pids.clear()
+            self.worker_sts_pids.clear()
+            self._worker_commands.clear()
+            self._worker_modes.clear()
+            self._worker_demo_paths.clear()
+            self._worker_checkpoint_paths.clear()
+            self._worker_restarts.clear()
+            self._worker_launch_time.clear()
+            self._parallel_launch_started_at = time.time()
+            self._n_workers = total_slots
+            self._with_trainer = False
+            self._trainer_cmd = None
+
+            demo_dir = ROOT / "bc_demos_shared"
+            demo_dir.mkdir(exist_ok=True)
+            (ROOT / "logs").mkdir(exist_ok=True)
+            games_per_worker = int((int(total_games) + int(total_slots) - 1) // int(total_slots))
+
+            self.root.after(0, lambda: self._add_log_tab("BC Collect"))
+            time.sleep(0.1)
+            self._append_log(
+                "BC Collect",
+                f"Starting BC demo collection: slots={total_slots}, "
+                f"launching={worker_ids}, games_per_slot={games_per_worker}"
+            )
+
+            bc_log = ROOT / "logs" / "bc_debug.log"
+            tailer = LogTailer(bc_log, lambda line: self._append_log("BC Collect", line))
+            tailer.start()
+            self.tailers.append(tailer)
+
+            for idx, worker_id in enumerate(worker_ids, start=1):
+                if not self.running:
+                    _logger.info(f"_launch_bc_collect aborted at worker {worker_id}")
+                    break
+
+                tab_name = f"BC {worker_id}"
+                self.root.after(0, lambda tn=tab_name: self._add_log_tab(tn))
+                time.sleep(0.1)
+
+                demo_rel = f"bc_demos_shared/bc_demo_worker_{worker_id}.npz"
+                checkpoint_rel = f"bc_demos_shared/bc_worker_{worker_id}_progress.npz"
+                demo_path = ROOT / demo_rel
+                checkpoint_path = ROOT / checkpoint_rel
+
+                if reset_existing:
+                    for path in (demo_path, checkpoint_path):
+                        try:
+                            if path.exists():
+                                _logger.info(f"Deleting stale BC worker file before fresh launch: {path}")
+                                path.unlink()
+                        except OSError as e:
+                            _logger.warning(f"Failed to delete stale BC file {path}: {e}")
+
+                cmd = build_bc_collect_command(
+                    worker_id,
+                    games_per_worker,
+                    demo_save=demo_rel,
+                    checkpoint=checkpoint_rel,
+                    verbose=bool(self.verbose_var.get()),
+                )
+                self._worker_commands[worker_id] = cmd
+                self._worker_modes[worker_id] = "bc_collect"
+                self._worker_demo_paths[worker_id] = demo_path
+                self._worker_checkpoint_paths[worker_id] = checkpoint_path
+                self._worker_restarts[worker_id] = 0
+
+                write_config(cmd, verbose=bool(self.verbose_var.get()))
+                self._append_log(tab_name, f"Config written for BC worker {worker_id}, launching STS...")
+
+                before_java_pids = self._sts_java_pids()
+                proc = launch_sts(skip_launcher=True)
+                self.processes.append(proc)
+                self.worker_launcher_pids[worker_id] = proc.pid
+                self.worker_sts_pids[worker_id] = set()
+                self._worker_launch_time[worker_id] = time.time()
+                _logger.info(f"BC worker {worker_id}: launcher PID={proc.pid}")
+                self._append_log(tab_name, f"STS instance launched (PID {proc.pid})")
+
+                threading.Thread(
+                    target=self._capture_sts_pids_for_worker,
+                    args=(proc.pid, worker_id, before_java_pids),
+                    daemon=True,
+                ).start()
+
+                self.root.after(0, lambda wid=worker_id: self.status_var.set(
+                    f"Waiting for BC worker {wid}/{total_slots} to start..."))
+
+                if idx < len(worker_ids):
+                    ready = self._wait_for_worker_process(worker_id, tab_name, timeout=120)
+                    _logger.info(f"BC worker {worker_id} process-ready={ready}, proceeding")
+
+            if self.running:
+                self.root.after(0, lambda: self.status_var.set(
+                    f"Running BC collection ({len(worker_ids)}/{total_slots} workers)"))
+                threading.Thread(target=self._monitor_workers, daemon=True).start()
+                _logger.info("BC collection health monitor started")
+        except Exception as e:
+            _logger.error(f"_launch_bc_collect FAILED: {traceback.format_exc()}")
+            self._append_log("All", f"ERROR in BC collection launch: {e}")
+
+    def _launch_bc_train_from_demos(self, bc_epochs: int):
+        _logger.info(f"_launch_bc_train_from_demos: bc_epochs={bc_epochs}")
+        try:
+            demo_dir = ROOT / "bc_demos_shared"
+            demo_dir.mkdir(exist_ok=True)
+            self.root.after(0, lambda: self._add_log_tab("BC Train"))
+            time.sleep(0.1)
+            tailer = LogTailer(ROOT / "logs" / "bc_debug.log",
+                               lambda line: self._append_log("BC Train", line))
+            tailer.start()
+            self.tailers.append(tailer)
+
+            cmd = [
+                str(VENV_PYTHON), str(SCRIPTS / "behavior_clone.py"),
+                "--train-demo-dir", str(demo_dir),
+                "--save", "models/ppo_sts_bc.pt",
+                "--epochs", str(int(bc_epochs)),
+                "--lr", "5e-4",
+                "--batch-size", "256",
+                "--val-split", "0.10",
+                "--patience", "12",
+                "--weight-decay", "1e-5",
+                "--label-smoothing", "0.02",
+            ]
+            if self.verbose_var.get():
+                cmd.append("--verbose")
+            self._append_log("BC Train", f"Training from demos in {demo_dir}")
+            _logger.info(f"BC train command: {cmd}")
+            self.trainer_proc = subprocess.Popen(
+                cmd, cwd=str(ROOT),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            _logger.info(f"BC train started: PID {self.trainer_proc.pid}")
+            self._append_log("BC Train", f"BC trainer started (PID {self.trainer_proc.pid})")
+            rc = self.trainer_proc.wait()
+            _logger.info(f"BC train exited: rc={rc}")
+            self._append_log("BC Train", f"BC training exited with code {rc}")
+            self.running = False
+            self.root.after(0, lambda: self.start_btn.configure(state="normal"))
+            self.root.after(0, lambda: self.stop_btn.configure(state="disabled"))
+            self.root.after(0, lambda: self.graceful_btn.configure(state="disabled"))
+            self.root.after(0, lambda: self.status_var.set(
+                "BC demo training complete" if rc == 0 else "BC demo training failed"
+            ))
+        except Exception as e:
+            _logger.error(f"_launch_bc_train_from_demos FAILED: {traceback.format_exc()}")
+            self._append_log("BC Train", f"ERROR training from demos: {e}")
 
     # ----- Worker health monitor -----
 
@@ -1913,6 +2233,14 @@ class AscensionApp:
             for worker_id in list(self._worker_commands.keys()):
                 if not self.running:
                     break
+                worker_mode = self._worker_modes.get(worker_id, "worker")
+                if worker_mode == "bc_collect" and self._bc_worker_complete(worker_id):
+                    _logger.info(f"BC worker {worker_id}: demo file complete; stopping worker")
+                    self._append_log(f"BC {worker_id}", "Demo file complete; closing STS instance.")
+                    self._stop_single_worker(worker_id)
+                    self._worker_commands.pop(worker_id, None)
+                    self._worker_modes.pop(worker_id, None)
+                    continue
                 launch_t = self._worker_launch_time.get(worker_id, 0)
                 age = time.time() - launch_t
                 if age < self._WORKER_BOOT_GRACE_SEC:
@@ -1921,16 +2249,18 @@ class AscensionApp:
                 java_pids |= self._live_cached_java_pids(worker_id)
                 heartbeat_age = self._worker_heartbeat_age(worker_id)
                 missing_piece = not java_pids or not py_pids
-                stale_heartbeat = (
-                    heartbeat_age is None
-                    or heartbeat_age > self._WORKER_HEARTBEAT_TIMEOUT_SEC
-                )
+                stale_heartbeat = False
+                if worker_mode != "bc_collect":
+                    stale_heartbeat = (
+                        heartbeat_age is None
+                        or heartbeat_age > self._WORKER_HEARTBEAT_TIMEOUT_SEC
+                    )
                 if missing_piece or stale_heartbeat:
                     restarts = self._worker_restarts.get(worker_id, 0)
                     if restarts >= self._MAX_RESTARTS:
                         if restarts == self._MAX_RESTARTS:
                             _logger.warning(f"Worker {worker_id}: max restarts ({self._MAX_RESTARTS}) reached, giving up")
-                            self._append_log(f"Worker {worker_id}",
+                            self._append_log(f"BC {worker_id}" if worker_mode == "bc_collect" else f"Worker {worker_id}",
                                              f"Max restarts ({self._MAX_RESTARTS}) reached — not relaunching.")
                             self._worker_restarts[worker_id] = restarts + 1
                         continue
@@ -1940,14 +2270,32 @@ class AscensionApp:
                     )
                     _logger.warning(f"Worker {worker_id}: unhealthy ({reason}), relaunching "
                                     f"(restart #{restarts + 1})")
-                    self._append_log(f"Worker {worker_id}",
+                    self._append_log(f"BC {worker_id}" if worker_mode == "bc_collect" else f"Worker {worker_id}",
                                      f"Unhealthy worker detected — relaunching "
                                      f"(restart #{restarts + 1}).")
                     self._stop_single_worker(worker_id)
                     self._relaunch_worker(worker_id)
                     time.sleep(15.0)
             self._kill_excess_unowned_sts_instances("monitor")
+            if self.running and not self._worker_commands and getattr(self, "_current_mode", "") == "bc_collect":
+                _logger.info("All BC collection workers completed")
+                self._append_log("BC Collect", "All selected BC workers completed.")
+                self.running = False
+                self.root.after(0, lambda: self.start_btn.configure(state="normal"))
+                self.root.after(0, lambda: self.stop_btn.configure(state="disabled"))
+                self.root.after(0, lambda: self.graceful_btn.configure(state="disabled"))
+                self.root.after(0, lambda: self.status_var.set("BC collection complete"))
+                break
         _logger.info("_monitor_workers: loop ended")
+
+    def _bc_worker_complete(self, worker_id: int) -> bool:
+        demo_path = self._worker_demo_paths.get(worker_id)
+        if demo_path is None:
+            return False
+        try:
+            return demo_path.exists() and demo_path.stat().st_size > 0
+        except OSError:
+            return False
 
     def _monitor_trainer(self):
         """Restart the offline trainer if it exits during parallel training."""
@@ -2008,6 +2356,8 @@ class AscensionApp:
             if not cmd:
                 _logger.error(f"_relaunch_worker: no stored command for worker {worker_id}")
                 return
+            worker_mode = self._worker_modes.get(worker_id, "worker")
+            tab_name = f"BC {worker_id}" if worker_mode == "bc_collect" else f"Worker {worker_id}"
             write_config(cmd, verbose=bool(self.verbose_var.get()))
             before_java_pids = self._sts_java_pids()
             proc = launch_sts(skip_launcher=True)
@@ -2017,7 +2367,7 @@ class AscensionApp:
             self._worker_restarts[worker_id] = self._worker_restarts.get(worker_id, 0) + 1
             self._worker_launch_time[worker_id] = time.time()
             _logger.info(f"Worker {worker_id} relaunched: PID {proc.pid}")
-            self._append_log(f"Worker {worker_id}",
+            self._append_log(tab_name,
                              f"Relaunched STS instance (PID {proc.pid}, --skip-launcher)")
 
             threading.Thread(
@@ -2027,7 +2377,8 @@ class AscensionApp:
             ).start()
         except Exception as e:
             _logger.error(f"_relaunch_worker {worker_id} FAILED: {e}")
-            self._append_log(f"Worker {worker_id}", f"ERROR relaunching: {e}")
+            tab_name = f"BC {worker_id}" if self._worker_modes.get(worker_id) == "bc_collect" else f"Worker {worker_id}"
+            self._append_log(tab_name, f"ERROR relaunching: {e}")
 
     def _graceful_stop(self):
         """Wait for all current games to finish, save transitions, then stop."""
@@ -2317,7 +2668,13 @@ class AscensionApp:
             _logger.warning("_find_pids_for_worker: psutil not available")
             return java_pids, py_pids
 
-        worker_script = "rollout_worker.py"
+        worker_mode = self._worker_modes.get(worker_id, "worker")
+        if worker_mode == "bc_collect":
+            worker_script = "behavior_clone.py"
+            id_flag = "--worker-id"
+        else:
+            worker_script = "rollout_worker.py"
+            id_flag = "--id"
         scanned = 0
 
         for p in psutil.process_iter(["pid", "name", "cmdline", "ppid"]):
@@ -2330,10 +2687,12 @@ class AscensionApp:
                 if worker_script not in cmdline:
                     continue
                 tokens = (p.info.get("cmdline") or [])
-                if "--id" not in tokens:
+                if worker_mode == "bc_collect" and "--collect-only" not in tokens:
+                    continue
+                if id_flag not in tokens:
                     continue
                 try:
-                    if str(tokens[tokens.index("--id") + 1]) != str(worker_id):
+                    if str(tokens[tokens.index(id_flag) + 1]) != str(worker_id):
                         continue
                 except (IndexError, ValueError):
                     continue
@@ -2354,8 +2713,8 @@ class AscensionApp:
             except (psutil.NoSuchProcess, psutil.AccessDenied):
                 continue
 
-        _logger.debug(f"_find_pids_for_worker({worker_id}): scanned {scanned} python procs, "
-                      f"found java={java_pids}, py={py_pids}")
+        _logger.debug(f"_find_pids_for_worker({worker_id}, mode={worker_mode}): "
+                      f"scanned {scanned} python procs, found java={java_pids}, py={py_pids}")
         return java_pids, py_pids
 
     def _capture_sts_pids_for_worker(self, launcher_pid: int, worker_id: int,
@@ -2599,6 +2958,9 @@ class AscensionApp:
         self.worker_launcher_pids.clear()
         self.worker_sts_pids.clear()
         self._worker_commands.clear()
+        self._worker_modes.clear()
+        self._worker_demo_paths.clear()
+        self._worker_checkpoint_paths.clear()
         self._worker_launch_time.clear()
 
         java_orphans = self._kill_orphan_sts_instances()
@@ -2628,10 +2990,10 @@ class AscensionApp:
         if mode != "play" and not VENV_PYTHON.exists():
             issues.append(f"Python venv not found:\n  {VENV_PYTHON}\n  Run: python -m venv .venv && pip install -r requirements.txt")
         _logger.debug(f"JAVA_EXE: {JAVA_EXE}  exists={JAVA_EXE.exists()}")
-        if not JAVA_EXE.exists():
+        if mode != "bc_train" and not JAVA_EXE.exists():
             issues.append(f"STS Java runtime not found:\n  {JAVA_EXE}\n  Is Slay the Spire installed via Steam?")
         _logger.debug(f"MTS_LAUNCHER: {MTS_LAUNCHER}  exists={MTS_LAUNCHER.exists()}")
-        if not MTS_LAUNCHER.exists():
+        if mode != "bc_train" and not MTS_LAUNCHER.exists():
             issues.append(
                 f"ModTheSpire jar not found:\n  {MTS_LAUNCHER}\n"
                 "Install Mod the Spire via Steam Workshop, or set "
