@@ -22,6 +22,20 @@
   <text class="title" x="42" y="48">AscensionAI: Local Distributed RL Training System</text>
   <text class="small" x="42" y="74">N live game workers collect checkpoint-tagged rollouts; one offline trainer updates the shared policy.</text>
 
+  <g id="connectors">
+    <path class="arrow" d="M262 190 L324 190"/>
+    <path class="arrow" d="M560 200 L624 200"/>
+    <path class="arrow" d="M860 200 L924 200"/>
+    <path class="arrow" d="M1055 290 C1055 360 640 340 640 399"/>
+    <path class="arrow" d="M732 478 L800 478"/>
+    <path class="arrow" d="M926 550 L926 604"/>
+    <path class="arrow dash" d="M800 658 L738 658"/>
+    <path class="arrow dash" d="M1046 658 C1195 658 1195 332 1055 296"/>
+    <path class="arrow" d="M482 658 L391 658"/>
+    <path class="arrow" d="M806 520 C720 575 640 585 608 604"/>
+    <path class="arrow" d="M806 500 C650 575 420 580 300 604"/>
+  </g>
+
   <rect class="box4" x="42" y="115" width="220" height="160"/>
   <text class="label" x="64" y="148">Control Panel</text>
   <text class="small" x="64" y="176">AscensionAI.pyw</text>
@@ -76,16 +90,4 @@
   <text class="label" x="177" y="643">Metrics + Reports</text>
   <text class="small" x="177" y="671">logs/*.csv</text>
   <text class="small" x="177" y="695">docs/experiments</text>
-
-  <path class="arrow" d="M262 190 L330 190"/>
-  <path class="arrow" d="M560 200 L630 200"/>
-  <path class="arrow" d="M860 200 L930 200"/>
-  <path class="arrow" d="M1055 290 C1055 360 715 340 640 405"/>
-  <path class="arrow" d="M732 478 L806 478"/>
-  <path class="arrow" d="M926 550 L926 610"/>
-  <path class="arrow dash" d="M806 658 L732 658"/>
-  <path class="arrow dash" d="M806 658 C700 590 960 360 1055 290"/>
-  <path class="arrow" d="M482 658 L385 658"/>
-  <path class="arrow" d="M806 478 C690 585 620 590 608 610"/>
-  <path class="arrow" d="M806 500 C620 575 390 580 300 610"/>
 </svg>
