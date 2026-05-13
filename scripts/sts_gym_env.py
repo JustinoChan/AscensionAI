@@ -38,7 +38,8 @@ from obs_encoder import (
     encode_game_state,
     living_monsters,
 )
-from screen_handler import note_rest_choice
+from screen_handler import event_choice_targets as get_event_choice_targets
+from screen_handler import event_choice_for_slot, note_rest_choice
 
 
 # ---------------------------------------------------------------------------
@@ -80,70 +81,6 @@ assert NUM_ACTIONS == _NOOP + 1, f"action layout mismatch: {NUM_ACTIONS} vs {_NO
 # ---------------------------------------------------------------------------
 # Action mask
 # ---------------------------------------------------------------------------
-def _truthy_disabled(value: Any) -> bool:
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return False
-    if isinstance(value, (int, float)):
-        return bool(value)
-    text = str(value).strip().lower()
-    return text in {"1", "true", "yes", "disabled", "locked"}
-
-
-def _event_choice_index(opt: Any, fallback: int) -> int:
-    choice_idx = getattr(opt, "choice_index", None)
-    if choice_idx is None:
-        return fallback
-    try:
-        return int(choice_idx)
-    except Exception:
-        return fallback
-
-
-def _event_choice_targets(gs: Any) -> Dict[int, int]:
-    """Map flat choice slots to CommunicationMod event choice indices.
-
-    CommunicationMod may expose event choices two different ways:
-
-    - ``choice_list`` can be compact, containing only enabled labels.
-    - ``screen.options`` can be full, including locked options first.
-
-    Ranwid's "We Meet Again!" can therefore have ``choice_list`` length 2
-    while ``options`` length is 4. In that case action slot 0 must map to the
-    first enabled option's ``choice_index`` instead of being treated as locked.
-    """
-    choice_list = list(getattr(gs, "choice_list", []) or [])
-    scr = getattr(gs, "screen", None)
-    options = list(getattr(scr, "options", []) or []) if scr else []
-
-    if not options:
-        return {i: i for i in range(min(len(choice_list), MAX_CHOICES))}
-
-    enabled = [
-        (i, opt) for i, opt in enumerate(options)
-        if not _truthy_disabled(getattr(opt, "disabled", False))
-    ]
-    if not enabled:
-        return {}
-
-    compact_enabled = bool(choice_list) and len(choice_list) <= len(enabled)
-    targets: Dict[int, int] = {}
-
-    if compact_enabled:
-        for action_slot, (_option_idx, opt) in enumerate(enabled[:len(choice_list)]):
-            if action_slot >= MAX_CHOICES:
-                break
-            targets[action_slot] = _event_choice_index(opt, action_slot)
-        return targets
-
-    for option_idx, opt in enabled:
-        if option_idx >= MAX_CHOICES:
-            continue
-        targets[option_idx] = _event_choice_index(opt, option_idx)
-    return targets
-
-
 def _norm_label(value) -> str:
     return str(value or "").lower().strip()
 
@@ -234,6 +171,7 @@ def compute_action_mask(gs: Any) -> np.ndarray:
                       and getattr(scr, "confirm_up", False))
 
     n_choices = len(choice_list)
+    event_choice_targets: Dict[int, int] = {}
     if not grid_confirmed:
         potions_full = bool(getattr(gs, "are_potions_full", lambda: False)())
 
@@ -243,10 +181,8 @@ def compute_action_mask(gs: Any) -> np.ndarray:
                           if st_name == "COMBAT_REWARD" and scr else [])
         if st_name == "COMBAT_REWARD" and not n_choices and combat_rewards:
             n_choices = len(combat_rewards)
-        event_options = list(getattr(scr, "options", []) or []) if st_name == "EVENT" and scr else []
-        event_choice_targets: Dict[int, int] = {}
         if st_name == "EVENT":
-            event_choice_targets = _event_choice_targets(gs)
+            event_choice_targets = get_event_choice_targets(gs, max_choices=MAX_CHOICES)
             if event_choice_targets:
                 n_choices = max(event_choice_targets) + 1
 
@@ -276,6 +212,7 @@ def compute_action_mask(gs: Any) -> np.ndarray:
         (st_name == "MAP" and n_choices > 0)
         or (st_name == "COMBAT_REWARD" and n_choices > 0)
         or (st_name == "BOSS_REWARD" and n_choices > 0)
+        or (st_name == "EVENT" and bool(event_choice_targets))
     )
     suppress_cancel = (
         # Closing the map after combat bounces back to the reward screen,
@@ -285,6 +222,9 @@ def compute_action_mask(gs: Any) -> np.ndarray:
         # Boss relics are mandatory. Leaving returns to the boss chest, which
         # reopens the relic screen and can trap the agent forever.
         or (st_name == "BOSS_REWARD" and n_choices > 0)
+        # Event "leave" buttons are often event choices, not the generic leave
+        # command. Prefer choose <index> while enabled event options exist.
+        or (st_name == "EVENT" and bool(event_choice_targets))
     )
 
     if proceed_avail and not suppress_proceed:
@@ -349,18 +289,32 @@ def flat_action_to_spire_action(action_id: int, gs: Any) -> Action:
         if st_name == "REST" and choice_idx < len(choice_list):
             note_rest_choice(gs, choice_list[choice_idx])
         if st_name == "EVENT" and scr is not None:
-            event_choice_targets = _event_choice_targets(gs)
+            event_choice_targets = get_event_choice_targets(gs, max_choices=MAX_CHOICES)
             if choice_idx in event_choice_targets:
                 return ChooseAction(choice_index=event_choice_targets[choice_idx])
         return ChooseAction(choice_index=choice_idx)
 
     if action_id == _PROCEED:
+        screen_type = getattr(gs, "screen_type", None)
+        st_name = getattr(screen_type, "name", "") if screen_type else ""
+        if st_name == "EVENT":
+            targets = get_event_choice_targets(gs, max_choices=MAX_CHOICES)
+            if targets:
+                _slot, choice_idx = event_choice_for_slot(gs, 0)
+                return ChooseAction(choice_index=choice_idx)
         commands = set(getattr(gs, "available_commands", []) or [])
         if "confirm" in commands and "proceed" not in commands:
             return Action("confirm")
         return Action("proceed")
 
     if action_id == _LEAVE:
+        screen_type = getattr(gs, "screen_type", None)
+        st_name = getattr(screen_type, "name", "") if screen_type else ""
+        if st_name == "EVENT":
+            targets = get_event_choice_targets(gs, max_choices=MAX_CHOICES)
+            if targets:
+                _slot, choice_idx = event_choice_for_slot(gs, 0)
+                return ChooseAction(choice_index=choice_idx)
         commands = set(getattr(gs, "available_commands", []) or [])
         for cmd in ("cancel", "leave", "return", "skip"):
             if cmd in commands:
