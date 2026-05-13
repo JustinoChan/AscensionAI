@@ -24,7 +24,38 @@
       font-family: Arial, Helvetica, sans-serif;
       line-height: 1.45;
     }
-    header {
+    a { color: var(--blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 14px 28px;
+      background: #ffffff;
+      border-bottom: 1px solid var(--line);
+      position: sticky;
+      top: 0;
+      z-index: 4;
+    }
+    .brand {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--ink);
+      white-space: nowrap;
+    }
+    nav {
+      display: flex;
+      gap: 18px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      font-size: 14px;
+    }
+    nav a {
+      color: var(--ink);
+      font-weight: 700;
+    }
+    .dashboard-header {
       padding: 28px 32px 18px;
       background: #243447;
       color: white;
@@ -34,7 +65,7 @@
       font-size: 30px;
       letter-spacing: 0;
     }
-    header p {
+    .dashboard-header p {
       margin: 0;
       max-width: 980px;
       color: #d7e2ee;
@@ -119,7 +150,9 @@
       font-weight: 700;
     }
     @media (max-width: 860px) {
-      header { padding: 22px 18px 16px; }
+      .topbar { align-items: flex-start; flex-direction: column; padding: 14px 18px; }
+      nav { justify-content: flex-start; gap: 12px; }
+      .dashboard-header { padding: 22px 18px 16px; }
       main { padding: 14px; }
       .grid, .chart-grid { grid-template-columns: 1fr; }
       h1 { font-size: 25px; }
@@ -127,7 +160,19 @@
   </style>
 </head>
 <body>
-  <header>
+  <header class="topbar">
+    <a class="brand" href="../">AscensionAI</a>
+    <nav aria-label="Primary">
+      <a href="../">Home</a>
+      <a href="../docs.html">Docs</a>
+      <a href="../scripts.html">Scripts</a>
+      <a href="../experiments/">Experiments</a>
+      <a href="https://justinchan.dev">Portfolio</a>
+      <a href="https://github.com/JustinoChan/AscensionAI">GitHub</a>
+    </nav>
+  </header>
+
+  <header class="dashboard-header">
     <h1>AscensionAI Results Dashboard</h1>
     <p>Static, hostable viewer for BC, PPO, and fixed-seed evaluation artifacts. It ships with a May 12, 2026 snapshot and can also parse local CSV exports from <code>logs/</code>.</p>
   </header>
