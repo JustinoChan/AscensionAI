@@ -1,0 +1,397 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AscensionAI Scripts</title>
+  <style>
+    :root {
+      --ink: #17202a;
+      --muted: #5d6875;
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --line: #d8dee7;
+      --blue: #1d5f99;
+      --green: #247a3d;
+      --amber: #9b640b;
+      --navy: #243447;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Arial, Helvetica, sans-serif;
+      line-height: 1.5;
+    }
+    a { color: var(--blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 14px 28px;
+      background: #ffffff;
+      border-bottom: 1px solid var(--line);
+      position: sticky;
+      top: 0;
+      z-index: 3;
+    }
+    .brand {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--ink);
+      white-space: nowrap;
+    }
+    nav {
+      display: flex;
+      gap: 18px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      font-size: 14px;
+    }
+    nav a { color: var(--ink); font-weight: 700; }
+    header.hero {
+      background: var(--navy);
+      color: #ffffff;
+      padding: 46px 28px;
+    }
+    .hero-inner, main {
+      max-width: 1180px;
+      margin: 0 auto;
+    }
+    h1 {
+      margin: 0 0 12px;
+      font-size: clamp(32px, 4vw, 50px);
+      line-height: 1.06;
+      letter-spacing: 0;
+    }
+    .hero p {
+      max-width: 800px;
+      margin: 0;
+      color: #d7e2ee;
+      font-size: 18px;
+    }
+    main { padding: 28px; }
+    .section { margin: 0 0 42px; }
+    h2 {
+      margin: 0 0 14px;
+      font-size: 25px;
+      letter-spacing: 0;
+    }
+    .lead {
+      max-width: 880px;
+      margin: 0 0 18px;
+      color: var(--muted);
+    }
+    .quick-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+    .quick {
+      background: #ffffff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 15px;
+    }
+    .quick h3 {
+      margin: 0 0 8px;
+      font-size: 17px;
+    }
+    .quick code, td code {
+      background: #eef3f8;
+      border-radius: 5px;
+      padding: 2px 5px;
+      font-family: Consolas, Monaco, monospace;
+      font-size: 13px;
+    }
+    .table-wrap {
+      overflow-x: auto;
+      background: #ffffff;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 940px;
+      font-size: 14px;
+    }
+    th, td {
+      vertical-align: top;
+      text-align: left;
+      border-bottom: 1px solid var(--line);
+      padding: 11px 12px;
+    }
+    th {
+      color: var(--muted);
+      font-weight: 700;
+      background: #fbfcfd;
+    }
+    tr:last-child td { border-bottom: 0; }
+    .tag {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 3px 8px;
+      background: #eef3f8;
+      color: var(--navy);
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .workflow {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+    pre {
+      margin: 10px 0 0;
+      padding: 12px;
+      overflow-x: auto;
+      border-radius: 8px;
+      background: #17202a;
+      color: #f3f7fb;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    footer {
+      border-top: 1px solid var(--line);
+      padding: 24px 28px 34px;
+      color: var(--muted);
+      text-align: center;
+    }
+    @media (max-width: 860px) {
+      .topbar { align-items: flex-start; flex-direction: column; padding: 14px 18px; }
+      nav { justify-content: flex-start; gap: 12px; }
+      header.hero { padding: 34px 18px; }
+      main { padding: 18px; }
+      .quick-grid, .workflow { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="./">AscensionAI</a>
+    <nav aria-label="Primary">
+      <a href="./">Home</a>
+      <a href="dashboard/">Dashboard</a>
+      <a href="docs.html">Docs</a>
+      <a href="experiments/">Experiments</a>
+      <a href="https://justinchan.dev">Portfolio</a>
+      <a href="https://github.com/JustinoChan/AscensionAI">GitHub</a>
+    </nav>
+  </header>
+
+  <header class="hero">
+    <div class="hero-inner">
+      <h1>Script Reference</h1>
+      <p>AscensionAI is organized as a set of focused launchers, training scripts, evaluation tools, environment modules, and analysis utilities. This page explains what each one does and when to use it.</p>
+    </div>
+  </header>
+
+  <main>
+    <section class="section">
+      <h2>Common Entry Points</h2>
+      <div class="quick-grid">
+        <article class="quick">
+          <h3>Desktop control panel</h3>
+          <p>Use this for most local runs. It launches workers, starts/stops training, tails logs, and recommends worker counts.</p>
+          <code>AscensionAI.pyw</code>
+        </article>
+        <article class="quick">
+          <h3>PowerShell launcher</h3>
+          <p>Use this when you want terminal-first launch control over workers, BC, PPO, evaluation, or passive logging.</p>
+          <code>launch_workers.ps1</code>
+        </article>
+        <article class="quick">
+          <h3>Static dashboard</h3>
+          <p>Use this to inspect public snapshot metrics or load fresh local CSV files from <code>logs/</code>.</p>
+          <code>docs/dashboard/index.html</code>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Training and Collection Scripts</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>File</th><th>Role</th><th>Use When</th><th>Typical Command</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>scripts/train_bc_ppo.py</code></td>
+              <td><span class="tag">end-to-end</span></td>
+              <td>Runs behavior cloning first, then PPO fine-tuning in one Communication Mod session.</td>
+              <td><code>python scripts/train_bc_ppo.py --bc-games 150 --ppo-games 200</code></td>
+            </tr>
+            <tr>
+              <td><code>scripts/behavior_clone.py</code></td>
+              <td><span class="tag">BC warm start</span></td>
+              <td>Collects heuristic demonstrations and trains the PPO network with supervised cross-entropy.</td>
+              <td><code>python scripts/behavior_clone.py --games 150 --save models/ppo_sts_bc.pt</code></td>
+            </tr>
+            <tr>
+              <td><code>scripts/train_ppo.py</code></td>
+              <td><span class="tag">single worker PPO</span></td>
+              <td>Trains PPO from one live game instance without the parallel rollout queue.</td>
+              <td><code>python scripts/train_ppo.py --save models/ppo_sts.pt --resume models/ppo_sts.pt</code></td>
+            </tr>
+            <tr>
+              <td><code>scripts/rollout_worker.py</code></td>
+              <td><span class="tag">collector</span></td>
+              <td>Runs inside each Slay the Spire instance and writes per-game rollout files to a shared directory.</td>
+              <td><code>python scripts/rollout_worker.py --model models/ppo_sts.pt --out rollouts_shared --id 1</code></td>
+            </tr>
+            <tr>
+              <td><code>scripts/train_offline.py</code></td>
+              <td><span class="tag">central trainer</span></td>
+              <td>Consumes batches of worker rollout files, rejects stale data, applies PPO updates, and saves the shared checkpoint.</td>
+              <td><code>python scripts/train_offline.py --model models/ppo_sts.pt --data rollouts_shared --delete-consumed</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Evaluation, Logging, and Analysis</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>File</th><th>Role</th><th>Use When</th><th>Output</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>scripts/eval_model.py</code></td>
+              <td><span class="tag">greedy eval</span></td>
+              <td>Runs heuristic or model policies without exploration on fixed seeds.</td>
+              <td><code>logs/eval_stats.csv</code>, <code>logs/eval_debug.log</code></td>
+            </tr>
+            <tr>
+              <td><code>scripts/make_eval_seeds.py</code></td>
+              <td><span class="tag">seed generation</span></td>
+              <td>Creates deterministic seed lists for controlled comparisons.</td>
+              <td><code>seeds/eval_200.txt</code></td>
+            </tr>
+            <tr>
+              <td><code>scripts/plot_training.py</code></td>
+              <td><span class="tag">plotting</span></td>
+              <td>Draws floor, reward, win-rate, entropy, KL, clip, policy-loss, and value-loss curves.</td>
+              <td><code>logs/training_plot.png</code> when run with <code>--save</code></td>
+            </tr>
+            <tr>
+              <td><code>scripts/analyze_training_rewards.py</code></td>
+              <td><span class="tag">reward audit</span></td>
+              <td>Checks whether shaped reward correlates with actual progress metrics.</td>
+              <td>Terminal correlation report</td>
+            </tr>
+            <tr>
+              <td><code>scripts/game_logger.py</code></td>
+              <td><span class="tag">passive recorder</span></td>
+              <td>Records game states while a human plays manually, without sending gameplay actions.</td>
+              <td><code>logs/game_trace_*.jsonl</code></td>
+            </tr>
+            <tr>
+              <td><code>scripts/analyze_trace.py</code></td>
+              <td><span class="tag">trace summary</span></td>
+              <td>Summarizes passive trace files by screen type, room phase, flags, and sample choices.</td>
+              <td>Terminal screen-state report</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Environment and Model Modules</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>File</th><th>Role</th><th>What It Contains</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>scripts/obs_encoder.py</code></td>
+              <td><span class="tag">observation encoder</span></td>
+              <td>Converts SpireComm game state into a fixed 530-float vector with player, card, monster, relic, potion, deck, screen, and map features.</td>
+            </tr>
+            <tr>
+              <td><code>scripts/sts_gym_env.py</code></td>
+              <td><span class="tag">environment</span></td>
+              <td>Defines the 134-action space, action masks, reward shaping, Gymnasium-style wrapper, and live Communication Mod interaction.</td>
+            </tr>
+            <tr>
+              <td><code>scripts/ppo_model.py</code></td>
+              <td><span class="tag">PPO core</span></td>
+              <td>Import-safe PPOTrainer and GameBuffer classes used by BC, PPO, workers, and offline training.</td>
+            </tr>
+            <tr>
+              <td><code>scripts/screen_handler.py</code></td>
+              <td><span class="tag">screen plumbing</span></td>
+              <td>Shared handling for non-combat screens, recovery paths, reward screens, map choices, shops, events, and grid selection.</td>
+            </tr>
+            <tr>
+              <td><code>scripts/game_data.py</code></td>
+              <td><span class="tag">game knowledge</span></td>
+              <td>Ironclad-relevant card, relic, and potion databases used by the observation encoder and heuristics.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Stats and Shared Helpers</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>File</th><th>Role</th><th>What It Standardizes</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>scripts/training_stats_schema.py</code></td>
+              <td><span class="tag">CSV schema</span></td>
+              <td>Shared <code>training_stats.csv</code> columns for training scripts and migration behavior when headers change.</td>
+            </tr>
+            <tr>
+              <td><code>scripts/bc_stats.py</code></td>
+              <td><span class="tag">BC logging</span></td>
+              <td>Per-game behavior-cloning metrics written to <code>logs/bc_stats.csv</code>.</td>
+            </tr>
+            <tr>
+              <td><code>scripts/fight_tracker.py</code></td>
+              <td><span class="tag">combat metrics</span></td>
+              <td>Elite and boss fight tracking, including terminal deaths that still report as in-combat.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Typical Workflows</h2>
+      <div class="workflow">
+        <article class="quick">
+          <h3>Fixed-seed comparison</h3>
+          <pre>python scripts\make_eval_seeds.py --count 200 --out seeds\eval_200.txt
+python scripts\eval_model.py --policy heuristic --games 200 --seed-file seeds\eval_200.txt
+python scripts\eval_model.py --model models\ppo_sts_bc.pt --games 200 --seed-file seeds\eval_200.txt
+python scripts\eval_model.py --model models\ppo_sts.pt --games 200 --seed-file seeds\eval_200.txt</pre>
+        </article>
+        <article class="quick">
+          <h3>Parallel PPO loop</h3>
+          <pre>.\launch_workers.ps1 -NumWorkers 3
+python scripts\train_offline.py --model models\ppo_sts.pt --data rollouts_shared --delete-consumed --batch-games 8 --ent-coef 0.001 --auto-tune</pre>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    Back to <a href="./">AscensionAI home</a> or <a href="https://justinchan.dev">justinchan.dev</a>.
+  </footer>
+</body>
+</html>

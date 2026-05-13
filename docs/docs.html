@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AscensionAI Docs</title>
+  <style>
+    :root { --ink:#17202a; --muted:#5d6875; --bg:#f6f7f9; --panel:#fff; --line:#d8dee7; --blue:#1d5f99; --navy:#243447; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink); font-family:Arial, Helvetica, sans-serif; line-height:1.5; }
+    a { color:var(--blue); text-decoration:none; }
+    a:hover { text-decoration:underline; }
+    .topbar { display:flex; align-items:center; justify-content:space-between; gap:18px; padding:14px 28px; background:#fff; border-bottom:1px solid var(--line); position:sticky; top:0; z-index:3; }
+    .brand { font-size:18px; font-weight:700; color:var(--ink); white-space:nowrap; }
+    nav { display:flex; gap:18px; flex-wrap:wrap; justify-content:flex-end; font-size:14px; }
+    nav a { color:var(--ink); font-weight:700; }
+    header.hero { background:var(--navy); color:#fff; padding:46px 28px; }
+    .hero-inner, main { max-width:1120px; margin:0 auto; }
+    h1 { margin:0 0 12px; font-size:clamp(32px, 4vw, 50px); line-height:1.06; letter-spacing:0; }
+    .hero p, .lead { max-width:820px; color:var(--muted); }
+    .hero p { margin:0; color:#d7e2ee; font-size:18px; }
+    main { padding:28px; }
+    h2 { margin:0 0 14px; font-size:25px; letter-spacing:0; }
+    .grid { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:14px; margin-bottom:38px; }
+    .card { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:18px; min-height:150px; }
+    .card h3 { margin:0 0 8px; font-size:18px; }
+    .card p { margin:0 0 14px; color:var(--muted); }
+    footer { border-top:1px solid var(--line); padding:24px 28px 34px; color:var(--muted); text-align:center; }
+    @media (max-width:760px) { .topbar { align-items:flex-start; flex-direction:column; padding:14px 18px; } nav { justify-content:flex-start; gap:12px; } header.hero { padding:34px 18px; } main { padding:18px; } .grid { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="./">AscensionAI</a>
+    <nav aria-label="Primary">
+      <a href="./">Home</a>
+      <a href="dashboard/">Dashboard</a>
+      <a href="scripts.html">Scripts</a>
+      <a href="experiments/">Experiments</a>
+      <a href="https://justinchan.dev">Portfolio</a>
+      <a href="https://github.com/JustinoChan/AscensionAI">GitHub</a>
+    </nav>
+  </header>
+  <header class="hero">
+    <div class="hero-inner">
+      <h1>Project Documentation</h1>
+      <p>Start here for the architecture, experiments, technical writeup, demo assets, portfolio framing, and public dashboard behind AscensionAI.</p>
+    </div>
+  </header>
+  <main>
+    <section>
+      <h2>Core Docs</h2>
+      <div class="grid">
+        <article class="card">
+          <h3>Architecture</h3>
+          <p>Distributed trainer/worker topology, checkpoint sync, stale rollout rejection, failure handling, and scaling points.</p>
+          <a href="architecture.md">Read architecture doc</a>
+        </article>
+        <article class="card">
+          <h3>Technical Writeup</h3>
+          <p>Implementation detail on observations, actions, reward shaping, behavior cloning, PPO, parallel training, and limitations.</p>
+          <a href="AscensionAI_Technical_Writeup.md">Read technical writeup</a>
+        </article>
+        <article class="card">
+          <h3>Experiment Reports</h3>
+          <p>BC baseline, parallel PPO, and fixed-seed evaluation reports backed by the public experiment registry.</p>
+          <a href="experiments/">Open experiments</a>
+        </article>
+        <article class="card">
+          <h3>Scripts Reference</h3>
+          <p>Plain-English guide to each training, evaluation, environment, plotting, and logging script.</p>
+          <a href="scripts.html">Read script guide</a>
+        </article>
+        <article class="card">
+          <h3>Dashboard</h3>
+          <p>Static results viewer with embedded public metrics and support for loading local CSV files.</p>
+          <a href="dashboard/">Open dashboard</a>
+        </article>
+        <article class="card">
+          <h3>Portfolio and Resume Framing</h3>
+          <p>Recruiter-facing summary, public demo assets, and resume-ready bullets.</p>
+          <a href="portfolio.md">Open portfolio page</a>
+        </article>
+      </div>
+    </section>
+  </main>
+  <footer>
+    Back to <a href="./">AscensionAI home</a>.
+  </footer>
+</body>
+</html>
