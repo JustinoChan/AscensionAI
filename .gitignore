@@ -37,6 +37,7 @@ models/
 
 # Training data & rollouts
 rollouts_shared/
+bc_demos_shared/
 archives/
 *.jsonl
 *.npz

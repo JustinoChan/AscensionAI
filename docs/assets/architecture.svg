@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="760" viewBox="0 0 1240 760" role="img" aria-labelledby="title desc">
+  <title id="title">AscensionAI local distributed training architecture</title>
+  <desc id="desc">Diagram of Slay the Spire instances, Communication Mod bridge, rollout workers, shared rollout directory, offline trainer, checkpoint, evaluation harness, logs, and control panel.</desc>
+  <defs>
+    <style>
+      .bg { fill: #f7f8fb; }
+      .box { fill: #ffffff; stroke: #243447; stroke-width: 2; rx: 8; }
+      .box2 { fill: #eef6ff; stroke: #1d5f99; stroke-width: 2; rx: 8; }
+      .box3 { fill: #eefaf2; stroke: #247a3d; stroke-width: 2; rx: 8; }
+      .box4 { fill: #fff7e8; stroke: #9b640b; stroke-width: 2; rx: 8; }
+      .title { font: 700 22px Arial, sans-serif; fill: #111827; }
+      .label { font: 700 15px Arial, sans-serif; fill: #111827; }
+      .small { font: 13px Arial, sans-serif; fill: #374151; }
+      .arrow { stroke: #374151; stroke-width: 2.4; fill: none; marker-end: url(#arrow); }
+      .dash { stroke-dasharray: 7 6; }
+    </style>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#374151"/>
+    </marker>
+  </defs>
+  <rect class="bg" x="0" y="0" width="1240" height="760"/>
+  <text class="title" x="42" y="48">AscensionAI: Local Distributed RL Training System</text>
+  <text class="small" x="42" y="74">N live game workers collect checkpoint-tagged rollouts; one offline trainer updates the shared policy.</text>
+
+  <rect class="box4" x="42" y="115" width="220" height="160"/>
+  <text class="label" x="64" y="148">Control Panel</text>
+  <text class="small" x="64" y="176">AscensionAI.pyw</text>
+  <text class="small" x="64" y="200">launch modes</text>
+  <text class="small" x="64" y="224">log tailing</text>
+  <text class="small" x="64" y="248">crash cleanup</text>
+
+  <rect class="box" x="330" y="110" width="230" height="180"/>
+  <text class="label" x="352" y="143">Live Game Processes</text>
+  <text class="small" x="352" y="172">Slay the Spire instance 1</text>
+  <text class="small" x="352" y="196">Slay the Spire instance 2</text>
+  <text class="small" x="352" y="220">Slay the Spire instance N</text>
+  <text class="small" x="352" y="252">ModTheSpire + BaseMod</text>
+
+  <rect class="box2" x="630" y="110" width="230" height="180"/>
+  <text class="label" x="652" y="143">Communication Bridge</text>
+  <text class="small" x="652" y="172">Communication Mod</text>
+  <text class="small" x="652" y="196">SpireComm coordinator</text>
+  <text class="small" x="652" y="220">stdin/stdout protocol</text>
+  <text class="small" x="652" y="252">game state + commands</text>
+
+  <rect class="box3" x="930" y="110" width="250" height="180"/>
+  <text class="label" x="952" y="143">Rollout Workers</text>
+  <text class="small" x="952" y="172">rollout_worker.py --id 1</text>
+  <text class="small" x="952" y="196">rollout_worker.py --id 2</text>
+  <text class="small" x="952" y="220">rollout_worker.py --id N</text>
+  <text class="small" x="952" y="252">134-action masked policy</text>
+
+  <rect class="box" x="482" y="405" width="250" height="145"/>
+  <text class="label" x="504" y="438">Shared Rollout Queue</text>
+  <text class="small" x="504" y="466">rollouts_shared/*.npz</text>
+  <text class="small" x="504" y="490">worker_id</text>
+  <text class="small" x="504" y="514">checkpoint_id</text>
+
+  <rect class="box3" x="806" y="405" width="240" height="145"/>
+  <text class="label" x="828" y="438">Offline Trainer</text>
+  <text class="small" x="828" y="466">train_offline.py</text>
+  <text class="small" x="828" y="490">PPO batch updates</text>
+  <text class="small" x="828" y="514">stale rollout rejection</text>
+
+  <rect class="box2" x="806" y="610" width="240" height="95"/>
+  <text class="label" x="828" y="643">Shared Checkpoint</text>
+  <text class="small" x="828" y="671">models/ppo_sts.pt</text>
+  <text class="small" x="828" y="695">atomic save + reload</text>
+
+  <rect class="box4" x="482" y="610" width="250" height="95"/>
+  <text class="label" x="504" y="643">Evaluation Harness</text>
+  <text class="small" x="504" y="671">eval_model.py</text>
+  <text class="small" x="504" y="695">fixed seed comparisons</text>
+
+  <rect class="box" x="155" y="610" width="230" height="95"/>
+  <text class="label" x="177" y="643">Metrics + Reports</text>
+  <text class="small" x="177" y="671">logs/*.csv</text>
+  <text class="small" x="177" y="695">docs/experiments</text>
+
+  <path class="arrow" d="M262 190 L330 190"/>
+  <path class="arrow" d="M560 200 L630 200"/>
+  <path class="arrow" d="M860 200 L930 200"/>
+  <path class="arrow" d="M1055 290 C1055 360 715 340 640 405"/>
+  <path class="arrow" d="M732 478 L806 478"/>
+  <path class="arrow" d="M926 550 L926 610"/>
+  <path class="arrow dash" d="M806 658 L732 658"/>
+  <path class="arrow dash" d="M806 658 C700 590 960 360 1055 290"/>
+  <path class="arrow" d="M482 658 L385 658"/>
+  <path class="arrow" d="M806 478 C690 585 620 590 608 610"/>
+  <path class="arrow" d="M806 500 C620 575 390 580 300 610"/>
+</svg>

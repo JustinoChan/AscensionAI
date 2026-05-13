@@ -1,5 +1,67 @@
 # AscensionAI
 
+AscensionAI is a distributed reinforcement-learning system for **Slay the Spire**, combining heuristic behavior cloning, PPO fine-tuning, action masking, supervised warm starts, parallel rollout workers, process supervision, and deterministic fixed-seed evaluation.
+
+The project is built as an ML systems portfolio piece: it shows how to wrap a live desktop game in a reproducible training loop, keep multiple rollout processes healthy, reject stale data, evaluate policies on controlled seeds, and turn raw training logs into inspectable public artifacts.
+
+![AscensionAI architecture](docs/assets/architecture.svg)
+
+## Review First
+
+| Artifact | Why it matters |
+|---|---|
+| [Static dashboard](docs/dashboard/index.html) | Hostable results viewer for BC, PPO, and fixed-seed metrics. |
+| [Experiment reports](docs/experiments/) | Reproducible summaries for BC baseline, parallel PPO, and fixed-seed evaluation. |
+| [Architecture doc](docs/architecture.md) | Explains the trainer/worker/checkpoint topology and reliability story. |
+| [Technical writeup](docs/AscensionAI_Technical_Writeup.md) | Deeper implementation notes on observations, actions, rewards, PPO, and limitations. |
+| [Portfolio page](docs/portfolio.md) | Screenshot-rich project page for recruiters and hiring managers. |
+| [Public demo assets](docs/demo_assets.md) | Diagrams, dashboard, plot snapshot, and public-safe visual assets. |
+| [Resume framing](docs/resume_portfolio.md) | Concise portfolio description and resume-ready bullets. |
+
+## Engineering Highlights
+
+- **134-action masked discrete action space** covering card plays, potion use, choices, map/event decisions, proceed/leave, and no-op recovery.
+- **530-dimensional observation encoder** with player state, hand cards, monster identity/intent/powers, relics, potions, deck profile, and map lookahead.
+- **Behavior cloning warm start** from a full-game heuristic, with resumable demo collection and supervised validation metrics.
+- **PPO fine-tuning** with GAE, clipped objective, entropy control, target-KL early stopping, and optional BC anchor loss.
+- **Parallel rollout collection** through multiple live Slay the Spire processes writing checkpoint-tagged `.npz` trajectories.
+- **Stale rollout rejection** so the trainer does not update from games produced by a policy too far behind the current checkpoint.
+- **Crash recovery and process supervision** in a Windows control panel that launches workers, tails logs, stops gracefully, and sweeps orphaned game processes.
+- **Deterministic seed-set evaluation** comparing heuristic, BC, and PPO policies on the same seed list.
+- **Log-driven analysis** through CSV metrics, training plots, experiment reports, and a static dashboard.
+
+## Current Snapshot
+
+These public numbers come from the local May 12, 2026 artifacts summarized in [docs/experiments/index.json](docs/experiments/index.json). Raw logs, rollout files, and model checkpoints stay out of git.
+
+| Result | Value |
+|---|---:|
+| BC supervised samples | 86,297 |
+| BC final validation accuracy | 84.948% |
+| Parallel PPO rollout games | 160 |
+| PPO update batches | 19 |
+| Stale rollouts in snapshot | 0 |
+| Fixed-seed heuristic avg floor | 16.60 |
+| Fixed-seed BC avg floor | 13.08 |
+| Fixed-seed PPO avg floor | 13.08 |
+
+![Training plot snapshot](docs/assets/training_plot.png)
+
+## System At A Glance
+
+```
+Slay the Spire instances
+    -> Communication Mod / SpireComm
+    -> rollout_worker.py processes
+    -> rollouts_shared/*.npz with checkpoint metadata
+    -> train_offline.py PPO batches
+    -> models/ppo_sts.pt atomic checkpoint
+    -> workers reload checkpoint
+    -> eval_model.py fixed-seed comparisons
+```
+
+The strongest part of the current project is the complete training and evaluation system. The latest PPO run has not yet beaten the heuristic baseline; the documentation is explicit about that so future runs can be compared honestly.
+
 ## About
 
 AscensionAI is a reinforcement learning project for training an AI agent to play **Slay the Spire** through a Gymnasium-style environment, Communication Mod integration, behavior cloning warm starts, PPO fine-tuning, action masking, dense reward shaping, and parallel rollout workers. The project focuses on long-running autonomous training, combat decision-making, event handling, map/path choices, relic/card rewards, and live progress tracking for improving Ironclad performance over time.
@@ -319,7 +381,14 @@ AscensionAI/
 │   └── analyze_trace.py      # Game logger trace analyzer
 ├── logs/                     # Debug logs, training stats, stuck-state dumps
 ├── seeds/                    # Fixed seed lists for controlled evaluation
-├── docs/                     # Technical write-up and PDF export
+├── docs/                     # Public docs, reports, dashboard, assets, PDF export
+│   ├── experiments/          # Reproducible BC/PPO/evaluation reports + registry
+│   ├── dashboard/            # Static results dashboard
+│   ├── assets/               # Architecture diagram and public-safe visuals
+│   ├── architecture.md       # Distributed trainer/worker system story
+│   ├── portfolio.md          # Recruiter-facing project page
+│   ├── demo_assets.md        # Public asset inventory and copyright notes
+│   └── resume_portfolio.md   # Portfolio summary and resume bullets
 ├── external/
 │   └── spirecomm/            # SpireComm library (Communication Mod protocol)
 ├── requirements.txt

@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1160" height="720" viewBox="0 0 1160 720" role="img" aria-labelledby="title desc">
+  <title id="title">AscensionAI control panel preview</title>
+  <desc id="desc">Public-safe preview of the control panel showing run mode, worker controls, metrics, and log tabs.</desc>
+  <defs>
+    <style>
+      .window { fill: #f5f7fb; stroke: #1f2937; stroke-width: 2; rx: 8; }
+      .top { fill: #243447; }
+      .panel { fill: #ffffff; stroke: #c9d2df; stroke-width: 1.4; rx: 6; }
+      .accent { fill: #1d5f99; }
+      .ok { fill: #247a3d; }
+      .warn { fill: #9b640b; }
+      .text { font: 14px Arial, sans-serif; fill: #1f2937; }
+      .small { font: 12px Arial, sans-serif; fill: #4b5563; }
+      .label { font: 700 15px Arial, sans-serif; fill: #111827; }
+      .mono { font: 12px Consolas, monospace; fill: #111827; }
+    </style>
+  </defs>
+  <rect class="window" x="20" y="20" width="1120" height="680"/>
+  <rect class="top" x="20" y="20" width="1120" height="46"/>
+  <text x="42" y="50" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#ffffff">AscensionAI Control Panel</text>
+
+  <rect class="panel" x="42" y="92" width="318" height="244"/>
+  <text class="label" x="62" y="124">Run Configuration</text>
+  <text class="text" x="62" y="158">Mode: Parallel Workers</text>
+  <text class="text" x="62" y="186">Workers: 3 running</text>
+  <text class="text" x="62" y="214">Entropy: 0.001</text>
+  <text class="text" x="62" y="242">BC games: 150</text>
+  <text class="text" x="62" y="270">PPO games: continuous</text>
+  <rect class="accent" x="62" y="296" width="118" height="28" rx="5"/>
+  <text x="88" y="315" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#ffffff">Start</text>
+  <rect class="warn" x="194" y="296" width="118" height="28" rx="5"/>
+  <text x="224" y="315" font-family="Arial, sans-serif" font-size="13" font-weight="700" fill="#ffffff">Stop</text>
+
+  <rect class="panel" x="390" y="92" width="330" height="244"/>
+  <text class="label" x="410" y="124">Hardware and Workers</text>
+  <text class="text" x="410" y="158">CPU: Ryzen 7 9800X3D</text>
+  <text class="text" x="410" y="186">RAM: 32 GB</text>
+  <text class="text" x="410" y="214">GPU: Radeon RX 9070 XT</text>
+  <text class="text" x="410" y="242">Recommended workers: 6</text>
+  <rect class="ok" x="410" y="270" width="250" height="16" rx="8"/>
+  <text class="small" x="410" y="312">Public preview; no game assets included.</text>
+
+  <rect class="panel" x="750" y="92" width="348" height="244"/>
+  <text class="label" x="770" y="124">Latest Metrics</text>
+  <text class="text" x="770" y="158">PPO rollout games: 160</text>
+  <text class="text" x="770" y="186">PPO updates: 19</text>
+  <text class="text" x="770" y="214">Stale rollouts: 0</text>
+  <text class="text" x="770" y="242">Fixed-seed PPO avg floor: 13.08</text>
+  <text class="text" x="770" y="270">BC validation accuracy: 84.95%</text>
+
+  <rect class="panel" x="42" y="370" width="1056" height="294"/>
+  <text class="label" x="62" y="402">Log Tabs</text>
+  <rect x="62" y="424" width="120" height="30" rx="5" fill="#e9eff6"/>
+  <text class="small" x="86" y="444">Trainer</text>
+  <rect x="192" y="424" width="120" height="30" rx="5" fill="#f3f4f6"/>
+  <text class="small" x="222" y="444">Worker 1</text>
+  <rect x="322" y="424" width="120" height="30" rx="5" fill="#f3f4f6"/>
+  <text class="small" x="352" y="444">Worker 2</text>
+  <rect x="452" y="424" width="120" height="30" rx="5" fill="#f3f4f6"/>
+  <text class="small" x="482" y="444">Worker 3</text>
+  <text class="mono" x="70" y="490">15:11:37 Loading 8 new game files...</text>
+  <text class="mono" x="70" y="516">15:11:37 Running PPO update on 1444 transitions...</text>
+  <text class="mono" x="70" y="542">15:11:37 Update #19: kl=0.03641 clip=0.190 ev=0.178 early_stop=1</text>
+  <text class="mono" x="70" y="568">15:11:37 Waiting for rollouts: ready=0 need=8 consumed=152 stale_total=0</text>
+  <text class="mono" x="70" y="594">15:15:59 worker_3 game finished: floor=12 reward=-11.935</text>
+</svg>

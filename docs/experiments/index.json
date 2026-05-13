@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "snapshot_date": "2026-05-12",
+  "commit": "af06ee9",
+  "notes": "Public summary generated from local logs and checkpoints. Raw logs, rollouts, and model files stay gitignored.",
+  "runs": [
+    {
+      "run_id": "bc_baseline_20260512",
+      "report": "001_bc_baseline.md",
+      "model_path": "models/ppo_sts_bc.pt",
+      "training_mode": "behavior_cloning",
+      "games": 410,
+      "worker_count": 3,
+      "hyperparameters": {
+        "learning_rate": 0.0005,
+        "batch_size": 256,
+        "validation_split": 0.1,
+        "weight_decay": 0.00001,
+        "label_smoothing": 0.02,
+        "patience": 12
+      },
+      "training_metrics": {
+        "samples": 86297,
+        "validation_accuracy_final_percent": 84.948,
+        "best_validation_loss": 0.395827
+      },
+      "eval_run_id": "bc_25_20260512_112612",
+      "evaluation": {
+        "games": 25,
+        "average_floor": 13.08,
+        "average_reward": -0.62,
+        "win_rate_percent": 0.0,
+        "act2_reach_rate_percent": 12.0,
+        "floor20_rate_percent": 12.0,
+        "elite_fights": 32,
+        "elite_wins": 25,
+        "boss_fights": 10,
+        "boss_wins": 3
+      },
+      "notes": "Usable supervised warm start, but still below the source heuristic on the 25-seed evaluation slice."
+    },
+    {
+      "run_id": "parallel_ppo_20260512",
+      "report": "002_parallel_ppo.md",
+      "model_path": "models/ppo_sts.pt",
+      "training_mode": "parallel_ppo",
+      "games": 160,
+      "worker_count": 3,
+      "hyperparameters": {
+        "batch_games": 8,
+        "learning_rate_initial": 0.00003,
+        "learning_rate_latest": 0.00001875,
+        "epochs": 4,
+        "clip": 0.15,
+        "target_kl": 0.03,
+        "entropy_coefficient_initial": 0.001,
+        "max_rollout_lag": 4,
+        "auto_tune": true
+      },
+      "training_metrics": {
+        "ppo_update_rows": 19,
+        "rollouts_consumed": 152,
+        "latest_transition_total": 21658,
+        "latest_approx_kl": 0.0364123,
+        "latest_clip_fraction": 0.189614,
+        "latest_explained_variance": 0.177785,
+        "stale_rollouts": 0
+      },
+      "eval_run_id": "ppo_current_25_20260512_112612",
+      "evaluation": {
+        "games": 25,
+        "average_floor": 13.08,
+        "average_reward": -0.62,
+        "win_rate_percent": 0.0,
+        "act2_reach_rate_percent": 12.0,
+        "floor20_rate_percent": 12.0,
+        "elite_fights": 32,
+        "elite_wins": 25,
+        "boss_fights": 10,
+        "boss_wins": 3
+      },
+      "notes": "Parallel trainer mechanics worked with zero stale rollouts, but model quality has not yet separated from BC."
+    },
+    {
+      "run_id": "heuristic_fixed_seed_20260512",
+      "report": "003_fixed_seed_eval.md",
+      "model_path": "heuristic",
+      "training_mode": "heuristic_eval",
+      "games": 25,
+      "worker_count": 1,
+      "hyperparameters": {
+        "seed_file": "seeds/eval_200.txt"
+      },
+      "eval_run_id": "heuristic_25_20260512_112612",
+      "evaluation": {
+        "games": 25,
+        "average_floor": 16.6,
+        "average_reward": 11.38,
+        "win_rate_percent": 0.0,
+        "act2_reach_rate_percent": 32.0,
+        "floor20_rate_percent": 32.0,
+        "elite_fights": 33,
+        "elite_wins": 27,
+        "boss_fights": 18,
+        "boss_wins": 8
+      },
+      "notes": "Current reference policy for fixed-seed comparison."
+    }
+  ]
+}

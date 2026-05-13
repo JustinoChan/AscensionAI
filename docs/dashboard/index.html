@@ -1,0 +1,431 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AscensionAI Results Dashboard</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --ink: #17202a;
+      --muted: #5d6875;
+      --line: #d8dee7;
+      --panel: #ffffff;
+      --blue: #1d5f99;
+      --green: #247a3d;
+      --amber: #9b640b;
+      --red: #9f2f2f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Arial, Helvetica, sans-serif;
+      line-height: 1.45;
+    }
+    header {
+      padding: 28px 32px 18px;
+      background: #243447;
+      color: white;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 30px;
+      letter-spacing: 0;
+    }
+    header p {
+      margin: 0;
+      max-width: 980px;
+      color: #d7e2ee;
+    }
+    main {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 22px;
+    }
+    .toolbar {
+      display: flex;
+      gap: 14px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-bottom: 18px;
+    }
+    .upload {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+      cursor: pointer;
+      font-weight: 700;
+    }
+    input[type="file"] { display: none; }
+    .note { color: var(--muted); font-size: 14px; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin-bottom: 16px;
+    }
+    .card, .chart, .table-panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: 0 1px 2px rgba(20, 30, 40, 0.04);
+    }
+    .card { padding: 16px; min-height: 102px; }
+    .card .label { color: var(--muted); font-size: 13px; }
+    .card .value { margin-top: 8px; font-size: 28px; font-weight: 700; }
+    .card .sub { margin-top: 6px; color: var(--muted); font-size: 13px; }
+    .chart-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+    .chart { padding: 16px; min-height: 300px; }
+    .chart h2, .table-panel h2 {
+      margin: 0 0 12px;
+      font-size: 18px;
+    }
+    canvas {
+      width: 100%;
+      height: 220px;
+      display: block;
+    }
+    .table-panel { padding: 16px; margin-top: 16px; overflow-x: auto; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 880px;
+      font-size: 14px;
+    }
+    th, td {
+      text-align: left;
+      border-bottom: 1px solid var(--line);
+      padding: 9px 8px;
+      white-space: nowrap;
+    }
+    th { color: var(--muted); font-weight: 700; }
+    .pill {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: #eef3f8;
+      color: #243447;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    @media (max-width: 860px) {
+      header { padding: 22px 18px 16px; }
+      main { padding: 14px; }
+      .grid, .chart-grid { grid-template-columns: 1fr; }
+      h1 { font-size: 25px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>AscensionAI Results Dashboard</h1>
+    <p>Static, hostable viewer for BC, PPO, and fixed-seed evaluation artifacts. It ships with a May 12, 2026 snapshot and can also parse local CSV exports from <code>logs/</code>.</p>
+  </header>
+
+  <main>
+    <div class="toolbar">
+      <label class="upload" for="csvInput">Load CSV files</label>
+      <input id="csvInput" type="file" accept=".csv" multiple>
+      <span id="status" class="note">Using embedded public snapshot. Load <code>training_stats.csv</code>, <code>bc_train_stats.csv</code>, and <code>eval_stats.csv</code> for live local charts.</span>
+    </div>
+
+    <section class="grid" id="cards"></section>
+
+    <section class="chart-grid">
+      <div class="chart">
+        <h2>Floor Over Time</h2>
+        <canvas id="floorChart"></canvas>
+      </div>
+      <div class="chart">
+        <h2>Reward Over Time</h2>
+        <canvas id="rewardChart"></canvas>
+      </div>
+      <div class="chart">
+        <h2>PPO KL, Entropy, and Loss</h2>
+        <canvas id="ppoChart"></canvas>
+      </div>
+      <div class="chart">
+        <h2>BC Validation Accuracy and Loss</h2>
+        <canvas id="bcChart"></canvas>
+      </div>
+    </section>
+
+    <section class="table-panel">
+      <h2>Fixed-Seed Comparison</h2>
+      <table id="comparisonTable"></table>
+    </section>
+
+    <section class="table-panel">
+      <h2>Run Metadata</h2>
+      <table id="metadataTable"></table>
+    </section>
+  </main>
+
+  <script>
+    const snapshot = {
+      meta: {
+        date: "2026-05-12",
+        commit: "af06ee9",
+        seedFile: "seeds/eval_200.txt",
+        bcModel: "models/ppo_sts_bc.pt",
+        ppoModel: "models/ppo_sts.pt",
+        workers: 3,
+        staleRollouts: 0
+      },
+      training: [
+        {"game":49,"floor":16,"reward":-4.285,"worker":"1"},{"game":43,"floor":16,"reward":5.39,"worker":"2"},{"game":50,"floor":6,"reward":-19.36,"worker":"1"},{"game":51,"floor":11,"reward":-4.57,"worker":"1"},{"game":44,"floor":16,"reward":0.46,"worker":"2"},{"game":47,"floor":23,"reward":35.48,"worker":"3"},{"game":45,"floor":16,"reward":7.2,"worker":"2"},{"game":52,"floor":24,"reward":29.02,"worker":"1"},{"game":48,"floor":23,"reward":26.32,"worker":"3"},{"game":49,"floor":6,"reward":-15.59,"worker":"3"},{"game":53,"floor":20,"reward":25.38,"worker":"1"},{"game":46,"floor":22,"reward":27.55,"worker":"2"},{"game":50,"floor":7,"reward":-13.36,"worker":"3"},{"game":51,"floor":6,"reward":-18.835,"worker":"3"},{"game":47,"floor":16,"reward":-6.91,"worker":"2"},{"game":54,"floor":23,"reward":33.48,"worker":"1"},{"game":48,"floor":8,"reward":-15.245,"worker":"2"},{"game":55,"floor":6,"reward":-17.65,"worker":"1"},{"game":52,"floor":19,"reward":22.3,"worker":"3"},{"game":49,"floor":7,"reward":-4.84,"worker":"2"},{"game":53,"floor":16,"reward":4.605,"worker":"3"},{"game":50,"floor":16,"reward":6.6,"worker":"2"},{"game":56,"floor":22,"reward":22.74,"worker":"1"},{"game":54,"floor":12,"reward":-11.935,"worker":"3"}
+      ],
+      ppo: [
+        {"update":1,"kl":0.00165891,"entropy":0.322985,"clip":0.027344,"vf_loss":30.374583,"pg_loss":-0.005981},{"update":2,"kl":0.00122486,"entropy":0.371167,"clip":0.06065,"vf_loss":38.961307,"pg_loss":-0.002782},{"update":3,"kl":0.01217209,"entropy":0.324659,"clip":0.090569,"vf_loss":44.569088,"pg_loss":0.004619},{"update":4,"kl":0.02050195,"entropy":0.364453,"clip":0.149709,"vf_loss":37.34534,"pg_loss":0.010889},{"update":5,"kl":0.01115785,"entropy":0.335404,"clip":0.098619,"vf_loss":29.842898,"pg_loss":-0.003106},{"update":6,"kl":0.00959566,"entropy":0.385109,"clip":0.093506,"vf_loss":41.427031,"pg_loss":-0.000898},{"update":7,"kl":0.01382287,"entropy":0.363347,"clip":0.126228,"vf_loss":29.717805,"pg_loss":0.006314},{"update":8,"kl":0.01342071,"entropy":0.347758,"clip":0.130684,"vf_loss":26.742273,"pg_loss":-0.000008},{"update":9,"kl":0.018282,"entropy":0.355549,"clip":0.168087,"vf_loss":27.759048,"pg_loss":0.008579},{"update":10,"kl":0.00806847,"entropy":0.337746,"clip":0.125699,"vf_loss":31.232329,"pg_loss":0.001521},{"update":11,"kl":0.00542871,"entropy":0.371397,"clip":0.133801,"vf_loss":29.980527,"pg_loss":0.00299},{"update":12,"kl":0.0038593,"entropy":0.34253,"clip":0.138354,"vf_loss":28.464578,"pg_loss":0.006595},{"update":13,"kl":0.003241,"entropy":0.316194,"clip":0.097049,"vf_loss":30.853033,"pg_loss":0.006479},{"update":14,"kl":0.01493797,"entropy":0.301612,"clip":0.116154,"vf_loss":30.552556,"pg_loss":0.007205},{"update":15,"kl":0.00892591,"entropy":0.311756,"clip":0.110978,"vf_loss":26.090092,"pg_loss":0.002494},{"update":16,"kl":0.00384765,"entropy":0.36802,"clip":0.12267,"vf_loss":25.46888,"pg_loss":0.003498},{"update":17,"kl":0.00806537,"entropy":0.363652,"clip":0.109872,"vf_loss":34.531892,"pg_loss":0.009227},{"update":18,"kl":0.00842598,"entropy":0.361252,"clip":0.143173,"vf_loss":20.690091,"pg_loss":0.014146},{"update":19,"kl":0.0364123,"entropy":0.35016,"clip":0.189614,"vf_loss":26.109448,"pg_loss":0.022714}
+      ],
+      bc: [
+        {"epoch":1,"val_acc":77.01,"val_loss":0.602193,"train_acc":72.781},{"epoch":5,"val_acc":81.078,"val_loss":0.505475,"train_acc":81.337},{"epoch":10,"val_acc":81.796,"val_loss":0.46856,"train_acc":83.156},{"epoch":15,"val_acc":83.581,"val_loss":0.431452,"train_acc":85.355},{"epoch":20,"val_acc":84.357,"val_loss":0.4102,"train_acc":87.224},{"epoch":25,"val_acc":84.508,"val_loss":0.402615,"train_acc":88.801},{"epoch":30,"val_acc":84.983,"val_loss":0.398281,"train_acc":90.015},{"epoch":35,"val_acc":84.647,"val_loss":0.398275,"train_acc":91.174},{"epoch":40,"val_acc":85.539,"val_loss":0.405917,"train_acc":92.352},{"epoch":41,"val_acc":84.948,"val_loss":0.406206,"train_acc":92.588}
+      ],
+      comparison: [
+        {"run":"heuristic_25_20260512_112612","label":"Heuristic","games":25,"avg_floor":16.6,"avg_reward":11.38,"win_rate":0,"act2_rate":32,"floor20_rate":32,"elite":"27/33","boss":"8/18"},
+        {"run":"bc_25_20260512_112612","label":"BC checkpoint","games":25,"avg_floor":13.08,"avg_reward":-0.62,"win_rate":0,"act2_rate":12,"floor20_rate":12,"elite":"25/32","boss":"3/10"},
+        {"run":"ppo_current_25_20260512_112612","label":"PPO checkpoint","games":25,"avg_floor":13.08,"avg_reward":-0.62,"win_rate":0,"act2_rate":12,"floor20_rate":12,"elite":"25/32","boss":"3/10"}
+      ]
+    };
+
+    let state = structuredClone(snapshot);
+
+    function number(value, fallback = 0) {
+      const n = Number(value);
+      return Number.isFinite(n) ? n : fallback;
+    }
+
+    function parseCsv(text) {
+      const rows = [];
+      let row = [], cell = "", quoted = false;
+      for (let i = 0; i < text.length; i++) {
+        const c = text[i], next = text[i + 1];
+        if (quoted && c === '"' && next === '"') { cell += '"'; i++; continue; }
+        if (c === '"') { quoted = !quoted; continue; }
+        if (!quoted && c === ",") { row.push(cell); cell = ""; continue; }
+        if (!quoted && (c === "\n" || c === "\r")) {
+          if (c === "\r" && next === "\n") i++;
+          row.push(cell); cell = "";
+          if (row.some(v => v !== "")) rows.push(row);
+          row = [];
+          continue;
+        }
+        cell += c;
+      }
+      row.push(cell);
+      if (row.some(v => v !== "")) rows.push(row);
+      const header = rows.shift() || [];
+      return rows.map(values => Object.fromEntries(header.map((h, i) => [h, values[i] ?? ""])));
+    }
+
+    function summarizeEval(rows) {
+      const groups = new Map();
+      rows.forEach(r => {
+        const key = r.run || r.policy || "unknown";
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(r);
+      });
+      return Array.from(groups.entries()).map(([run, group]) => {
+        const games = group.length || 1;
+        const wins = group.filter(r => number(r.victory) === 1).length;
+        const act2 = group.filter(r => number(r.final_act) >= 2).length;
+        const floor20 = group.filter(r => number(r.final_floor) >= 20).length;
+        const eliteWins = group.reduce((s, r) => s + number(r.elites_won), 0);
+        const eliteFights = group.reduce((s, r) => s + number(r.elites_fought), 0);
+        const bossWins = group.reduce((s, r) => s + number(r.bosses_won), 0);
+        const bossFights = group.reduce((s, r) => s + number(r.bosses_fought), 0);
+        const model = group[0].model || group[0].policy || "";
+        const label = run.startsWith("heuristic") ? "Heuristic" : run.startsWith("bc") ? "BC checkpoint" : run.includes("ppo") ? "PPO checkpoint" : model;
+        return {
+          run, label, games,
+          avg_floor: avg(group, "final_floor"),
+          avg_reward: avg(group, "total_reward"),
+          win_rate: pct(wins, games),
+          act2_rate: pct(act2, games),
+          floor20_rate: pct(floor20, games),
+          elite: `${eliteWins}/${eliteFights}`,
+          boss: `${bossWins}/${bossFights}`
+        };
+      });
+    }
+
+    function avg(rows, key) {
+      const vals = rows.map(r => number(r[key], NaN)).filter(Number.isFinite);
+      return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+    }
+    function pct(n, d) { return d ? (100 * n / d) : 0; }
+    function fmt(n, digits = 2) { return Number(n).toFixed(digits); }
+
+    function renderCards() {
+      const latestBc = state.bc.at(-1) || {};
+      const ppoGames = state.training.length;
+      const avgFloor = avg(state.training, "floor");
+      const avgReward = avg(state.training, "reward");
+      const latestPpo = state.ppo.at(-1) || {};
+      const bestEval = [...state.comparison].sort((a, b) => b.avg_floor - a.avg_floor)[0] || {};
+      const cards = [
+        ["BC val accuracy", `${fmt(number(latestBc.val_acc), 2)}%`, `epoch ${latestBc.epoch || "n/a"}`],
+        ["Recent PPO avg floor", fmt(avgFloor), `${ppoGames} displayed rollout games`],
+        ["Recent PPO avg reward", fmt(avgReward), "shaped reward"],
+        ["Latest PPO KL", fmt(number(latestPpo.kl), 5), `clip ${fmt(number(latestPpo.clip), 3)}`],
+        ["Best fixed-seed policy", bestEval.label || "n/a", `avg floor ${fmt(number(bestEval.avg_floor))}`],
+        ["Workers", String(state.meta.workers || "n/a"), `stale rollouts ${state.meta.staleRollouts}`],
+        ["Commit", state.meta.commit, state.meta.date],
+        ["Seed file", state.meta.seedFile, "deterministic eval"]
+      ];
+      document.getElementById("cards").innerHTML = cards.map(([label, value, sub]) => `
+        <article class="card">
+          <div class="label">${label}</div>
+          <div class="value">${value}</div>
+          <div class="sub">${sub}</div>
+        </article>
+      `).join("");
+    }
+
+    function renderTable(id, headers, rows) {
+      document.getElementById(id).innerHTML = `
+        <thead><tr>${headers.map(h => `<th>${h}</th>`).join("")}</tr></thead>
+        <tbody>${rows.map(row => `<tr>${row.map(v => `<td>${v}</td>`).join("")}</tr>`).join("")}</tbody>
+      `;
+    }
+
+    function renderTables() {
+      renderTable("comparisonTable",
+        ["Policy", "Run", "Games", "Avg floor", "Avg reward", "Win", "Act 2", "Floor 20+", "Elite W/L", "Boss W/L"],
+        state.comparison.map(r => [
+          `<span class="pill">${r.label}</span>`, r.run, r.games, fmt(r.avg_floor), fmt(r.avg_reward),
+          `${fmt(r.win_rate, 1)}%`, `${fmt(r.act2_rate, 1)}%`, `${fmt(r.floor20_rate, 1)}%`, r.elite, r.boss
+        ])
+      );
+      renderTable("metadataTable",
+        ["Field", "Value"],
+        [
+          ["Snapshot date", state.meta.date],
+          ["Commit", `<code>${state.meta.commit}</code>`],
+          ["BC model", `<code>${state.meta.bcModel}</code>`],
+          ["PPO model", `<code>${state.meta.ppoModel}</code>`],
+          ["Seed file", `<code>${state.meta.seedFile}</code>`],
+          ["Worker count", state.meta.workers],
+          ["Stale rollouts", state.meta.staleRollouts]
+        ]
+      );
+    }
+
+    function drawLine(canvasId, series, options) {
+      const canvas = document.getElementById(canvasId);
+      const rect = canvas.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      canvas.width = Math.max(320, Math.floor(rect.width * dpr));
+      canvas.height = Math.floor(220 * dpr);
+      const ctx = canvas.getContext("2d");
+      ctx.scale(dpr, dpr);
+      const w = canvas.width / dpr, h = canvas.height / dpr;
+      ctx.clearRect(0, 0, w, h);
+      ctx.strokeStyle = "#d8dee7";
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 5; i++) {
+        const y = 18 + i * (h - 38) / 4;
+        ctx.beginPath(); ctx.moveTo(42, y); ctx.lineTo(w - 12, y); ctx.stroke();
+      }
+      const all = series.flatMap(s => s.values.map(v => v.y)).filter(Number.isFinite);
+      const min = Math.min(...all, options.min ?? Infinity);
+      const max = Math.max(...all, options.max ?? -Infinity);
+      const span = max === min ? 1 : max - min;
+      ctx.fillStyle = "#5d6875";
+      ctx.font = "12px Arial";
+      ctx.fillText(fmt(max, options.digits ?? 1), 6, 22);
+      ctx.fillText(fmt(min, options.digits ?? 1), 6, h - 18);
+      series.forEach(s => {
+        ctx.strokeStyle = s.color;
+        ctx.lineWidth = 2.4;
+        ctx.beginPath();
+        s.values.forEach((p, i) => {
+          const x = 42 + i * (w - 58) / Math.max(1, s.values.length - 1);
+          const y = 18 + (max - p.y) * (h - 38) / span;
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+      });
+      let lx = 48;
+      series.forEach(s => {
+        ctx.fillStyle = s.color;
+        ctx.fillRect(lx, h - 12, 10, 10);
+        ctx.fillStyle = "#17202a";
+        ctx.fillText(s.name, lx + 15, h - 3);
+        lx += ctx.measureText(s.name).width + 45;
+      });
+    }
+
+    function renderCharts() {
+      drawLine("floorChart", [
+        { name: "final floor", color: "#1d5f99", values: state.training.map((r, i) => ({ x: i, y: number(r.floor) })) }
+      ], { min: 0, digits: 0 });
+      drawLine("rewardChart", [
+        { name: "reward", color: "#247a3d", values: state.training.map((r, i) => ({ x: i, y: number(r.reward) })) }
+      ], { digits: 1 });
+      drawLine("ppoChart", [
+        { name: "KL", color: "#9f2f2f", values: state.ppo.map(r => ({ x: r.update, y: number(r.kl) })) },
+        { name: "entropy", color: "#1d5f99", values: state.ppo.map(r => ({ x: r.update, y: number(r.entropy) })) },
+        { name: "clip", color: "#9b640b", values: state.ppo.map(r => ({ x: r.update, y: number(r.clip) })) }
+      ], { min: 0, digits: 3 });
+      drawLine("bcChart", [
+        { name: "val acc", color: "#247a3d", values: state.bc.map(r => ({ x: r.epoch, y: number(r.val_acc) })) },
+        { name: "val loss x100", color: "#9b640b", values: state.bc.map(r => ({ x: r.epoch, y: number(r.val_loss) * 100 })) }
+      ], { min: 0, digits: 1 });
+    }
+
+    function render() {
+      renderCards();
+      renderTables();
+      renderCharts();
+    }
+
+    document.getElementById("csvInput").addEventListener("change", async event => {
+      const files = Array.from(event.target.files || []);
+      const loaded = [];
+      for (const file of files) {
+        const text = await file.text();
+        const rows = parseCsv(text);
+        loaded.push(file.name);
+        if (file.name === "training_stats.csv") {
+          const games = rows.filter(r => r.final_floor !== "").map(r => ({
+            game: number(r.game), floor: number(r.final_floor), reward: number(r.total_reward), worker: r.worker || ""
+          }));
+          const ppo = rows.filter(r => r.approx_kl !== "").map(r => ({
+            update: number(r.total_updates), kl: number(r.approx_kl), entropy: number(r.entropy), clip: number(r.clip_fraction),
+            vf_loss: number(r.vf_loss), pg_loss: number(r.pg_loss)
+          }));
+          state.training = games.slice(-120);
+          state.ppo = ppo;
+          const staleRows = rows.filter(r => r.stale_rollouts !== "");
+          state.meta.staleRollouts = staleRows.length ? staleRows.at(-1).stale_rollouts : state.meta.staleRollouts;
+          state.meta.workers = new Set(games.map(g => g.worker).filter(Boolean)).size || state.meta.workers;
+        }
+        if (file.name === "bc_train_stats.csv") {
+          state.bc = rows.filter(r => r.val_acc !== "").map(r => ({
+            epoch: number(r.epoch), val_acc: number(r.val_acc), val_loss: number(r.val_loss), train_acc: number(r.train_acc)
+          })).slice(-80);
+        }
+        if (file.name === "eval_stats.csv") {
+          state.comparison = summarizeEval(rows);
+        }
+      }
+      document.getElementById("status").textContent = `Loaded ${loaded.join(", ")}. Charts now reflect local CSV data in this browser session.`;
+      render();
+    });
+
+    window.addEventListener("resize", renderCharts);
+    render();
+  </script>
+</body>
+</html>
