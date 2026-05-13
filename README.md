@@ -10,7 +10,10 @@ The project is built as an ML systems portfolio piece: it shows how to wrap a li
 
 | Artifact | Why it matters |
 |---|---|
+| [GitHub Pages landing page](docs/index.html) | Welcome page for the public project site at the Pages root. |
 | [Static dashboard](docs/dashboard/index.html) | Hostable results viewer for BC, PPO, and fixed-seed metrics. |
+| [Scripts reference](docs/scripts.html) | Explains what each launcher, training, evaluation, environment, and analysis script does. |
+| [Docs hub](docs/docs.html) | Central navigation for architecture, reports, writeups, assets, and portfolio framing. |
 | [Experiment reports](docs/experiments/) | Reproducible summaries for BC baseline, parallel PPO, and fixed-seed evaluation. |
 | [Architecture doc](docs/architecture.md) | Explains the trainer/worker/checkpoint topology and reliability story. |
 | [Technical writeup](docs/AscensionAI_Technical_Writeup.md) | Deeper implementation notes on observations, actions, rewards, PPO, and limitations. |

@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AscensionAI</title>
+  <style>
+    :root {
+      --ink: #17202a;
+      --muted: #5d6875;
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --line: #d8dee7;
+      --blue: #1d5f99;
+      --green: #247a3d;
+      --amber: #9b640b;
+      --red: #9f2f2f;
+      --navy: #243447;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Arial, Helvetica, sans-serif;
+      line-height: 1.5;
+    }
+    a { color: var(--blue); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 14px 28px;
+      background: #ffffff;
+      border-bottom: 1px solid var(--line);
+      position: sticky;
+      top: 0;
+      z-index: 3;
+    }
+    .brand {
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--ink);
+      white-space: nowrap;
+    }
+    nav {
+      display: flex;
+      gap: 18px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      font-size: 14px;
+    }
+    nav a { color: var(--ink); font-weight: 700; }
+    .hero {
+      position: relative;
+      min-height: 430px;
+      display: grid;
+      align-items: end;
+      overflow: hidden;
+      background: var(--navy);
+    }
+    .hero::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        linear-gradient(90deg, rgba(23, 32, 42, 0.92), rgba(23, 32, 42, 0.66), rgba(23, 32, 42, 0.30)),
+        url("assets/architecture.svg") center / cover no-repeat;
+      transform: scale(1.02);
+    }
+    .hero-content {
+      position: relative;
+      max-width: 1180px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 58px 28px;
+      color: #ffffff;
+    }
+    h1 {
+      max-width: 880px;
+      margin: 0 0 18px;
+      font-size: clamp(34px, 5vw, 62px);
+      line-height: 1.02;
+      letter-spacing: 0;
+    }
+    .hero p {
+      max-width: 760px;
+      margin: 0;
+      font-size: 19px;
+      color: #e6edf5;
+    }
+    .hero-actions {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 26px;
+    }
+    .button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 42px;
+      padding: 10px 14px;
+      border: 1px solid rgba(255, 255, 255, 0.72);
+      border-radius: 6px;
+      color: #ffffff;
+      font-weight: 700;
+      background: rgba(255, 255, 255, 0.08);
+    }
+    .button.primary {
+      border-color: #ffffff;
+      background: #ffffff;
+      color: var(--navy);
+    }
+    .button:hover { text-decoration: none; }
+    main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 28px;
+    }
+    .section {
+      margin: 28px 0 42px;
+    }
+    .section h2 {
+      margin: 0 0 12px;
+      font-size: 26px;
+      letter-spacing: 0;
+    }
+    .lead {
+      max-width: 860px;
+      color: var(--muted);
+      margin: 0 0 18px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+    }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      min-height: 178px;
+      box-shadow: 0 1px 2px rgba(20, 30, 40, 0.04);
+    }
+    .card h3 {
+      margin: 0 0 8px;
+      font-size: 18px;
+      letter-spacing: 0;
+    }
+    .card p {
+      margin: 0 0 14px;
+      color: var(--muted);
+    }
+    .metric-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .metric {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      min-height: 92px;
+    }
+    .metric strong {
+      display: block;
+      font-size: 26px;
+      margin-top: 6px;
+    }
+    .metric span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .media-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+      gap: 18px;
+      align-items: start;
+    }
+    .media-row img {
+      display: block;
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+    .doc-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .doc-link {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      padding: 13px 14px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      color: var(--ink);
+      font-weight: 700;
+    }
+    .doc-link span {
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 400;
+    }
+    footer {
+      border-top: 1px solid var(--line);
+      padding: 24px 28px 34px;
+      color: var(--muted);
+      text-align: center;
+    }
+    @media (max-width: 860px) {
+      .topbar { align-items: flex-start; flex-direction: column; padding: 14px 18px; }
+      nav { justify-content: flex-start; gap: 12px; }
+      .hero-content { padding: 42px 18px; }
+      main { padding: 18px; }
+      .grid, .metric-grid, .media-row, .doc-list { grid-template-columns: 1fr; }
+      .hero p { font-size: 17px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="./">AscensionAI</a>
+    <nav aria-label="Primary">
+      <a href="dashboard/">Dashboard</a>
+      <a href="docs.html">Docs</a>
+      <a href="scripts.html">Scripts</a>
+      <a href="experiments/">Experiments</a>
+      <a href="https://justinchan.dev">Portfolio</a>
+      <a href="https://github.com/JustinoChan/AscensionAI">GitHub</a>
+    </nav>
+  </header>
+
+  <section class="hero">
+    <div class="hero-content">
+      <h1>Distributed reinforcement learning for Slay the Spire</h1>
+      <p>AscensionAI wraps a live desktop game in a training system with behavior cloning, PPO fine-tuning, action masking, parallel rollout workers, checkpoint-aware offline updates, deterministic evaluation, and public experiment reporting.</p>
+      <div class="hero-actions">
+        <a class="button primary" href="dashboard/">Open Dashboard</a>
+        <a class="button" href="scripts.html">Read Script Guide</a>
+        <a class="button" href="AscensionAI_Technical_Writeup.md">Technical Writeup</a>
+      </div>
+    </div>
+  </section>
+
+  <main>
+    <section class="section">
+      <h2>Project Snapshot</h2>
+      <p class="lead">The current public snapshot focuses on making the existing ML systems work legible: training infrastructure, deterministic evaluation, dashboarding, architecture documentation, and honest early results.</p>
+      <div class="metric-grid">
+        <div class="metric"><span>Action space</span><strong>134</strong></div>
+        <div class="metric"><span>Observation vector</span><strong>530</strong></div>
+        <div class="metric"><span>BC validation accuracy</span><strong>84.948%</strong></div>
+        <div class="metric"><span>Stale rollouts in snapshot</span><strong>0</strong></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>What To Review First</h2>
+      <div class="grid">
+        <article class="card">
+          <h3>Results Dashboard</h3>
+          <p>Static viewer for fixed-seed comparisons, PPO metrics, BC validation curves, and local CSV uploads.</p>
+          <a href="dashboard/">Open dashboard</a>
+        </article>
+        <article class="card">
+          <h3>Architecture</h3>
+          <p>Trainer/worker topology, checkpoint sync, stale rollout rejection, crash handling, and scaling points.</p>
+          <a href="docs.html">Open docs</a>
+        </article>
+        <article class="card">
+          <h3>Experiments</h3>
+          <p>Reproducible summaries for BC baseline, parallel PPO, and fixed-seed evaluation.</p>
+          <a href="experiments/">Open reports</a>
+        </article>
+        <article class="card">
+          <h3>Scripts</h3>
+          <p>Plain-English reference for the training, evaluation, environment, plotting, and logging scripts.</p>
+          <a href="scripts.html">Read script guide</a>
+        </article>
+        <article class="card">
+          <h3>Technical Writeup</h3>
+          <p>Deep implementation notes on observation encoding, action masking, reward shaping, PPO, and limitations.</p>
+          <a href="AscensionAI_Technical_Writeup.md">Read writeup</a>
+        </article>
+        <article class="card">
+          <h3>Personal Portfolio</h3>
+          <p>More projects, background, and contact information.</p>
+          <a href="https://justinchan.dev">Visit justinchan.dev</a>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>System In Motion</h2>
+      <div class="media-row">
+        <img src="assets/worker_launch_demo.gif" alt="Animated diagram showing rollout workers producing files, an offline trainer updating a checkpoint, and workers reloading the model.">
+        <div>
+          <p class="lead">AscensionAI runs as a local distributed training loop: live game workers write checkpoint-tagged rollout files, the offline trainer consumes fresh batches, saves an updated checkpoint, and workers reload the policy for the next collection cycle.</p>
+          <div class="doc-list">
+            <a class="doc-link" href="docs.html">Docs hub <span>all project docs</span></a>
+            <a class="doc-link" href="demo_assets.md">Demo assets <span>public-safe media</span></a>
+            <a class="doc-link" href="portfolio.md">Portfolio page <span>project framing</span></a>
+            <a class="doc-link" href="experiments/index.json">Experiment registry <span>machine-readable</span></a>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Current Results</h2>
+      <p class="lead">The latest PPO snapshot has not yet beaten the heuristic baseline. The value here is the complete training system and evaluation pipeline, with clear metrics for future improvement.</p>
+      <div class="grid">
+        <article class="card">
+          <h3>Heuristic baseline</h3>
+          <p>25 fixed-seed games: 16.60 average floor, 11.38 average shaped reward, 32.0% Act 2 reach rate.</p>
+          <a href="experiments/003_fixed_seed_eval.md">View evaluation</a>
+        </article>
+        <article class="card">
+          <h3>BC checkpoint</h3>
+          <p>86,297 supervised samples and 84.948% final validation accuracy from heuristic demonstrations.</p>
+          <a href="experiments/001_bc_baseline.md">View BC report</a>
+        </article>
+        <article class="card">
+          <h3>Parallel PPO</h3>
+          <p>160 rollout games, 19 PPO update batches, and zero stale rollouts in the public snapshot.</p>
+          <a href="experiments/002_parallel_ppo.md">View PPO report</a>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    AscensionAI is a public portfolio project by Justin Chan. The live training stack depends on a local Slay the Spire install; this site hosts the docs, reports, dashboard, and public-safe media.
+  </footer>
+</body>
+</html>
