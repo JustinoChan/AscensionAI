@@ -89,9 +89,11 @@ from game_data import CARD_MECHANICS
 from screen_handler import (
     GOOD_CARDS, OK_CARDS, JUNK_CARDS,
     pick_card_reward, pick_combat_reward_obj, pick_combat_reward_str,
-    pick_rest, pick_event, pick_boss_relic, pick_hand_select,
+    pick_rest, pick_event_slot_and_choice,
+    pick_boss_relic, pick_hand_select,
     pick_grid_card, _pick_grid_upgrade, _is_matching_grid, _pick_grid_match,
     _pick_from_unselected, _looks_like_smith_grid,
+    event_choice_targets,
     pick_map,
     pick_shop_item,
     recover_from_command_error,
@@ -490,18 +492,14 @@ def heuristic_action(gs) -> Tuple[Optional[Action], Optional[int]]:
     # --- EVENT ---
     if screen == "EVENT":
         if choice_list:
-            idx = pick_event(choice_list, gs)
-            return ChooseAction(choice_index=idx), _CHOOSE_START + idx
+            if event_choice_targets(gs):
+                slot, choice_idx = pick_event_slot_and_choice(choice_list, gs)
+                return ChooseAction(choice_index=choice_idx), _CHOOSE_START + slot
         options = list(getattr(scr, "options", []) or []) if scr else []
         if options:
-            enabled = [
-                (i, opt) for i, opt in enumerate(options)
-                if not bool(getattr(opt, "disabled", False))
-            ]
-            if enabled:
-                idx, opt = enabled[0]
-                choice_idx = getattr(opt, "choice_index", None)
-                return ChooseAction(choice_index=choice_idx if choice_idx is not None else idx), _CHOOSE_START + idx
+            if event_choice_targets(gs):
+                slot, choice_idx = pick_event_slot_and_choice([], gs)
+                return ChooseAction(choice_index=choice_idx), _CHOOSE_START + slot
         if proceed_avail:
             return Action("proceed"), _PROCEED
         return None, None
@@ -1200,6 +1198,12 @@ def main():
         if len(action_list) < 50:
             log(f"Too few samples in demo dir {demo_dir}, skipping training")
             return
+        demo_save = args.demo_save
+        if demo_save is None:
+            demo_save = save_path.replace(".pt", "_bc_demos.npz")
+        elif not os.path.isabs(demo_save):
+            demo_save = os.path.join(_root, demo_save)
+        save_demo_dataset(obs_list, action_list, mask_list, demo_save)
         train_supervised(
             obs_list, action_list, mask_list, save_path,
             epochs=args.epochs, lr=args.lr, batch_size=args.batch_size,

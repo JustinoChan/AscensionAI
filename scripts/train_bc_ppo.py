@@ -193,7 +193,12 @@ from sts_gym_env import (
     RewardTracker, _NOOP, is_terminal_state, is_victory_state,
 )
 from ppo_model import PPOTrainer, GameBuffer
-from screen_handler import auto_handle_screen, recover_from_command_error
+from screen_handler import (
+    auto_handle_screen,
+    event_choice_targets,
+    pick_event_slot_and_choice,
+    recover_from_command_error,
+)
 from behavior_clone import heuristic_action
 from bc_stats import append_bc_stats
 from fight_tracker import FightTracker
@@ -690,6 +695,11 @@ class BCPPOAgent:
             return self._ppo_step_inner(gs)
         except Exception:
             log(f"CRASH in _ppo_step: {traceback.format_exc()}")
+            if self._screen_name(gs) == "EVENT":
+                choice_list = list(getattr(gs, "choice_list", []) or [])
+                if event_choice_targets(gs):
+                    _slot, choice_idx = pick_event_slot_and_choice(choice_list, gs)
+                    return ChooseAction(choice_index=choice_idx)
             if getattr(gs, "proceed_available", False):
                 return Action("proceed")
             return ChooseAction(choice_index=0)
@@ -785,6 +795,9 @@ class BCPPOAgent:
             choice_list = list(getattr(gs, "choice_list", []) or [])
             log(f"PPO ISSUE stuck on {screen} floor={cur_floor}, forcing action: "
                 f"{_state_desc(gs, screen)}")
+            if screen == "EVENT" and event_choice_targets(gs):
+                _slot, choice_idx = pick_event_slot_and_choice(choice_list, gs)
+                return ChooseAction(choice_index=choice_idx)
             if getattr(gs, "proceed_available", False):
                 return Action("proceed")
             if getattr(gs, "cancel_available", False):

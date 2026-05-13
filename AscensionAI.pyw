@@ -1557,6 +1557,17 @@ class AscensionApp:
                 shutil.copy2(str(bc_path), str(model_path))
                 _logger.info(f"Copied BC checkpoint -> {model_path}")
                 self._append_log("All", "Initialized model from BC checkpoint")
+                bc_demo_target = ROOT / "models" / "ppo_sts_bc_demos.npz"
+                for bc_demo_source in (
+                    ROOT / "models" / "ppo_sts_bc_demos.npz",
+                    ROOT / "models" / "ppo_sts_bc_bc_demos.npz",
+                ):
+                    if not bc_demo_source.exists():
+                        continue
+                    if bc_demo_source != bc_demo_target:
+                        shutil.copy2(str(bc_demo_source), str(bc_demo_target))
+                    _logger.info(f"BC demo anchor available at {bc_demo_target}")
+                    break
             else:
                 _logger.warning("Use BC checked but ppo_sts_bc.pt not found")
                 self._append_log("All", "WARNING: BC checkpoint not found, starting fresh")
@@ -2181,6 +2192,7 @@ class AscensionApp:
                 str(VENV_PYTHON), str(SCRIPTS / "behavior_clone.py"),
                 "--train-demo-dir", str(demo_dir),
                 "--save", "models/ppo_sts_bc.pt",
+                "--demo-save", "models/ppo_sts_bc_demos.npz",
                 "--epochs", str(int(bc_epochs)),
                 "--lr", "5e-4",
                 "--batch-size", "256",

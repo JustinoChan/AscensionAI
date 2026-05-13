@@ -114,7 +114,12 @@ from sts_gym_env import (
     is_terminal_state, is_victory_state,
 )
 from ppo_model import PPOTrainer
-from screen_handler import auto_handle_screen, recover_from_command_error
+from screen_handler import (
+    auto_handle_screen,
+    event_choice_targets,
+    pick_event_slot_and_choice,
+    recover_from_command_error,
+)
 from fight_tracker import FightTracker
 
 BUG_DEBUG_LOG = os.path.join(_root, "logs", "bug_debug.log")
@@ -329,14 +334,33 @@ class WorkerAgent:
             for c in (getattr(scr, "cards", []) or [])[:8]
         ) if scr is not None else ()
         commands = tuple(sorted(str(c) for c in (getattr(gs, "available_commands", []) or [])))
+        event_sig = ()
+        if screen_name == "EVENT" and scr is not None:
+            options = tuple(
+                (
+                    str(getattr(opt, "label", getattr(opt, "text", opt))),
+                    bool(getattr(opt, "disabled", False)),
+                    str(getattr(opt, "choice_index", "")),
+                )
+                for opt in (getattr(scr, "options", []) or [])[:8]
+            )
+            event_sig = (
+                str(getattr(scr, "event_id", "")),
+                str(getattr(scr, "event_name", "")),
+                str(getattr(scr, "body_text", ""))[:200],
+                options,
+            )
         return repr((
             screen_name,
             int(getattr(gs, "act", 0) or 0),
             int(getattr(gs, "floor", 0) or 0),
+            int(getattr(gs, "current_hp", 0) or 0),
+            int(getattr(gs, "max_hp", 0) or 0),
             bool(getattr(gs, "proceed_available", False)),
             bool(getattr(gs, "cancel_available", False)),
             commands,
             choice_list,
+            event_sig,
             bool(getattr(scr, "confirm_up", False)) if scr is not None else False,
             int(getattr(scr, "num_cards", 0) or 0) if scr is not None else 0,
             selected,
@@ -356,24 +380,16 @@ class WorkerAgent:
             self._no_progress_count = 1
         return self._no_progress_count
 
-    def _first_enabled_event_choice(self, gs):
-        scr = getattr(gs, "screen", None)
-        options = list(getattr(scr, "options", []) or []) if scr else []
-        for i, opt in enumerate(options):
-            if bool(getattr(opt, "disabled", False)):
-                continue
-            choice_idx = getattr(opt, "choice_index", None)
-            try:
-                return int(choice_idx) if choice_idx is not None else i
-            except Exception:
-                return i
-        return 0
-
     def _force_progress_action(self, gs, screen_name: str, why: str) -> Action:
         commands = set(getattr(gs, "available_commands", []) or [])
         choice_list = list(getattr(gs, "choice_list", []) or [])
         log(f"{why} on {screen_name}; forcing progress "
             f"commands={sorted(commands)} choices={choice_list[:5]}")
+
+        event_targets = event_choice_targets(gs) if screen_name == "EVENT" else {}
+        if event_targets:
+            _slot, choice_idx = pick_event_slot_and_choice(choice_list, gs)
+            return ChooseAction(choice_index=choice_idx)
 
         # GRID/forge confirmation frequently exposes only the `confirm` command.
         if "confirm" in commands:
@@ -381,8 +397,6 @@ class WorkerAgent:
         if bool(getattr(gs, "proceed_available", False)) or "proceed" in commands:
             return Action("proceed")
 
-        if screen_name == "EVENT":
-            return ChooseAction(choice_index=self._first_enabled_event_choice(gs))
         if "choose" in commands or choice_list:
             return ChooseAction(choice_index=0)
 
@@ -485,6 +499,10 @@ class WorkerAgent:
                     self._stuck_dumped_key = self._stuck_key
                 proceed_avail = bool(getattr(gs, "proceed_available", False))
                 cancel_avail = bool(getattr(gs, "cancel_available", False))
+                choice_list = list(getattr(gs, "choice_list", []) or [])
+                if screen_name == "EVENT" and event_choice_targets(gs):
+                    _slot, choice_idx = pick_event_slot_and_choice(choice_list, gs)
+                    return ChooseAction(choice_index=choice_idx)
                 if proceed_avail:
                     return Action("proceed")
                 if cancel_avail:

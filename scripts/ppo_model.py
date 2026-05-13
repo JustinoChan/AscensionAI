@@ -370,10 +370,13 @@ class PPOTrainer:
             "value_head": self.value_head.state_dict(),
             "optimizer": self.optimizer.state_dict(),
             "total_updates": self.total_updates,
+            "lr": self.get_lr(),
+            "ent_coef": self.ent_coef,
+            "bc_coef": self.bc_coef,
         }, tmp)
         os.replace(tmp, path)
 
-    def load(self, path: str):
+    def load(self, path: str, load_hparams: bool = False):
         ckpt = torch.load(path, map_location=self.device, weights_only=True)
         try:
             self.shared.load_state_dict(ckpt["shared"])
@@ -385,3 +388,11 @@ class PPOTrainer:
             # but keep total_updates so logs stay coherent.
             pass
         self.total_updates = ckpt.get("total_updates", 0)
+        self._loaded_bc_coef = None
+        if load_hparams:
+            self.ent_coef = float(ckpt.get("ent_coef", self.ent_coef))
+            if "bc_coef" in ckpt:
+                self.bc_coef = float(ckpt["bc_coef"])
+                self._loaded_bc_coef = self.bc_coef
+            if "lr" in ckpt:
+                self.set_lr(float(ckpt["lr"]))

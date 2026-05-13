@@ -157,7 +157,7 @@ def read_rollout_meta(path: str) -> dict:
         return {}
 
 
-def load_bc_demo(path: str) -> tuple:
+def _load_bc_demo_file(path: str) -> tuple:
     with np.load(path, allow_pickle=False) as data:
         obs = data["observations"]
         actions = data["actions"]
@@ -166,6 +166,43 @@ def load_bc_demo(path: str) -> tuple:
     if len(actions) != n or len(masks) != n:
         raise ValueError(f"BC demo length mismatch: obs={n}, actions={len(actions)}, masks={len(masks)}")
     return obs, actions, masks
+
+
+def load_bc_demo(path: str) -> tuple:
+    """Load one BC demo file, or merge every .npz demo file in a directory."""
+    if os.path.isdir(path):
+        files = sorted(glob.glob(os.path.join(path, "*.npz")))
+        if not files:
+            raise FileNotFoundError(f"no .npz demo files in {path}")
+        obs_parts = []
+        action_parts = []
+        mask_parts = []
+        for f in files:
+            obs, actions, masks = _load_bc_demo_file(f)
+            obs_parts.append(obs)
+            action_parts.append(actions)
+            mask_parts.append(masks)
+        return (
+            np.concatenate(obs_parts, axis=0),
+            np.concatenate(action_parts, axis=0),
+            np.concatenate(mask_parts, axis=0),
+        )
+    return _load_bc_demo_file(path)
+
+
+def _bc_demo_candidates(model_path: str, requested_path: str | None) -> List[str]:
+    """Return BC anchor locations in priority order."""
+    if requested_path:
+        if not os.path.isabs(requested_path):
+            requested_path = os.path.join(_root, requested_path)
+        return [requested_path]
+
+    model_dir = os.path.dirname(model_path)
+    return [
+        model_path.replace(".pt", "_bc_demos.npz"),
+        os.path.join(model_dir, "ppo_sts_bc_bc_demos.npz"),
+        os.path.join(_root, "bc_demos_shared"),
+    ]
 
 
 def load_transitions(paths: List[str]) -> tuple:
@@ -442,31 +479,45 @@ def main():
     )
 
     if os.path.isfile(model_path):
-        trainer.load(model_path)
-        trainer.set_lr(args.lr)
-        log(f"Loaded existing model; optimizer lr reset to {args.lr}")
+        trainer.load(model_path, load_hparams=args.auto_tune)
+        if args.auto_tune:
+            log(
+                "Loaded existing model; keeping checkpoint auto-tune state "
+                f"lr={_current_lr(trainer):.2e} ent_coef={trainer.ent_coef:.5f}"
+            )
+        else:
+            trainer.set_lr(args.lr)
+            trainer.ent_coef = args.ent_coef
+            log(f"Loaded existing model; optimizer lr reset to {args.lr}")
     else:
         log("Starting with fresh model")
 
-    bc_demo_path = args.bc_demo
-    if bc_demo_path is None:
-        bc_demo_path = model_path.replace(".pt", "_bc_demos.npz")
-    elif not os.path.isabs(bc_demo_path):
-        bc_demo_path = os.path.join(_root, bc_demo_path)
-    if args.bc_coef > 0.0 and os.path.isfile(bc_demo_path):
-        try:
-            bc_obs, bc_actions, bc_masks = load_bc_demo(bc_demo_path)
-            trainer.set_bc_reference(
-                bc_obs, bc_actions, bc_masks,
-                coef=args.bc_coef,
-                batch_size=args.batch_size,
-            )
-            log(f"Loaded BC anchor demos: {len(bc_actions)} samples "
-                f"coef={args.bc_coef} path={bc_demo_path}")
-        except Exception as e:
-            log(f"Failed to load BC anchor demos {bc_demo_path}: {e}")
-    elif args.bc_coef > 0.0:
-        log(f"No BC anchor demos found at {bc_demo_path}; PPO runs without BC anchor")
+    if args.bc_coef > 0.0:
+        bc_demo_sources = _bc_demo_candidates(model_path, args.bc_demo)
+        loaded_bc_anchor = False
+        for bc_demo_path in bc_demo_sources:
+            if not (os.path.isfile(bc_demo_path) or os.path.isdir(bc_demo_path)):
+                continue
+            try:
+                bc_obs, bc_actions, bc_masks = load_bc_demo(bc_demo_path)
+                anchor_coef = args.bc_coef
+                loaded_bc_coef = getattr(trainer, "_loaded_bc_coef", None)
+                if args.auto_tune and loaded_bc_coef is not None:
+                    anchor_coef = loaded_bc_coef
+                trainer.set_bc_reference(
+                    bc_obs, bc_actions, bc_masks,
+                    coef=anchor_coef,
+                    batch_size=args.batch_size,
+                )
+                log(f"Loaded BC anchor demos: {len(bc_actions)} samples "
+                    f"coef={anchor_coef} path={bc_demo_path}")
+                loaded_bc_anchor = True
+                break
+            except Exception as e:
+                log(f"Failed to load BC anchor demos {bc_demo_path}: {e}")
+        if not loaded_bc_anchor:
+            log("No BC anchor demos found in "
+                f"{', '.join(bc_demo_sources)}; PPO runs without BC anchor")
 
     consumed: set = set()
     total_transitions = 0

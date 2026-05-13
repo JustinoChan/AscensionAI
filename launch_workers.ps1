@@ -176,7 +176,7 @@ function Get-Command-For-BCCollect($workerId, $gamesForWorker) {
 }
 
 function Get-Command-For-BCTrain {
-    return "$PyEsc $RootEsc/scripts/behavior_clone.py --train-demo-dir bc_demos_shared --save models/ppo_sts_bc.pt --epochs $BCEpochs --lr $BCLr --batch-size $BCBatchSize --val-split $BCValSplit --patience $BCPatience --weight-decay $BCWeightDecay --label-smoothing $BCLabelSmoothing"
+    return "$PyEsc $RootEsc/scripts/behavior_clone.py --train-demo-dir bc_demos_shared --save models/ppo_sts_bc.pt --demo-save models/ppo_sts_bc_demos.npz --epochs $BCEpochs --lr $BCLr --batch-size $BCBatchSize --val-split $BCValSplit --patience $BCPatience --weight-decay $BCWeightDecay --label-smoothing $BCLabelSmoothing"
 }
 
 function Get-Command-For-BCPPO {
@@ -315,7 +315,7 @@ switch ($Mode) {
         Write-Host "Epochs: $BCEpochs | LR: $BCLr | Batch size: $BCBatchSize" -ForegroundColor Yellow
         $cmd = Get-Command-For-BCTrain
         Write-Host "Running: $cmd" -ForegroundColor DarkGray
-        & $PythonExe (Join-Path $ProjectRoot "scripts\behavior_clone.py") --train-demo-dir "bc_demos_shared" --save "models/ppo_sts_bc.pt" --epochs $BCEpochs --lr $BCLr --batch-size $BCBatchSize --val-split $BCValSplit --patience $BCPatience --weight-decay $BCWeightDecay --label-smoothing $BCLabelSmoothing
+        & $PythonExe (Join-Path $ProjectRoot "scripts\behavior_clone.py") --train-demo-dir "bc_demos_shared" --save "models/ppo_sts_bc.pt" --demo-save "models/ppo_sts_bc_demos.npz" --epochs $BCEpochs --lr $BCLr --batch-size $BCBatchSize --val-split $BCValSplit --patience $BCPatience --weight-decay $BCWeightDecay --label-smoothing $BCLabelSmoothing
     }
     "bc-ppo" {
         Write-Host "Mode: BC -> PPO end-to-end ($BCGames BC games, $BCEpochs BC epochs + 200 PPO games)" -ForegroundColor Green

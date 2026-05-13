@@ -254,6 +254,82 @@ def _can_choose(gs) -> bool:
     return not commands or "choose" in commands
 
 
+def _truthy_disabled(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value).strip().lower()
+    return text in {"1", "true", "yes", "disabled", "locked"}
+
+
+def _event_choice_index(opt, fallback: int) -> int:
+    choice_idx = getattr(opt, "choice_index", None)
+    if choice_idx is None:
+        return fallback
+    try:
+        return int(choice_idx)
+    except Exception:
+        return fallback
+
+
+def _event_option_label(opt) -> str:
+    for attr in ("label", "text", "body_text"):
+        value = getattr(opt, attr, None)
+        if value:
+            return str(value)
+    return str(opt or "")
+
+
+def event_choice_targets(gs, *, max_choices: int = 40) -> dict[int, int]:
+    """Map flat event action slots to CommunicationMod choice indices."""
+    choice_list = list(getattr(gs, "choice_list", []) or [])
+    scr = getattr(gs, "screen", None)
+    options = list(getattr(scr, "options", []) or []) if scr else []
+
+    if not options:
+        targets: dict[int, int] = {}
+        for i, label in enumerate(choice_list[:max_choices]):
+            if not _choice_is_locked(str(label)):
+                targets[i] = i
+        return targets
+
+    enabled = [
+        (i, opt) for i, opt in enumerate(options)
+        if not _truthy_disabled(getattr(opt, "disabled", False))
+        and not _choice_is_locked(_event_option_label(opt))
+    ]
+    if not enabled:
+        return {}
+
+    targets: dict[int, int] = {}
+    compact_enabled = bool(choice_list) and len(choice_list) <= len(enabled)
+    if compact_enabled:
+        for action_slot, (_option_idx, opt) in enumerate(enabled[:len(choice_list)]):
+            if action_slot >= max_choices:
+                break
+            targets[action_slot] = _event_choice_index(opt, action_slot)
+        return targets
+
+    for option_idx, opt in enabled:
+        if option_idx >= max_choices:
+            continue
+        targets[option_idx] = _event_choice_index(opt, option_idx)
+    return targets
+
+
+def event_choice_for_slot(gs, action_slot: int = 0) -> tuple[int, int]:
+    targets = event_choice_targets(gs)
+    if targets:
+        if action_slot in targets:
+            return action_slot, targets[action_slot]
+        first_slot = min(targets)
+        return first_slot, targets[first_slot]
+    return action_slot, action_slot
+
+
 def _proceed_or_state(gs) -> Action:
     commands = _available_commands(gs)
     if "proceed" in commands:
@@ -361,6 +437,19 @@ def pick_event(choice_list: list, gs) -> int:
         if "leave" not in c:
             return i
     return 0
+
+
+def pick_event_slot_and_choice(choice_list: list, gs) -> tuple[int, int]:
+    """Return (flat action slot, CommunicationMod choice index)."""
+    if choice_list:
+        slot = pick_event(choice_list, gs)
+        return event_choice_for_slot(gs, slot)
+    return event_choice_for_slot(gs, 0)
+
+
+def pick_event_action(choice_list: list, gs) -> ChooseAction:
+    _slot, choice_idx = pick_event_slot_and_choice(choice_list, gs)
+    return ChooseAction(choice_index=choice_idx)
 
 
 def pick_boss_relic(choice_list: list) -> int:
@@ -886,26 +975,27 @@ def auto_handle_screen(
 
     # ---- EVENT ----
     if screen_name == "EVENT":
+        event_targets = event_choice_targets(gs)
         if choice_list:
-            if heuristic_all:
-                return ChooseAction(choice_index=pick_event(choice_list, gs))
-            return None
-        options = list(getattr(scr, "options", []) or []) if scr else []
-        if options:
-            enabled = [
-                (i, opt) for i, opt in enumerate(options)
-                if not bool(getattr(opt, "disabled", False))
-            ]
-            if not enabled:
+            if not event_targets:
                 if proceed_avail:
                     return _proceed_or_state(gs)
                 if cancel_avail:
                     return Action("leave")
                 return Action("state")
-            if heuristic_all:
-                idx, opt = enabled[0]
-                choice_idx = getattr(opt, "choice_index", None)
-                return ChooseAction(choice_index=choice_idx if choice_idx is not None else idx)
+            if heuristic_all or len(event_targets) == 1:
+                return pick_event_action(choice_list, gs)
+            return None
+        options = list(getattr(scr, "options", []) or []) if scr else []
+        if options:
+            if not event_targets:
+                if proceed_avail:
+                    return _proceed_or_state(gs)
+                if cancel_avail:
+                    return Action("leave")
+                return Action("state")
+            if heuristic_all or len(event_targets) == 1:
+                return pick_event_action([], gs)
             return None
         if proceed_avail:
             return _proceed_or_state(gs)

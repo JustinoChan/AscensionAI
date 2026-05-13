@@ -152,7 +152,12 @@ from sts_gym_env import (
     RewardTracker, _NOOP, is_terminal_state, is_victory_state,
 )
 from ppo_model import PPOTrainer, GameBuffer
-from screen_handler import auto_handle_screen, recover_from_command_error
+from screen_handler import (
+    auto_handle_screen,
+    event_choice_targets,
+    pick_event_slot_and_choice,
+    recover_from_command_error,
+)
 from fight_tracker import FightTracker
 
 log("Imports done")
@@ -296,6 +301,11 @@ class PPOAgent:
                 self._stuck_count = 0
                 proceed_avail = bool(getattr(gs, "proceed_available", False))
                 cancel_avail = bool(getattr(gs, "cancel_available", False))
+                if screen_name == "EVENT":
+                    choice_list = list(getattr(gs, "choice_list", []) or [])
+                    if event_choice_targets(gs):
+                        _slot, choice_idx = pick_event_slot_and_choice(choice_list, gs)
+                        return ChooseAction(choice_index=choice_idx)
                 if proceed_avail:
                     return Action("proceed")
                 if cancel_avail:
