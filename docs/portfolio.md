@@ -20,7 +20,7 @@ AscensionAI is a local distributed reinforcement-learning system for Slay the Sp
 | Asset | Preview |
 |---|---|
 | Control panel and log supervision | ![Control panel preview](assets/control_panel_preview.svg) |
-| Worker/trainer loop animation | ![Worker launch demo](assets/worker_launch_demo.svg) |
+| Worker/trainer loop GIF | ![Worker launch demo](assets/worker_launch_demo.gif) |
 | Training plot snapshot | ![Training plot](assets/training_plot.png) |
 
 Open the [static results dashboard](dashboard/index.html) to inspect the embedded public snapshot or load local CSV files from a fresh run.
