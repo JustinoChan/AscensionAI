@@ -279,7 +279,8 @@ def build_bc_collect_command(worker_id: int, games: int, *,
 
 def build_eval_command(*, policy: str, games: int, seed_file: str, run_tag: str,
                        model: str | None = None, top_actions: int = 0,
-                       verbose: bool = False) -> str:
+                       verbose: bool = False, resume_run: bool = False,
+                       log_file: str | None = None) -> str:
     """Build a CommunicationMod command for one fixed-seed eval run."""
     py = escape_properties_path(VENV_PYTHON)
     root = escape_properties_path(ROOT)
@@ -291,6 +292,11 @@ def build_eval_command(*, policy: str, games: int, seed_file: str, run_tag: str,
         f"--seed-file {safe_seed_file} "
         f"--run-tag {run_tag}"
     )
+    if resume_run:
+        cmd += " --resume-run"
+    if log_file:
+        safe_log_file = str(log_file).replace("\\", "/")
+        cmd += f" --log-file {safe_log_file}"
     if policy == "heuristic":
         cmd += " --policy heuristic"
     else:
@@ -303,7 +309,7 @@ def build_eval_command(*, policy: str, games: int, seed_file: str, run_tag: str,
         "build_eval_command("
         f"policy={policy}, games={games}, seed_file={seed_file}, "
         f"run_tag={run_tag}, model={model}, top_actions={top_actions}, "
-        f"verbose={verbose}) -> {cmd}"
+        f"verbose={verbose}, resume_run={resume_run}, log_file={log_file}) -> {cmd}"
     )
     return cmd
 
@@ -1682,28 +1688,86 @@ class AscensionApp:
             _logger.warning(f"Failed to count eval rows for {run_tag}: {e}")
             return 0
 
+    def _eval_python_running_for_run(self, run_tag: str) -> bool | None:
+        try:
+            import psutil
+        except ImportError:
+            return None
+
+        try:
+            for p in psutil.process_iter(["pid", "name", "cmdline"]):
+                try:
+                    name = (p.info.get("name") or "").lower()
+                    if not name.startswith("python"):
+                        continue
+                    tokens = [str(t) for t in (p.info.get("cmdline") or [])]
+                    cmdline = " ".join(tokens)
+                    if "eval_model.py" not in cmdline or run_tag not in tokens:
+                        continue
+                    return True
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+        except Exception as e:
+            _logger.debug(f"Failed to scan eval python process for {run_tag}: {e}")
+            return None
+        return False
+
     def _wait_for_eval_complete(self, run_tag: str, games: int, proc: subprocess.Popen,
-                                timeout_sec: int) -> bool:
+                                timeout_sec: int) -> str:
         start = time.time()
+        last_progress_at = start
         last_count = -1
+        exit_seen_at = None
+        stall_timeout_sec = max(900, min(timeout_sec, 3600))
+        exit_grace_sec = 120
         while self.running:
             count = self._count_eval_rows_for_run(run_tag)
             if count != last_count:
                 _logger.info(f"Eval run {run_tag}: {count}/{games} games recorded")
                 self._append_log("Eval Set", f"{run_tag}: {count}/{games} games recorded")
                 last_count = count
+                last_progress_at = time.time()
             if count >= games:
-                return True
-            if time.time() - start > timeout_sec:
+                return "complete"
+
+            rc = proc.poll()
+            if rc is not None:
+                if exit_seen_at is None:
+                    exit_seen_at = time.time()
+                    _logger.warning(
+                        f"Eval launcher process exited for {run_tag} before completion "
+                        f"(rc={rc}, rows={count}/{games}); waiting for progress grace period"
+                    )
+                eval_running = self._eval_python_running_for_run(run_tag)
+                if (
+                    eval_running is False
+                    and time.time() - exit_seen_at > exit_grace_sec
+                    and time.time() - last_progress_at > exit_grace_sec
+                ):
+                    _logger.warning(
+                        f"Eval run {run_tag} stopped progressing after launcher exit "
+                        f"(rc={rc}, rows={count}/{games})"
+                    )
+                    self._append_log(
+                        "Eval Set",
+                        f"CRASH/EXIT: {run_tag} exited with rc={rc} at {count}/{games} games",
+                    )
+                    return "exited"
+
+            elapsed = time.time() - start
+            if elapsed > timeout_sec:
                 _logger.warning(f"Eval run {run_tag} timed out after {timeout_sec}s with {count}/{games} games")
                 self._append_log("Eval Set", f"TIMEOUT: {run_tag} only reached {count}/{games} games")
-                return False
-            if proc.poll() is not None and count == 0 and time.time() - start > 120:
-                _logger.warning(f"Eval STS process exited before writing rows for {run_tag} (rc={proc.poll()})")
-                self._append_log("Eval Set", f"ERROR: STS exited early for {run_tag} (rc={proc.poll()})")
-                return False
+                return "timeout"
+            if time.time() - last_progress_at > stall_timeout_sec:
+                _logger.warning(
+                    f"Eval run {run_tag} stalled for {stall_timeout_sec}s "
+                    f"with {count}/{games} games recorded"
+                )
+                self._append_log("Eval Set", f"STALLED: {run_tag} stuck at {count}/{games} games")
+                return "stalled"
             time.sleep(5.0)
-        return False
+        return "stopped"
 
     def _cleanup_eval_instance(self, proc: subprocess.Popen | None, label: str):
         try:
@@ -1725,7 +1789,7 @@ class AscensionApp:
 
     def _launch_eval_set(self, games: int):
         _logger.info(f"_launch_eval_set: games={games}")
-        eval_tailer = None
+        completed_all = False
         try:
             verbose = bool(self.verbose_var.get())
             seed_file = self._selected_seed_file(games)
@@ -1743,19 +1807,13 @@ class AscensionApp:
             else:
                 self._append_log("Eval Set", f"Using existing seed file: {seed_file}")
 
-            self.root.after(0, lambda: self._add_log_tab("Evaluation"))
-            eval_tailer = LogTailer(ROOT / "logs" / "eval_debug.log",
-                                    lambda line: self._append_log("Evaluation", line))
-            eval_tailer.start()
-            self.tailers.append(eval_tailer)
-
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             runs = [
-                {"label": "Heuristic", "policy": "heuristic", "model": None,
+                {"label": "Heuristic", "key": "heuristic", "policy": "heuristic", "model": None,
                  "tag": f"heuristic_{games}_{ts}", "top_actions": 0},
-                {"label": "BC", "policy": "model", "model": "models/ppo_sts_bc.pt",
+                {"label": "BC", "key": "bc", "policy": "model", "model": "models/ppo_sts_bc.pt",
                  "tag": f"bc_{games}_{ts}", "top_actions": 5},
-                {"label": "PPO Current", "policy": "model", "model": "models/ppo_sts.pt",
+                {"label": "PPO Current", "key": "ppo_current", "policy": "model", "model": "models/ppo_sts.pt",
                  "tag": f"ppo_current_{games}_{ts}", "top_actions": 5},
             ]
 
@@ -1764,9 +1822,18 @@ class AscensionApp:
                 "Eval Set",
                 f"Starting fixed-seed eval set: {games} games each, seed_file={seed_file}"
             )
+            self._append_log(
+                "Eval Set",
+                "Running eval policies sequentially; concurrent Heuristic/BC/PPO eval is deferred "
+                "because CommunicationMod config, process cleanup, and log/stat isolation need "
+                "separate instance ownership first."
+            )
 
+            max_restarts = 3
+            completed_all = True
             for run in runs:
                 if not self.running:
+                    completed_all = False
                     break
                 model = run["model"]
                 if model and not (ROOT / model).exists():
@@ -1775,40 +1842,98 @@ class AscensionApp:
                     self._append_log("Eval Set", msg)
                     continue
 
-                cmd = build_eval_command(
-                    policy=run["policy"], games=games, seed_file=seed_file,
-                    run_tag=run["tag"], model=model,
-                    top_actions=int(run["top_actions"]), verbose=verbose,
-                )
-                self._append_log("Eval Set", f"Launching {run['label']} eval: {run['tag']}")
-                self._append_log("Eval Set", cmd)
-                write_config(cmd, verbose=verbose)
-                proc = None
+                log_rel = f"logs/eval_{run['key']}_{run['tag']}.log"
+                log_path = ROOT / log_rel
+                tab_name = f"Eval {run['label']}"
+                self.root.after(0, lambda name=tab_name: self._add_log_tab(name))
+                run_tailer = LogTailer(log_path, lambda line, name=tab_name: self._append_log(name, line))
+                run_tailer.start()
+                self.tailers.append(run_tailer)
+
+                status = "stopped"
+                attempt = 0
                 try:
-                    proc = launch_sts(skip_launcher=True)
-                    self.processes.append(proc)
-                    _logger.info(f"Eval set {run['label']} STS launched: PID {proc.pid}")
-                    self.root.after(0, lambda label=run['label']: self.status_var.set(
-                        f"Evaluating {label} ({games} games)..."
-                    ))
-                    timeout = max(900, int(games) * 180)
-                    ok = self._wait_for_eval_complete(run["tag"], games, proc, timeout)
-                    self._append_log("Eval Set", f"{run['label']} eval {'complete' if ok else 'stopped/failed'}")
-                    if not ok and self.running:
-                        # Stop the sequence on a real failure. The user can inspect
-                        # eval_debug.log, fix the issue, and rerun from the GUI.
-                        break
+                    while self.running and attempt <= max_restarts:
+                        completed_rows = self._count_eval_rows_for_run(run["tag"])
+                        if completed_rows >= games:
+                            status = "complete"
+                            break
+
+                        resume_run = attempt > 0 or completed_rows > 0
+                        cmd = build_eval_command(
+                            policy=run["policy"], games=games, seed_file=seed_file,
+                            run_tag=run["tag"], model=model,
+                            top_actions=int(run["top_actions"]), verbose=verbose,
+                            resume_run=resume_run, log_file=log_rel,
+                        )
+                        attempt_label = "resume" if resume_run else "fresh"
+                        self._append_log(
+                            "Eval Set",
+                            f"Launching {run['label']} eval ({attempt_label} attempt "
+                            f"{attempt + 1}/{max_restarts + 1}): {run['tag']}"
+                        )
+                        self._append_log("Eval Set", f"Log file: {log_rel}")
+                        self._append_log("Eval Set", cmd)
+                        write_config(cmd, verbose=verbose)
+                        proc = None
+                        try:
+                            proc = launch_sts(skip_launcher=True)
+                            self.processes.append(proc)
+                            _logger.info(f"Eval set {run['label']} STS launched: PID {proc.pid}")
+                            self.root.after(0, lambda label=run['label']: self.status_var.set(
+                                f"Evaluating {label} ({games} games)..."
+                            ))
+                            timeout = max(900, int(games) * 180)
+                            status = self._wait_for_eval_complete(run["tag"], games, proc, timeout)
+                        finally:
+                            self._cleanup_eval_instance(proc, run["label"])
+                            time.sleep(3.0)
+
+                        if status == "complete":
+                            break
+                        if status == "stopped" or not self.running:
+                            break
+                        if attempt >= max_restarts:
+                            completed_rows = self._count_eval_rows_for_run(run["tag"])
+                            msg = (
+                                f"{run['label']} eval failed after {max_restarts} restart(s): "
+                                f"status={status}, rows={completed_rows}/{games}"
+                            )
+                            _logger.error(msg)
+                            self._append_log("Eval Set", msg)
+                            break
+
+                        attempt += 1
+                        completed_rows = self._count_eval_rows_for_run(run["tag"])
+                        msg = (
+                            f"{run['label']} eval {status}; relaunching with --resume-run "
+                            f"from {completed_rows}/{games} recorded games"
+                        )
+                        _logger.warning(msg)
+                        self._append_log("Eval Set", msg)
                 finally:
-                    self._cleanup_eval_instance(proc, run["label"])
-                    time.sleep(3.0)
+                    run_tailer.stop()
+                    if run_tailer in self.tailers:
+                        self.tailers.remove(run_tailer)
+
+                self._append_log(
+                    "Eval Set",
+                    f"{run['label']} eval {'complete' if status == 'complete' else 'stopped/failed'} ({status})"
+                )
+                if status != "complete" and self.running:
+                    completed_all = False
+                    break
+                if status != "complete":
+                    completed_all = False
 
             self.running = False
             self.root.after(0, lambda: self.start_btn.configure(state="normal"))
             self.root.after(0, lambda: self.stop_btn.configure(state="disabled"))
             self.root.after(0, lambda: self.graceful_btn.configure(state="disabled"))
-            self.root.after(0, lambda: self.status_var.set("Eval set complete"))
-            self._append_log("Eval Set", "Fixed-seed eval set finished.")
-            _logger.info("_launch_eval_set complete")
+            final_status = "Eval set complete" if completed_all else "Eval set stopped/failed"
+            self.root.after(0, lambda status=final_status: self.status_var.set(status))
+            self._append_log("Eval Set", "Fixed-seed eval set finished." if completed_all else "Fixed-seed eval set stopped/failed.")
+            _logger.info(f"_launch_eval_set complete: completed_all={completed_all}")
         except Exception as e:
             _logger.error(f"_launch_eval_set FAILED: {traceback.format_exc()}")
             self._append_log("Eval Set", f"ERROR launching eval set: {e}")

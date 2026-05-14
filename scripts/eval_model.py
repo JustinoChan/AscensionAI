@@ -114,9 +114,34 @@ def _init_csv() -> None:
         log(f"eval csv migration failed: {e}")
 
 
+def _csv_game_exists(run_tag: str, game: int) -> bool:
+    if game <= 0 or not os.path.exists(EVAL_CSV):
+        return False
+    try:
+        with open(EVAL_CSV, "r", encoding="utf-8", newline="") as f:
+            for row in csv.DictReader(f):
+                try:
+                    existing_game = int(row.get("game", 0) or 0)
+                except (TypeError, ValueError):
+                    continue
+                if row.get("run") == run_tag and existing_game == game:
+                    return True
+    except Exception as e:
+        log(f"csv duplicate check failed: {e}")
+    return False
+
+
 def _append_csv(row: dict) -> None:
     try:
         _init_csv()
+        run_tag = str(row.get("run", ""))
+        try:
+            game = int(row.get("game", 0) or 0)
+        except (TypeError, ValueError):
+            game = 0
+        if _csv_game_exists(run_tag, game):
+            log(f"Skipping duplicate eval csv row for run={run_tag} game={game}")
+            return
         with open(EVAL_CSV, "a", encoding="utf-8", newline="") as f:
             csv.DictWriter(f, fieldnames=_EVAL_COLUMNS,
                            extrasaction="ignore").writerow(row)
@@ -124,8 +149,42 @@ def _append_csv(row: dict) -> None:
         log(f"csv append failed: {e}")
 
 
-log("=== EVAL STARTING ===")
-_init_csv()
+def _row_int(row: dict, key: str) -> int:
+    try:
+        return int(float(row.get(key, 0) or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _row_float(row: dict, key: str) -> float:
+    try:
+        return float(row.get(key, 0.0) or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _completed_rows_for_run(run_tag: str) -> list[dict]:
+    rows_by_game: dict[int, dict] = {}
+    if not os.path.exists(EVAL_CSV):
+        return []
+    try:
+        with open(EVAL_CSV, "r", encoding="utf-8", newline="") as f:
+            for row in csv.DictReader(f):
+                if row.get("run") != run_tag:
+                    continue
+                game = _row_int(row, "game")
+                if game > 0 and game not in rows_by_game:
+                    rows_by_game[game] = row
+    except Exception as e:
+        log(f"resume scan failed for run={run_tag}: {e}")
+        return []
+
+    completed: list[dict] = []
+    game = 1
+    while game in rows_by_game:
+        completed.append(rows_by_game[game])
+        game += 1
+    return completed
 
 
 def _action_desc(action: Optional[Action]) -> str:
@@ -155,6 +214,7 @@ class EvalAgent:
         model_label: str = "",
         seeds: Optional[list[str]] = None,
         top_actions: int = 0,
+        completed_rows: Optional[list[dict]] = None,
     ):
         self.trainer = trainer
         self.target_games = target_games
@@ -164,7 +224,8 @@ class EvalAgent:
         self.seeds = seeds or []
         self.top_actions = top_actions
         self.reward_tracker = RewardTracker()
-        self.games_played = 0
+        completed_rows = completed_rows or []
+        self.games_played = len(completed_rows)
         self.total_steps = 0
         self.episode_reward = 0.0
         self.initialized = False
@@ -178,6 +239,21 @@ class EvalAgent:
         self.bosses_won = 0
         self.fight_tracker = FightTracker(source="eval", worker="eval", log=log)
         self._current_seed = ""
+        self._preload_completed_summary(completed_rows)
+
+    def _preload_completed_summary(self, rows: list[dict]) -> None:
+        if not rows:
+            log(f"Starting fresh eval run {self.run_tag}")
+            return
+        for row in rows:
+            self.sum_floor += _row_int(row, "final_floor")
+            self.sum_reward += _row_float(row, "total_reward")
+            self.wins += 1 if _row_int(row, "victory") else 0
+            self.elites_fought += _row_int(row, "elites_fought")
+            self.elites_won += _row_int(row, "elites_won")
+            self.bosses_fought += _row_int(row, "bosses_fought")
+            self.bosses_won += _row_int(row, "bosses_won")
+        log(f"Resuming eval run {self.run_tag}: {self.games_played} contiguous games already recorded")
 
     def on_state_change(self, gs) -> Action:
         try:
@@ -345,7 +421,7 @@ class EvalAgent:
 
 
 def main() -> None:
-    global VERBOSE
+    global DEBUG_LOG, VERBOSE
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default="models/ppo_sts.pt")
     parser.add_argument("--games", type=int, default=20)
@@ -358,10 +434,19 @@ def main() -> None:
                         help="File of one seed per line for fixed-seed eval")
     parser.add_argument("--top-actions", type=int, default=0,
                         help="Log top N model actions at each RL decision")
+    parser.add_argument("--resume-run", action="store_true",
+                        help="Resume from completed rows in logs/eval_stats.csv for this run tag")
+    parser.add_argument("--log-file", type=str, default=None,
+                        help="Debug log path for this eval run")
     parser.add_argument("--verbose", action="store_true",
                         help="Write detailed per-state/per-action debug logs")
     args = parser.parse_args()
+    if args.log_file:
+        DEBUG_LOG = args.log_file if os.path.isabs(args.log_file) else os.path.join(_root, args.log_file)
+    os.makedirs(os.path.dirname(DEBUG_LOG), exist_ok=True)
     VERBOSE = VERBOSE or args.verbose
+    log("=== EVAL STARTING ===")
+    _init_csv()
 
     seeds: list[str] = []
     if args.seed_file:
@@ -378,11 +463,17 @@ def main() -> None:
     if seeds and len(seeds) < args.games:
         log(f"WARNING: only {len(seeds)} seeds for {args.games} games; remaining games use random seeds")
 
+    completed_rows = _completed_rows_for_run(args.run_tag) if args.resume_run else []
+    if len(completed_rows) >= args.games:
+        log(f"Resume requested and run {args.run_tag} already has {len(completed_rows)}/{args.games} games")
+        return
+
     trainer: Optional[PPOTrainer] = None
     model_path = os.path.join(_root, args.model) if not os.path.isabs(args.model) else args.model
     log(f"Starting eval for {args.games} greedy games "
         f"run_tag={args.run_tag} policy={args.policy} verbose={VERBOSE} "
-        f"seeds={len(seeds)} top_actions={args.top_actions}")
+        f"seeds={len(seeds)} top_actions={args.top_actions} "
+        f"resume={args.resume_run} completed={len(completed_rows)}")
     if args.policy == "model":
         log(f"Loading model from {model_path}")
         trainer = PPOTrainer(
@@ -405,6 +496,7 @@ def main() -> None:
         model_label=args.model if args.policy == "model" else "heuristic",
         seeds=seeds,
         top_actions=max(0, args.top_actions),
+        completed_rows=completed_rows,
     )
 
     coord = Coordinator()
