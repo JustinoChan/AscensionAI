@@ -35,18 +35,20 @@ The project is built as an ML systems portfolio piece: it shows how to wrap a li
 
 ## Current Snapshot
 
-These public numbers come from the local May 12, 2026 artifacts summarized in [docs/experiments/index.json](docs/experiments/index.json). Raw logs, rollout files, and model checkpoints stay out of git.
+These public numbers come from the local May 14, 2026 artifacts summarized in [docs/experiments/index.json](docs/experiments/index.json). Raw logs, rollout files, and model checkpoints stay out of git.
 
 | Result | Value |
 |---|---:|
 | BC supervised samples | 86,297 |
 | BC final validation accuracy | 84.948% |
-| Parallel PPO rollout games | 160 |
-| PPO update batches | 19 |
+| Parallel PPO rollout games | 2,496 |
+| PPO update batches | 311 |
 | Stale rollouts in snapshot | 0 |
-| Fixed-seed heuristic avg floor | 16.60 |
+| Latest PPO eval avg floor | 16.40 |
+| Latest PPO eval avg reward | 9.57 |
+| Fixed-seed heuristic avg floor | 16.84 |
 | Fixed-seed BC avg floor | 13.08 |
-| Fixed-seed PPO avg floor | 13.08 |
+| Fixed-seed PPO avg floor | 16.40 |
 
 ![Training plot snapshot](docs/assets/training_plot.png)
 
@@ -63,7 +65,7 @@ Slay the Spire instances
     -> eval_model.py fixed-seed comparisons
 ```
 
-The strongest part of the current project is the complete training and evaluation system. The latest PPO run has not yet beaten the heuristic baseline; the documentation is explicit about that so future runs can be compared honestly.
+The strongest part of the current project is the complete training and evaluation system. The latest long PPO run now separates from the BC checkpoint on the 25-seed slice and nearly matches the heuristic baseline, while the documentation stays explicit that full victories and larger-seed confirmation are still open work.
 
 ## About
 

@@ -174,14 +174,14 @@
 
   <header class="dashboard-header">
     <h1>AscensionAI Results Dashboard</h1>
-    <p>Static, hostable viewer for BC, PPO, and fixed-seed evaluation artifacts. It ships with a May 12, 2026 snapshot and can also parse local CSV exports from <code>logs/</code>.</p>
+    <p>Static, hostable viewer for BC, PPO, and fixed-seed evaluation artifacts. It ships with a May 14, 2026 snapshot and can also parse local CSV exports from <code>logs/</code>.</p>
   </header>
 
   <main>
     <div class="toolbar">
       <label class="upload" for="csvInput">Load CSV files</label>
       <input id="csvInput" type="file" accept=".csv" multiple>
-      <span id="status" class="note">Using embedded public snapshot. Load <code>training_stats.csv</code>, <code>bc_train_stats.csv</code>, and <code>eval_stats.csv</code> for live local charts.</span>
+      <span id="status" class="note">Using embedded May 14 public snapshot. Load <code>training_stats.csv</code>, <code>bc_train_stats.csv</code>, and <code>eval_stats.csv</code> for live local charts.</span>
     </div>
 
     <section class="grid" id="cards"></section>
@@ -218,30 +218,1244 @@
 
   <script>
     const snapshot = {
-      meta: {
-        date: "2026-05-12",
-        commit: "af06ee9",
-        seedFile: "seeds/eval_200.txt",
-        bcModel: "models/ppo_sts_bc.pt",
-        ppoModel: "models/ppo_sts.pt",
-        workers: 3,
-        staleRollouts: 0
+      "meta": {
+            "date": "2026-05-14",
+            "commit": "2670c91",
+            "seedFile": "seeds/eval_200.txt",
+            "bcModel": "models/ppo_sts_bc.pt",
+            "ppoModel": "models/ppo_sts.pt",
+            "workers": 3,
+            "staleRollouts": 0,
+            "ppoGames": 2496,
+            "ppoUpdates": 311,
+            "last500AvgFloor": 14.92,
+            "latestEvalAvgFloor": 16.4
       },
-      training: [
-        {"game":49,"floor":16,"reward":-4.285,"worker":"1"},{"game":43,"floor":16,"reward":5.39,"worker":"2"},{"game":50,"floor":6,"reward":-19.36,"worker":"1"},{"game":51,"floor":11,"reward":-4.57,"worker":"1"},{"game":44,"floor":16,"reward":0.46,"worker":"2"},{"game":47,"floor":23,"reward":35.48,"worker":"3"},{"game":45,"floor":16,"reward":7.2,"worker":"2"},{"game":52,"floor":24,"reward":29.02,"worker":"1"},{"game":48,"floor":23,"reward":26.32,"worker":"3"},{"game":49,"floor":6,"reward":-15.59,"worker":"3"},{"game":53,"floor":20,"reward":25.38,"worker":"1"},{"game":46,"floor":22,"reward":27.55,"worker":"2"},{"game":50,"floor":7,"reward":-13.36,"worker":"3"},{"game":51,"floor":6,"reward":-18.835,"worker":"3"},{"game":47,"floor":16,"reward":-6.91,"worker":"2"},{"game":54,"floor":23,"reward":33.48,"worker":"1"},{"game":48,"floor":8,"reward":-15.245,"worker":"2"},{"game":55,"floor":6,"reward":-17.65,"worker":"1"},{"game":52,"floor":19,"reward":22.3,"worker":"3"},{"game":49,"floor":7,"reward":-4.84,"worker":"2"},{"game":53,"floor":16,"reward":4.605,"worker":"3"},{"game":50,"floor":16,"reward":6.6,"worker":"2"},{"game":56,"floor":22,"reward":22.74,"worker":"1"},{"game":54,"floor":12,"reward":-11.935,"worker":"3"}
+      "training": [
+            {
+                  "game": 69,
+                  "floor": 6,
+                  "reward": -19.295,
+                  "worker": "3"
+            },
+            {
+                  "game": 70,
+                  "floor": 16,
+                  "reward": -5.175,
+                  "worker": "3"
+            },
+            {
+                  "game": 1,
+                  "floor": 22,
+                  "reward": 17.965,
+                  "worker": "1"
+            },
+            {
+                  "game": 5,
+                  "floor": 23,
+                  "reward": 36.075,
+                  "worker": "2"
+            },
+            {
+                  "game": 6,
+                  "floor": 10,
+                  "reward": -5.305,
+                  "worker": "2"
+            },
+            {
+                  "game": 2,
+                  "floor": 14,
+                  "reward": 1.23,
+                  "worker": "1"
+            },
+            {
+                  "game": 7,
+                  "floor": 6,
+                  "reward": -19.005,
+                  "worker": "2"
+            },
+            {
+                  "game": 71,
+                  "floor": 23,
+                  "reward": 26.2,
+                  "worker": "3"
+            },
+            {
+                  "game": 72,
+                  "floor": 12,
+                  "reward": -0.84,
+                  "worker": "3"
+            },
+            {
+                  "game": 3,
+                  "floor": 22,
+                  "reward": 53.32,
+                  "worker": "1"
+            },
+            {
+                  "game": 8,
+                  "floor": 16,
+                  "reward": -3.04,
+                  "worker": "2"
+            },
+            {
+                  "game": 4,
+                  "floor": 11,
+                  "reward": -7.03,
+                  "worker": "1"
+            },
+            {
+                  "game": 9,
+                  "floor": 16,
+                  "reward": -6.42,
+                  "worker": "2"
+            },
+            {
+                  "game": 73,
+                  "floor": 21,
+                  "reward": 45.405,
+                  "worker": "3"
+            },
+            {
+                  "game": 5,
+                  "floor": 13,
+                  "reward": 3.075,
+                  "worker": "1"
+            },
+            {
+                  "game": 10,
+                  "floor": 18,
+                  "reward": 16.405,
+                  "worker": "2"
+            },
+            {
+                  "game": 6,
+                  "floor": 16,
+                  "reward": 6.745,
+                  "worker": "1"
+            },
+            {
+                  "game": 74,
+                  "floor": 16,
+                  "reward": -7.65,
+                  "worker": "3"
+            },
+            {
+                  "game": 11,
+                  "floor": 16,
+                  "reward": 0.395,
+                  "worker": "2"
+            },
+            {
+                  "game": 7,
+                  "floor": 16,
+                  "reward": -2.96,
+                  "worker": "1"
+            },
+            {
+                  "game": 12,
+                  "floor": 16,
+                  "reward": -4.27,
+                  "worker": "2"
+            },
+            {
+                  "game": 8,
+                  "floor": 14,
+                  "reward": -5.09,
+                  "worker": "1"
+            },
+            {
+                  "game": 13,
+                  "floor": 16,
+                  "reward": 1.69,
+                  "worker": "2"
+            },
+            {
+                  "game": 9,
+                  "floor": 16,
+                  "reward": 7.36,
+                  "worker": "1"
+            },
+            {
+                  "game": 14,
+                  "floor": 11,
+                  "reward": -15.045,
+                  "worker": "2"
+            },
+            {
+                  "game": 10,
+                  "floor": 16,
+                  "reward": 1.565,
+                  "worker": "1"
+            },
+            {
+                  "game": 15,
+                  "floor": 13,
+                  "reward": 10.425,
+                  "worker": "2"
+            },
+            {
+                  "game": 11,
+                  "floor": 6,
+                  "reward": -12.44,
+                  "worker": "1"
+            },
+            {
+                  "game": 16,
+                  "floor": 7,
+                  "reward": -15.585,
+                  "worker": "2"
+            },
+            {
+                  "game": 1,
+                  "floor": 16,
+                  "reward": -2.105,
+                  "worker": "3"
+            },
+            {
+                  "game": 12,
+                  "floor": 14,
+                  "reward": 3.5,
+                  "worker": "1"
+            },
+            {
+                  "game": 17,
+                  "floor": 16,
+                  "reward": -1.42,
+                  "worker": "2"
+            },
+            {
+                  "game": 13,
+                  "floor": 16,
+                  "reward": -6.1,
+                  "worker": "1"
+            },
+            {
+                  "game": 2,
+                  "floor": 16,
+                  "reward": -3.69,
+                  "worker": "3"
+            },
+            {
+                  "game": 14,
+                  "floor": 16,
+                  "reward": 0.14,
+                  "worker": "1"
+            },
+            {
+                  "game": 3,
+                  "floor": 16,
+                  "reward": 1.36,
+                  "worker": "3"
+            },
+            {
+                  "game": 18,
+                  "floor": 22,
+                  "reward": 44.305,
+                  "worker": "2"
+            },
+            {
+                  "game": 15,
+                  "floor": 16,
+                  "reward": -7.915,
+                  "worker": "1"
+            },
+            {
+                  "game": 19,
+                  "floor": 10,
+                  "reward": -12.575,
+                  "worker": "2"
+            },
+            {
+                  "game": 20,
+                  "floor": 13,
+                  "reward": -0.56,
+                  "worker": "2"
+            },
+            {
+                  "game": 4,
+                  "floor": 16,
+                  "reward": -6.31,
+                  "worker": "3"
+            },
+            {
+                  "game": 16,
+                  "floor": 16,
+                  "reward": -5.115,
+                  "worker": "1"
+            },
+            {
+                  "game": 17,
+                  "floor": 16,
+                  "reward": 1.75,
+                  "worker": "1"
+            },
+            {
+                  "game": 21,
+                  "floor": 29,
+                  "reward": 60.535,
+                  "worker": "2"
+            },
+            {
+                  "game": 5,
+                  "floor": 16,
+                  "reward": -1.6,
+                  "worker": "3"
+            },
+            {
+                  "game": 18,
+                  "floor": 16,
+                  "reward": 8.355,
+                  "worker": "1"
+            },
+            {
+                  "game": 6,
+                  "floor": 16,
+                  "reward": 14.52,
+                  "worker": "3"
+            },
+            {
+                  "game": 22,
+                  "floor": 22,
+                  "reward": 39.985,
+                  "worker": "2"
+            },
+            {
+                  "game": 7,
+                  "floor": 6,
+                  "reward": -15.985,
+                  "worker": "3"
+            },
+            {
+                  "game": 19,
+                  "floor": 16,
+                  "reward": 3.87,
+                  "worker": "1"
+            },
+            {
+                  "game": 23,
+                  "floor": 11,
+                  "reward": -2.55,
+                  "worker": "2"
+            },
+            {
+                  "game": 8,
+                  "floor": 20,
+                  "reward": 9.05,
+                  "worker": "3"
+            },
+            {
+                  "game": 20,
+                  "floor": 19,
+                  "reward": 22.405,
+                  "worker": "1"
+            },
+            {
+                  "game": 24,
+                  "floor": 16,
+                  "reward": -3.05,
+                  "worker": "2"
+            },
+            {
+                  "game": 21,
+                  "floor": 5,
+                  "reward": -21.415,
+                  "worker": "1"
+            },
+            {
+                  "game": 25,
+                  "floor": 20,
+                  "reward": 34.61,
+                  "worker": "2"
+            },
+            {
+                  "game": 9,
+                  "floor": 21,
+                  "reward": 23.77,
+                  "worker": "3"
+            },
+            {
+                  "game": 22,
+                  "floor": 21,
+                  "reward": 35.475,
+                  "worker": "1"
+            },
+            {
+                  "game": 26,
+                  "floor": 12,
+                  "reward": 0.235,
+                  "worker": "2"
+            },
+            {
+                  "game": 10,
+                  "floor": 13,
+                  "reward": -8.665,
+                  "worker": "3"
+            },
+            {
+                  "game": 11,
+                  "floor": 11,
+                  "reward": -6.67,
+                  "worker": "3"
+            },
+            {
+                  "game": 27,
+                  "floor": 16,
+                  "reward": 4.545,
+                  "worker": "2"
+            },
+            {
+                  "game": 23,
+                  "floor": 16,
+                  "reward": 4.495,
+                  "worker": "1"
+            },
+            {
+                  "game": 28,
+                  "floor": 12,
+                  "reward": -6.96,
+                  "worker": "2"
+            },
+            {
+                  "game": 12,
+                  "floor": 16,
+                  "reward": 15.765,
+                  "worker": "3"
+            },
+            {
+                  "game": 29,
+                  "floor": 14,
+                  "reward": -13.335,
+                  "worker": "2"
+            },
+            {
+                  "game": 30,
+                  "floor": 6,
+                  "reward": -10.475,
+                  "worker": "2"
+            },
+            {
+                  "game": 13,
+                  "floor": 16,
+                  "reward": 1.35,
+                  "worker": "3"
+            },
+            {
+                  "game": 14,
+                  "floor": 12,
+                  "reward": -5.44,
+                  "worker": "3"
+            },
+            {
+                  "game": 31,
+                  "floor": 16,
+                  "reward": -2.915,
+                  "worker": "2"
+            },
+            {
+                  "game": 24,
+                  "floor": 46,
+                  "reward": 94.275,
+                  "worker": "1"
+            },
+            {
+                  "game": 25,
+                  "floor": 6,
+                  "reward": -19.33,
+                  "worker": "1"
+            },
+            {
+                  "game": 32,
+                  "floor": 14,
+                  "reward": 1.435,
+                  "worker": "2"
+            },
+            {
+                  "game": 15,
+                  "floor": 16,
+                  "reward": 1.81,
+                  "worker": "3"
+            },
+            {
+                  "game": 33,
+                  "floor": 11,
+                  "reward": -4.135,
+                  "worker": "2"
+            },
+            {
+                  "game": 26,
+                  "floor": 11,
+                  "reward": -9.25,
+                  "worker": "1"
+            },
+            {
+                  "game": 16,
+                  "floor": 7,
+                  "reward": -20.405,
+                  "worker": "3"
+            },
+            {
+                  "game": 17,
+                  "floor": 6,
+                  "reward": -20.56,
+                  "worker": "3"
+            },
+            {
+                  "game": 34,
+                  "floor": 16,
+                  "reward": -0.46,
+                  "worker": "2"
+            },
+            {
+                  "game": 27,
+                  "floor": 16,
+                  "reward": 11.31,
+                  "worker": "1"
+            }
       ],
-      ppo: [
-        {"update":1,"kl":0.00165891,"entropy":0.322985,"clip":0.027344,"vf_loss":30.374583,"pg_loss":-0.005981},{"update":2,"kl":0.00122486,"entropy":0.371167,"clip":0.06065,"vf_loss":38.961307,"pg_loss":-0.002782},{"update":3,"kl":0.01217209,"entropy":0.324659,"clip":0.090569,"vf_loss":44.569088,"pg_loss":0.004619},{"update":4,"kl":0.02050195,"entropy":0.364453,"clip":0.149709,"vf_loss":37.34534,"pg_loss":0.010889},{"update":5,"kl":0.01115785,"entropy":0.335404,"clip":0.098619,"vf_loss":29.842898,"pg_loss":-0.003106},{"update":6,"kl":0.00959566,"entropy":0.385109,"clip":0.093506,"vf_loss":41.427031,"pg_loss":-0.000898},{"update":7,"kl":0.01382287,"entropy":0.363347,"clip":0.126228,"vf_loss":29.717805,"pg_loss":0.006314},{"update":8,"kl":0.01342071,"entropy":0.347758,"clip":0.130684,"vf_loss":26.742273,"pg_loss":-0.000008},{"update":9,"kl":0.018282,"entropy":0.355549,"clip":0.168087,"vf_loss":27.759048,"pg_loss":0.008579},{"update":10,"kl":0.00806847,"entropy":0.337746,"clip":0.125699,"vf_loss":31.232329,"pg_loss":0.001521},{"update":11,"kl":0.00542871,"entropy":0.371397,"clip":0.133801,"vf_loss":29.980527,"pg_loss":0.00299},{"update":12,"kl":0.0038593,"entropy":0.34253,"clip":0.138354,"vf_loss":28.464578,"pg_loss":0.006595},{"update":13,"kl":0.003241,"entropy":0.316194,"clip":0.097049,"vf_loss":30.853033,"pg_loss":0.006479},{"update":14,"kl":0.01493797,"entropy":0.301612,"clip":0.116154,"vf_loss":30.552556,"pg_loss":0.007205},{"update":15,"kl":0.00892591,"entropy":0.311756,"clip":0.110978,"vf_loss":26.090092,"pg_loss":0.002494},{"update":16,"kl":0.00384765,"entropy":0.36802,"clip":0.12267,"vf_loss":25.46888,"pg_loss":0.003498},{"update":17,"kl":0.00806537,"entropy":0.363652,"clip":0.109872,"vf_loss":34.531892,"pg_loss":0.009227},{"update":18,"kl":0.00842598,"entropy":0.361252,"clip":0.143173,"vf_loss":20.690091,"pg_loss":0.014146},{"update":19,"kl":0.0364123,"entropy":0.35016,"clip":0.189614,"vf_loss":26.109448,"pg_loss":0.022714}
+      "ppo": [
+            {
+                  "update": 232,
+                  "kl": 0.0018459,
+                  "entropy": 0.206576,
+                  "clip": 0.038574,
+                  "vf_loss": 12.374748,
+                  "pg_loss": -0.018965
+            },
+            {
+                  "update": 233,
+                  "kl": 0.00325877,
+                  "entropy": 0.211158,
+                  "clip": 0.096413,
+                  "vf_loss": 13.620448,
+                  "pg_loss": -0.003596
+            },
+            {
+                  "update": 234,
+                  "kl": 0.00267465,
+                  "entropy": 0.2086,
+                  "clip": 0.036923,
+                  "vf_loss": 19.415624,
+                  "pg_loss": 0.001527
+            },
+            {
+                  "update": 235,
+                  "kl": 0.00505319,
+                  "entropy": 0.212559,
+                  "clip": 0.075469,
+                  "vf_loss": 14.268611,
+                  "pg_loss": -0.003469
+            },
+            {
+                  "update": 236,
+                  "kl": 0.00050758,
+                  "entropy": 0.194452,
+                  "clip": 0.025814,
+                  "vf_loss": 12.951285,
+                  "pg_loss": 0.000848
+            },
+            {
+                  "update": 237,
+                  "kl": 0.00213691,
+                  "entropy": 0.205321,
+                  "clip": 0.070017,
+                  "vf_loss": 10.555841,
+                  "pg_loss": -0.004509
+            },
+            {
+                  "update": 238,
+                  "kl": 0.00515545,
+                  "entropy": 0.207104,
+                  "clip": 0.067911,
+                  "vf_loss": 22.073773,
+                  "pg_loss": 0.002135
+            },
+            {
+                  "update": 239,
+                  "kl": 0.00191826,
+                  "entropy": 0.205113,
+                  "clip": 0.046428,
+                  "vf_loss": 12.532584,
+                  "pg_loss": 0.001118
+            },
+            {
+                  "update": 240,
+                  "kl": 0.00234561,
+                  "entropy": 0.21415,
+                  "clip": 0.115319,
+                  "vf_loss": 32.378252,
+                  "pg_loss": 0.008747
+            },
+            {
+                  "update": 241,
+                  "kl": 0.00053913,
+                  "entropy": 0.198912,
+                  "clip": 0.059588,
+                  "vf_loss": 16.51021,
+                  "pg_loss": 0.004556
+            },
+            {
+                  "update": 242,
+                  "kl": 0.0091203,
+                  "entropy": 0.207902,
+                  "clip": 0.101953,
+                  "vf_loss": 11.354151,
+                  "pg_loss": 0.001125
+            },
+            {
+                  "update": 243,
+                  "kl": 0.005961,
+                  "entropy": 0.221287,
+                  "clip": 0.074534,
+                  "vf_loss": 14.596473,
+                  "pg_loss": -0.001706
+            },
+            {
+                  "update": 244,
+                  "kl": 0.00276767,
+                  "entropy": 0.195088,
+                  "clip": 0.068819,
+                  "vf_loss": 24.781802,
+                  "pg_loss": -9.7e-05
+            },
+            {
+                  "update": 245,
+                  "kl": 0.00533946,
+                  "entropy": 0.216677,
+                  "clip": 0.06481,
+                  "vf_loss": 14.087452,
+                  "pg_loss": 0.006084
+            },
+            {
+                  "update": 246,
+                  "kl": -0.0015619,
+                  "entropy": 0.211036,
+                  "clip": 0.065131,
+                  "vf_loss": 11.417428,
+                  "pg_loss": -0.000694
+            },
+            {
+                  "update": 247,
+                  "kl": 0.00359326,
+                  "entropy": 0.204828,
+                  "clip": 0.093061,
+                  "vf_loss": 12.872947,
+                  "pg_loss": -0.000229
+            },
+            {
+                  "update": 248,
+                  "kl": 0.00989646,
+                  "entropy": 0.234246,
+                  "clip": 0.143646,
+                  "vf_loss": 11.309403,
+                  "pg_loss": 0.009392
+            },
+            {
+                  "update": 249,
+                  "kl": 0.00343464,
+                  "entropy": 0.214068,
+                  "clip": 0.065359,
+                  "vf_loss": 17.30607,
+                  "pg_loss": 0.001878
+            },
+            {
+                  "update": 250,
+                  "kl": 0.00141971,
+                  "entropy": 0.213599,
+                  "clip": 0.08133,
+                  "vf_loss": 18.474387,
+                  "pg_loss": 0.004199
+            },
+            {
+                  "update": 251,
+                  "kl": 0.00773122,
+                  "entropy": 0.200898,
+                  "clip": 0.063345,
+                  "vf_loss": 11.749141,
+                  "pg_loss": 0.003221
+            },
+            {
+                  "update": 252,
+                  "kl": 0.0050749,
+                  "entropy": 0.221465,
+                  "clip": 0.063017,
+                  "vf_loss": 20.452542,
+                  "pg_loss": 0.000178
+            },
+            {
+                  "update": 253,
+                  "kl": 0.0059632,
+                  "entropy": 0.229183,
+                  "clip": 0.073081,
+                  "vf_loss": 19.236845,
+                  "pg_loss": 0.001538
+            },
+            {
+                  "update": 254,
+                  "kl": 0.00314319,
+                  "entropy": 0.224345,
+                  "clip": 0.074398,
+                  "vf_loss": 14.092081,
+                  "pg_loss": 0.004396
+            },
+            {
+                  "update": 255,
+                  "kl": 0.00965359,
+                  "entropy": 0.21863,
+                  "clip": 0.072519,
+                  "vf_loss": 24.663979,
+                  "pg_loss": -9.2e-05
+            },
+            {
+                  "update": 256,
+                  "kl": 0.00322966,
+                  "entropy": 0.20862,
+                  "clip": 0.080517,
+                  "vf_loss": 26.206606,
+                  "pg_loss": 0.004881
+            },
+            {
+                  "update": 257,
+                  "kl": 0.00053584,
+                  "entropy": 0.219059,
+                  "clip": 0.070886,
+                  "vf_loss": 11.656736,
+                  "pg_loss": 0.00435
+            },
+            {
+                  "update": 258,
+                  "kl": 0.00632483,
+                  "entropy": 0.221876,
+                  "clip": 0.077381,
+                  "vf_loss": 11.453063,
+                  "pg_loss": 0.000159
+            },
+            {
+                  "update": 259,
+                  "kl": 0.00276861,
+                  "entropy": 0.228283,
+                  "clip": 0.051253,
+                  "vf_loss": 17.446138,
+                  "pg_loss": -0.001787
+            },
+            {
+                  "update": 260,
+                  "kl": 0.00092202,
+                  "entropy": 0.217789,
+                  "clip": 0.069824,
+                  "vf_loss": 17.983761,
+                  "pg_loss": -0.006613
+            },
+            {
+                  "update": 261,
+                  "kl": 0.00823361,
+                  "entropy": 0.222008,
+                  "clip": 0.106349,
+                  "vf_loss": 17.133279,
+                  "pg_loss": 0.006389
+            },
+            {
+                  "update": 262,
+                  "kl": 0.00758248,
+                  "entropy": 0.22298,
+                  "clip": 0.091571,
+                  "vf_loss": 16.546775,
+                  "pg_loss": -0.007793
+            },
+            {
+                  "update": 263,
+                  "kl": 0.00555192,
+                  "entropy": 0.222913,
+                  "clip": 0.088604,
+                  "vf_loss": 14.511938,
+                  "pg_loss": 0.00219
+            },
+            {
+                  "update": 264,
+                  "kl": 0.0056801,
+                  "entropy": 0.212108,
+                  "clip": 0.088594,
+                  "vf_loss": 20.907148,
+                  "pg_loss": 0.003456
+            },
+            {
+                  "update": 265,
+                  "kl": 0.000172,
+                  "entropy": 0.203081,
+                  "clip": 0.065885,
+                  "vf_loss": 16.947658,
+                  "pg_loss": -0.00056
+            },
+            {
+                  "update": 266,
+                  "kl": 0.00309709,
+                  "entropy": 0.22396,
+                  "clip": 0.068911,
+                  "vf_loss": 23.533713,
+                  "pg_loss": 0.012894
+            },
+            {
+                  "update": 267,
+                  "kl": 0.00049705,
+                  "entropy": 0.206988,
+                  "clip": 0.065798,
+                  "vf_loss": 19.49856,
+                  "pg_loss": -0.000881
+            },
+            {
+                  "update": 268,
+                  "kl": 0.01301389,
+                  "entropy": 0.198162,
+                  "clip": 0.139648,
+                  "vf_loss": 23.527558,
+                  "pg_loss": 0.014353
+            },
+            {
+                  "update": 269,
+                  "kl": 0.00158029,
+                  "entropy": 0.21175,
+                  "clip": 0.045194,
+                  "vf_loss": 19.595322,
+                  "pg_loss": -0.001859
+            },
+            {
+                  "update": 270,
+                  "kl": 0.0062419,
+                  "entropy": 0.209148,
+                  "clip": 0.034638,
+                  "vf_loss": 19.526073,
+                  "pg_loss": 0.000915
+            },
+            {
+                  "update": 271,
+                  "kl": 0.00380012,
+                  "entropy": 0.211106,
+                  "clip": 0.059631,
+                  "vf_loss": 20.491646,
+                  "pg_loss": 0.001806
+            },
+            {
+                  "update": 272,
+                  "kl": 0.00067403,
+                  "entropy": 0.207183,
+                  "clip": 0.044739,
+                  "vf_loss": 23.972283,
+                  "pg_loss": 0.002311
+            },
+            {
+                  "update": 273,
+                  "kl": 0.00671174,
+                  "entropy": 0.219109,
+                  "clip": 0.081811,
+                  "vf_loss": 18.162569,
+                  "pg_loss": -0.00072
+            },
+            {
+                  "update": 274,
+                  "kl": 0.00447783,
+                  "entropy": 0.216238,
+                  "clip": 0.09385,
+                  "vf_loss": 18.182882,
+                  "pg_loss": -0.001005
+            },
+            {
+                  "update": 275,
+                  "kl": 0.01175905,
+                  "entropy": 0.221131,
+                  "clip": 0.08779,
+                  "vf_loss": 14.498038,
+                  "pg_loss": 0.006466
+            },
+            {
+                  "update": 276,
+                  "kl": 0.00244059,
+                  "entropy": 0.227446,
+                  "clip": 0.090404,
+                  "vf_loss": 18.988311,
+                  "pg_loss": -0.004321
+            },
+            {
+                  "update": 277,
+                  "kl": 0.00273345,
+                  "entropy": 0.21292,
+                  "clip": 0.075995,
+                  "vf_loss": 18.263398,
+                  "pg_loss": 0.008547
+            },
+            {
+                  "update": 278,
+                  "kl": 0.00205205,
+                  "entropy": 0.231717,
+                  "clip": 0.059391,
+                  "vf_loss": 18.829043,
+                  "pg_loss": 0.003425
+            },
+            {
+                  "update": 279,
+                  "kl": 0.00053021,
+                  "entropy": 0.243658,
+                  "clip": 0.037178,
+                  "vf_loss": 16.887964,
+                  "pg_loss": 0.008397
+            },
+            {
+                  "update": 280,
+                  "kl": 0.00415861,
+                  "entropy": 0.221316,
+                  "clip": 0.040675,
+                  "vf_loss": 14.816132,
+                  "pg_loss": 0.000895
+            },
+            {
+                  "update": 281,
+                  "kl": 0.00884127,
+                  "entropy": 0.240887,
+                  "clip": 0.069818,
+                  "vf_loss": 12.674628,
+                  "pg_loss": -0.001507
+            },
+            {
+                  "update": 282,
+                  "kl": 0.00419671,
+                  "entropy": 0.203884,
+                  "clip": 0.087358,
+                  "vf_loss": 19.604903,
+                  "pg_loss": -0.00096
+            },
+            {
+                  "update": 283,
+                  "kl": 0.00106274,
+                  "entropy": 0.223308,
+                  "clip": 0.070816,
+                  "vf_loss": 18.461339,
+                  "pg_loss": 0.003077
+            },
+            {
+                  "update": 284,
+                  "kl": 0.00636862,
+                  "entropy": 0.215949,
+                  "clip": 0.063451,
+                  "vf_loss": 14.938581,
+                  "pg_loss": 0.002924
+            },
+            {
+                  "update": 285,
+                  "kl": 0.00044532,
+                  "entropy": 0.216746,
+                  "clip": 0.06526,
+                  "vf_loss": 12.28889,
+                  "pg_loss": -0.000812
+            },
+            {
+                  "update": 286,
+                  "kl": 0.0075906,
+                  "entropy": 0.195993,
+                  "clip": 0.057566,
+                  "vf_loss": 20.462503,
+                  "pg_loss": 0.069859
+            },
+            {
+                  "update": 287,
+                  "kl": 0.00358551,
+                  "entropy": 0.207241,
+                  "clip": 0.067064,
+                  "vf_loss": 14.929933,
+                  "pg_loss": 0.002927
+            },
+            {
+                  "update": 288,
+                  "kl": 0.00075973,
+                  "entropy": 0.203039,
+                  "clip": 0.055525,
+                  "vf_loss": 24.815782,
+                  "pg_loss": 0.004433
+            },
+            {
+                  "update": 289,
+                  "kl": 0.0097959,
+                  "entropy": 0.226655,
+                  "clip": 0.111843,
+                  "vf_loss": 20.406719,
+                  "pg_loss": 0.008091
+            },
+            {
+                  "update": 290,
+                  "kl": 0.01222066,
+                  "entropy": 0.214612,
+                  "clip": 0.095477,
+                  "vf_loss": 26.90123,
+                  "pg_loss": 0.007273
+            },
+            {
+                  "update": 291,
+                  "kl": 0.00014834,
+                  "entropy": 0.219627,
+                  "clip": 0.083516,
+                  "vf_loss": 17.078621,
+                  "pg_loss": 0.003843
+            },
+            {
+                  "update": 292,
+                  "kl": 0.0107157,
+                  "entropy": 0.234055,
+                  "clip": 0.083726,
+                  "vf_loss": 19.973632,
+                  "pg_loss": 0.004226
+            },
+            {
+                  "update": 293,
+                  "kl": 0.00584268,
+                  "entropy": 0.221428,
+                  "clip": 0.051172,
+                  "vf_loss": 19.155152,
+                  "pg_loss": -0.001259
+            },
+            {
+                  "update": 294,
+                  "kl": 0.00685951,
+                  "entropy": 0.234803,
+                  "clip": 0.047963,
+                  "vf_loss": 17.515802,
+                  "pg_loss": -0.004158
+            },
+            {
+                  "update": 295,
+                  "kl": 0.00627326,
+                  "entropy": 0.241642,
+                  "clip": 0.092188,
+                  "vf_loss": 21.218741,
+                  "pg_loss": 0.005901
+            },
+            {
+                  "update": 296,
+                  "kl": 0.00682346,
+                  "entropy": 0.218445,
+                  "clip": 0.09006,
+                  "vf_loss": 22.35653,
+                  "pg_loss": 0.011282
+            },
+            {
+                  "update": 297,
+                  "kl": 0.00583423,
+                  "entropy": 0.242426,
+                  "clip": 0.110983,
+                  "vf_loss": 15.369824,
+                  "pg_loss": 0.001191
+            },
+            {
+                  "update": 298,
+                  "kl": 0.00765509,
+                  "entropy": 0.220597,
+                  "clip": 0.102009,
+                  "vf_loss": 18.584208,
+                  "pg_loss": 0.008261
+            },
+            {
+                  "update": 299,
+                  "kl": 0.0055003,
+                  "entropy": 0.250677,
+                  "clip": 0.068805,
+                  "vf_loss": 11.588196,
+                  "pg_loss": 0.004482
+            },
+            {
+                  "update": 300,
+                  "kl": 0.00873733,
+                  "entropy": 0.211982,
+                  "clip": 0.061819,
+                  "vf_loss": 16.319413,
+                  "pg_loss": -0.000646
+            },
+            {
+                  "update": 301,
+                  "kl": 0.00533478,
+                  "entropy": 0.232846,
+                  "clip": 0.06625,
+                  "vf_loss": 15.764714,
+                  "pg_loss": 0.000276
+            },
+            {
+                  "update": 302,
+                  "kl": 0.01243824,
+                  "entropy": 0.239058,
+                  "clip": 0.12406,
+                  "vf_loss": 17.303107,
+                  "pg_loss": 0.003392
+            },
+            {
+                  "update": 303,
+                  "kl": 0.00502142,
+                  "entropy": 0.230795,
+                  "clip": 0.088712,
+                  "vf_loss": 33.034112,
+                  "pg_loss": 0.006334
+            },
+            {
+                  "update": 304,
+                  "kl": 0.00590082,
+                  "entropy": 0.236382,
+                  "clip": 0.103838,
+                  "vf_loss": 18.929775,
+                  "pg_loss": 0.010605
+            },
+            {
+                  "update": 305,
+                  "kl": 0.00383432,
+                  "entropy": 0.212522,
+                  "clip": 0.066443,
+                  "vf_loss": 13.096147,
+                  "pg_loss": 0.001544
+            },
+            {
+                  "update": 306,
+                  "kl": 0.00830054,
+                  "entropy": 0.238026,
+                  "clip": 0.097601,
+                  "vf_loss": 14.42245,
+                  "pg_loss": 0.004347
+            },
+            {
+                  "update": 307,
+                  "kl": 0.0048697,
+                  "entropy": 0.234433,
+                  "clip": 0.066786,
+                  "vf_loss": 20.385667,
+                  "pg_loss": 0.002208
+            },
+            {
+                  "update": 308,
+                  "kl": 0.01009878,
+                  "entropy": 0.233508,
+                  "clip": 0.10759,
+                  "vf_loss": 16.49425,
+                  "pg_loss": 0.0025
+            },
+            {
+                  "update": 309,
+                  "kl": 0.00672637,
+                  "entropy": 0.220926,
+                  "clip": 0.092254,
+                  "vf_loss": 21.889352,
+                  "pg_loss": 0.0027
+            },
+            {
+                  "update": 310,
+                  "kl": 0.00460333,
+                  "entropy": 0.252739,
+                  "clip": 0.089798,
+                  "vf_loss": 15.290199,
+                  "pg_loss": 0.002004
+            },
+            {
+                  "update": 311,
+                  "kl": 0.00797181,
+                  "entropy": 0.256081,
+                  "clip": 0.106109,
+                  "vf_loss": 17.17627,
+                  "pg_loss": 0.004728
+            }
       ],
-      bc: [
-        {"epoch":1,"val_acc":77.01,"val_loss":0.602193,"train_acc":72.781},{"epoch":5,"val_acc":81.078,"val_loss":0.505475,"train_acc":81.337},{"epoch":10,"val_acc":81.796,"val_loss":0.46856,"train_acc":83.156},{"epoch":15,"val_acc":83.581,"val_loss":0.431452,"train_acc":85.355},{"epoch":20,"val_acc":84.357,"val_loss":0.4102,"train_acc":87.224},{"epoch":25,"val_acc":84.508,"val_loss":0.402615,"train_acc":88.801},{"epoch":30,"val_acc":84.983,"val_loss":0.398281,"train_acc":90.015},{"epoch":35,"val_acc":84.647,"val_loss":0.398275,"train_acc":91.174},{"epoch":40,"val_acc":85.539,"val_loss":0.405917,"train_acc":92.352},{"epoch":41,"val_acc":84.948,"val_loss":0.406206,"train_acc":92.588}
+      "bc": [
+            {
+                  "epoch": 1,
+                  "val_acc": 77.01,
+                  "val_loss": 0.602193,
+                  "train_acc": 72.781
+            },
+            {
+                  "epoch": 5,
+                  "val_acc": 81.078,
+                  "val_loss": 0.505475,
+                  "train_acc": 81.337
+            },
+            {
+                  "epoch": 10,
+                  "val_acc": 81.796,
+                  "val_loss": 0.46856,
+                  "train_acc": 83.156
+            },
+            {
+                  "epoch": 15,
+                  "val_acc": 83.581,
+                  "val_loss": 0.431452,
+                  "train_acc": 85.355
+            },
+            {
+                  "epoch": 20,
+                  "val_acc": 84.357,
+                  "val_loss": 0.4102,
+                  "train_acc": 87.224
+            },
+            {
+                  "epoch": 25,
+                  "val_acc": 84.508,
+                  "val_loss": 0.402615,
+                  "train_acc": 88.801
+            },
+            {
+                  "epoch": 30,
+                  "val_acc": 84.983,
+                  "val_loss": 0.398281,
+                  "train_acc": 90.015
+            },
+            {
+                  "epoch": 35,
+                  "val_acc": 84.647,
+                  "val_loss": 0.398275,
+                  "train_acc": 91.174
+            },
+            {
+                  "epoch": 40,
+                  "val_acc": 85.539,
+                  "val_loss": 0.405917,
+                  "train_acc": 92.352
+            },
+            {
+                  "epoch": 41,
+                  "val_acc": 84.948,
+                  "val_loss": 0.406206,
+                  "train_acc": 92.588
+            }
       ],
-      comparison: [
-        {"run":"heuristic_25_20260512_112612","label":"Heuristic","games":25,"avg_floor":16.6,"avg_reward":11.38,"win_rate":0,"act2_rate":32,"floor20_rate":32,"elite":"27/33","boss":"8/18"},
-        {"run":"bc_25_20260512_112612","label":"BC checkpoint","games":25,"avg_floor":13.08,"avg_reward":-0.62,"win_rate":0,"act2_rate":12,"floor20_rate":12,"elite":"25/32","boss":"3/10"},
-        {"run":"ppo_current_25_20260512_112612","label":"PPO checkpoint","games":25,"avg_floor":13.08,"avg_reward":-0.62,"win_rate":0,"act2_rate":12,"floor20_rate":12,"elite":"25/32","boss":"3/10"}
+      "comparison": [
+            {
+                  "run": "heuristic_25_20260514_094347",
+                  "label": "Heuristic",
+                  "games": 25,
+                  "avg_floor": 16.84,
+                  "avg_reward": 11.87,
+                  "win_rate": 0.0,
+                  "act2_rate": 32.0,
+                  "floor20_rate": 32.0,
+                  "elite": "28/33",
+                  "boss": "8/18"
+            },
+            {
+                  "run": "bc_25_20260514_094347",
+                  "label": "BC checkpoint",
+                  "games": 25,
+                  "avg_floor": 13.08,
+                  "avg_reward": -0.62,
+                  "win_rate": 0.0,
+                  "act2_rate": 12.0,
+                  "floor20_rate": 12.0,
+                  "elite": "25/32",
+                  "boss": "3/10"
+            },
+            {
+                  "run": "ppo_current_25_20260514_094347",
+                  "label": "PPO checkpoint",
+                  "games": 25,
+                  "avg_floor": 16.4,
+                  "avg_reward": 9.57,
+                  "win_rate": 0.0,
+                  "act2_rate": 24.0,
+                  "floor20_rate": 24.0,
+                  "elite": "21/26",
+                  "boss": "7/16"
+            }
       ]
-    };
+};
 
     let state = structuredClone(snapshot);
 
@@ -320,11 +1534,11 @@
       const bestEval = [...state.comparison].sort((a, b) => b.avg_floor - a.avg_floor)[0] || {};
       const cards = [
         ["BC val accuracy", `${fmt(number(latestBc.val_acc), 2)}%`, `epoch ${latestBc.epoch || "n/a"}`],
-        ["Recent PPO avg floor", fmt(avgFloor), `${ppoGames} displayed rollout games`],
+        ["Recent PPO avg floor", fmt(avgFloor), `${ppoGames} displayed rollout games; ${state.meta.ppoGames || ppoGames} total`],
         ["Recent PPO avg reward", fmt(avgReward), "shaped reward"],
         ["Latest PPO KL", fmt(number(latestPpo.kl), 5), `clip ${fmt(number(latestPpo.clip), 3)}`],
         ["Best fixed-seed policy", bestEval.label || "n/a", `avg floor ${fmt(number(bestEval.avg_floor))}`],
-        ["Workers", String(state.meta.workers || "n/a"), `stale rollouts ${state.meta.staleRollouts}`],
+        ["Workers", String(state.meta.workers || "n/a"), `${state.meta.ppoUpdates || "n/a"} PPO updates; stale ${state.meta.staleRollouts}`],
         ["Commit", state.meta.commit, state.meta.date],
         ["Seed file", state.meta.seedFile, "deterministic eval"]
       ];
@@ -361,6 +1575,9 @@
           ["PPO model", `<code>${state.meta.ppoModel}</code>`],
           ["Seed file", `<code>${state.meta.seedFile}</code>`],
           ["Worker count", state.meta.workers],
+          ["PPO rollout games", state.meta.ppoGames || state.training.length],
+          ["PPO update rows", state.meta.ppoUpdates || state.ppo.length],
+          ["Last 500 avg floor", state.meta.last500AvgFloor || "n/a"],
           ["Stale rollouts", state.meta.staleRollouts]
         ]
       );

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "snapshot_date": "2026-05-12",
-  "commit": "af06ee9",
+  "snapshot_date": "2026-05-14",
+  "commit": "2670c91",
   "notes": "Public summary generated from local logs and checkpoints. Raw logs, rollouts, and model files stay gitignored.",
   "runs": [
     {
@@ -15,7 +15,7 @@
         "learning_rate": 0.0005,
         "batch_size": 256,
         "validation_split": 0.1,
-        "weight_decay": 0.00001,
+        "weight_decay": 1e-05,
         "label_smoothing": 0.02,
         "patience": 12
       },
@@ -48,8 +48,8 @@
       "worker_count": 3,
       "hyperparameters": {
         "batch_games": 8,
-        "learning_rate_initial": 0.00003,
-        "learning_rate_latest": 0.00001875,
+        "learning_rate_initial": 3e-05,
+        "learning_rate_latest": 1.875e-05,
         "epochs": 4,
         "clip": 0.15,
         "target_kl": 0.03,
@@ -105,6 +105,64 @@
         "boss_wins": 8
       },
       "notes": "Current reference policy for fixed-seed comparison."
+    },
+    {
+      "run_id": "long_ppo_eval_20260514",
+      "report": "004_long_ppo_eval.md",
+      "model_path": "models/ppo_sts.pt",
+      "training_mode": "parallel_ppo_long_run",
+      "games": 2496,
+      "worker_count": 3,
+      "hyperparameters": {
+        "batch_games": 8,
+        "learning_rate_initial": 3e-05,
+        "learning_rate_latest": 2.2888184e-05,
+        "epochs": 4,
+        "clip": 0.15,
+        "target_kl": 0.03,
+        "entropy_coefficient_latest": 0.00117128,
+        "bc_anchor_coefficient_latest": 0.01,
+        "max_rollout_lag": 4,
+        "auto_tune": true
+      },
+      "training_metrics": {
+        "ppo_update_rows": 311,
+        "latest_transition_batch": 1443,
+        "total_update_transitions": 372305,
+        "average_final_floor": 13.797,
+        "last_500_average_floor": 14.924,
+        "last_100_average_floor": 15.0,
+        "latest_approx_kl": 0.00797181,
+        "latest_clip_fraction": 0.106109,
+        "latest_normalized_entropy": 0.256081,
+        "latest_explained_variance": 0.677278,
+        "stale_rollouts": 0,
+        "legacy_rollouts": 0,
+        "skipped_rollouts": 0
+      },
+      "eval_run_id": "ppo_current_25_20260514_094347",
+      "evaluation": {
+        "games": 25,
+        "average_floor": 16.4,
+        "best_floor": 36,
+        "average_reward": 9.57,
+        "win_rate_percent": 0.0,
+        "act2_reach_rate_percent": 24.0,
+        "floor20_rate_percent": 24.0,
+        "elite_fights": 26,
+        "elite_wins": 21,
+        "boss_fights": 16,
+        "boss_wins": 7
+      },
+      "comparison": {
+        "heuristic_eval_run_id": "heuristic_25_20260514_094347",
+        "heuristic_average_floor": 16.84,
+        "bc_eval_run_id": "bc_25_20260514_094347",
+        "bc_average_floor": 13.08,
+        "ppo_minus_bc_average_floor": 3.32,
+        "ppo_minus_heuristic_average_floor": -0.44
+      },
+      "notes": "After the long PPO run, the checkpoint improved materially over BC on the 25-seed slice and nearly matched the heuristic average floor, though it still recorded no full victories."
     }
   ]
 }
