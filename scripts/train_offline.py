@@ -412,6 +412,8 @@ def main():
                         help="Entropy bonus coefficient (higher = more exploration)")
     parser.add_argument("--auto-tune", action="store_true",
                         help="Dynamically adjust lr, ent_coef, and bc_coef from KL/clip/normalized entropy")
+    parser.add_argument("--override-ent-coef", action="store_true",
+                        help="Apply --ent-coef after loading checkpoint hparams")
     parser.add_argument("--clip", type=float, default=0.15,
                         help="PPO clip range (default: 0.15)")
     parser.add_argument("--target-kl", type=float, default=0.03,
@@ -469,7 +471,8 @@ def main():
         f"clip={args.clip}, target_kl={args.target_kl}, "
         f"batch_games={args.batch_games}, max_rollout_lag={args.max_rollout_lag}, "
         f"bc_coef={args.bc_coef}, auto_tune={args.auto_tune}, "
-        f"allow_legacy={args.allow_legacy_rollouts}, device={device}, verbose={VERBOSE}")
+        f"override_ent_coef={args.override_ent_coef}, allow_legacy={args.allow_legacy_rollouts}, "
+        f"device={device}, verbose={VERBOSE}")
 
     trainer = PPOTrainer(
         obs_size=OBS_SIZE, n_actions=NUM_ACTIONS, device=device,
@@ -481,10 +484,22 @@ def main():
     if os.path.isfile(model_path):
         trainer.load(model_path, load_hparams=args.auto_tune)
         if args.auto_tune:
-            log(
-                "Loaded existing model; keeping checkpoint auto-tune state "
-                f"lr={_current_lr(trainer):.2e} ent_coef={trainer.ent_coef:.5f}"
-            )
+            loaded_ent = float(getattr(trainer, "ent_coef", args.ent_coef) or 0.0)
+            if args.override_ent_coef:
+                trainer.ent_coef = args.ent_coef
+                log(
+                    "Loaded existing model; keeping checkpoint auto-tune state "
+                    f"lr={_current_lr(trainer):.2e} ent_coef={loaded_ent:.5f}"
+                )
+                log(
+                    "Manual entropy override applied after checkpoint load: "
+                    f"ent_coef {loaded_ent:.5f}->{trainer.ent_coef:.5f}"
+                )
+            else:
+                log(
+                    "Loaded existing model; keeping checkpoint auto-tune state "
+                    f"lr={_current_lr(trainer):.2e} ent_coef={trainer.ent_coef:.5f}"
+                )
         else:
             trainer.set_lr(args.lr)
             trainer.ent_coef = args.ent_coef

@@ -496,6 +496,12 @@ class AscensionApp:
         self._parallel_launch_started_at: float = 0.0
         self._n_workers: int = 0
         self._eval_set_started_at: float = 0.0
+        self._ent_value = 0.001
+        self._ent_manual_override = False
+        self._ent_updating_ui = False
+        self._latest_trainer_ent_coef: float | None = None
+        self._latest_normalized_entropy: float | None = None
+        self._latest_auto_tune_action = ""
 
         self.hw = detect_hardware()
 
@@ -594,17 +600,39 @@ class AscensionApp:
         self.ent_row = ttk.Frame(ctrl_frame)
         self.ent_row.pack(fill="x", pady=(6, 0))
 
-        self.ent_label = ttk.Label(self.ent_row, text="Entropy Coef:")
+        self.ent_label = ttk.Label(self.ent_row, text="Start Entropy:")
         self.ent_label.pack(side="left", padx=(0, 5))
-        self._ent_value = 0.001
-        self.ent_var = tk.StringVar(value="0.001")
+        self.ent_var = tk.StringVar(value=f"{self._ent_value:.6f}")
         self.ent_minus = ttk.Button(self.ent_row, text="-", width=3, command=self._dec_ent)
         self.ent_minus.pack(side="left")
-        self.ent_display = ttk.Label(self.ent_row, textvariable=self.ent_var, width=5,
+        self.ent_display = ttk.Label(self.ent_row, textvariable=self.ent_var, width=9,
                                      anchor="center", font=("Consolas", 11, "bold"))
         self.ent_display.pack(side="left", padx=2)
         self.ent_plus = ttk.Button(self.ent_row, text="+", width=3, command=self._inc_ent)
         self.ent_plus.pack(side="left")
+        self.ent_scale = ttk.Scale(
+            self.ent_row,
+            from_=0.0,
+            to=0.01,
+            orient="horizontal",
+            length=160,
+            command=self._on_ent_scale,
+        )
+        self._ent_updating_ui = True
+        try:
+            self.ent_scale.set(self._ent_value)
+        finally:
+            self._ent_updating_ui = False
+        self.ent_scale.pack(side="left", padx=(8, 0))
+        self.ent_sync_btn = ttk.Button(
+            self.ent_row,
+            text="Sync latest",
+            command=lambda: self._sync_ent_from_latest(manual=True),
+        )
+        self.ent_sync_btn.pack(side="left", padx=(8, 0))
+        self.ent_current_var = tk.StringVar(value="Current: no trainer entropy yet")
+        ttk.Label(self.ent_row, textvariable=self.ent_current_var,
+                  font=("Consolas", 9)).pack(side="left", padx=(8, 0))
 
         self.ent_help = ttk.Label(self.ent_row, text="(?)", foreground="gray",
                                   font=("Segoe UI", 10, "bold"), cursor="hand2")
@@ -887,17 +915,49 @@ class AscensionApp:
         value = value.replace("\\", "/")
         return value
 
+    def _set_ent_value(self, value: float, *, manual: bool = False):
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            v = 0.001
+        v = round(max(0.0, min(0.01, v)), 6)
+        self._ent_value = v
+        if manual:
+            self._ent_manual_override = True
+        if hasattr(self, "ent_var"):
+            self.ent_var.set(f"{v:.6f}")
+        if hasattr(self, "ent_scale"):
+            self._ent_updating_ui = True
+            try:
+                self.ent_scale.set(v)
+            finally:
+                self._ent_updating_ui = False
+
+    def _on_ent_scale(self, value):
+        if self._ent_updating_ui:
+            return
+        self._set_ent_value(float(value), manual=True)
+
+    def _sync_ent_from_latest(self, *, manual: bool = True):
+        if self._latest_trainer_ent_coef is not None:
+            self._set_ent_value(self._latest_trainer_ent_coef, manual=manual)
+
+    def _set_ent_current_text(self, ent_coef, normalized_entropy, action):
+        if ent_coef is None:
+            self.ent_current_var.set("Current: no trainer entropy yet")
+            return
+        parts = [f"Current: ent_coef {ent_coef:.6f}"]
+        if normalized_entropy is not None:
+            parts.append(f"norm_ent {normalized_entropy:.3f}")
+        if action:
+            parts.append(str(action))
+        self.ent_current_var.set(" | ".join(parts))
+
     def _inc_ent(self):
-        v = round(self._ent_value + 0.001, 3)
-        if v <= 0.10:
-            self._ent_value = v
-            self.ent_var.set(f"{v:.3f}")
+        self._set_ent_value(self._ent_value + 0.0001, manual=True)
 
     def _dec_ent(self):
-        v = round(self._ent_value - 0.001, 3)
-        if v >= 0.0:
-            self._ent_value = v
-            self.ent_var.set(f"{v:.3f}")
+        self._set_ent_value(self._ent_value - 0.0001, manual=True)
 
     _ENT_TOOLTIP_TEXT = (
         "Controls how much the agent explores vs. exploits.\n"
@@ -908,7 +968,11 @@ class AscensionApp:
         "Lower (0.00-0.005): More deterministic, better for\n"
         "testing whether PPO improves the BC policy.\n"
         "\n"
-        "Recommended after BC: 0.001-0.005. Raise only if\n"
+        "The slider and +/- buttons set the starting entropy for a\n"
+        "new trainer launch. Auto-Tune may adjust it after that.\n"
+        "Sync latest copies the most recent logged trainer value.\n"
+        "\n"
+        "Recommended after BC: 0.001000-0.005000. Raise only if\n"
         "entropy collapses too early."
     )
 
@@ -1081,6 +1145,9 @@ class AscensionApp:
         updates, total_transitions, total_steps = 0, 0, 0
         trainer_transitions = 0
         trainer_transition_rows = 0
+        latest_trainer_ent_coef = None
+        latest_normalized_entropy = None
+        latest_auto_tune_action = ""
         prev_cumulative_transitions: dict[str, int] = {}
         prev_cumulative_steps: dict[str, int] = {}
         acts, victories = [], []
@@ -1203,6 +1270,21 @@ class AscensionApp:
                     updates = u
             except Exception:
                 pass
+            try:
+                ent_raw = r.get("ent_coef")
+                if ent_raw not in (None, ""):
+                    latest_trainer_ent_coef = float(ent_raw)
+            except Exception:
+                pass
+            try:
+                norm_raw = r.get("normalized_entropy")
+                if norm_raw not in (None, ""):
+                    latest_normalized_entropy = float(norm_raw)
+            except Exception:
+                pass
+            action = str(r.get("auto_tune_action") or "").strip()
+            if action:
+                latest_auto_tune_action = action
 
         display_transitions = trainer_transitions if trainer_transitions else total_transitions
 
@@ -1250,6 +1332,9 @@ class AscensionApp:
             "total_steps": total_steps,
             "rollouts_pending": rollouts_pending,
             "model_age": model_age,
+            "latest_ent_coef": latest_trainer_ent_coef,
+            "latest_normalized_entropy": latest_normalized_entropy,
+            "latest_auto_tune_action": latest_auto_tune_action,
             "fight_stats_available": fight_stats["has_data"],
             "elites_fought": fight_stats["elites_fought"],
             "elites_won": fight_stats["elites_won"],
@@ -1390,6 +1475,14 @@ class AscensionApp:
         try:
             ts = self._load_training_stats()
             if ts:
+                self._latest_trainer_ent_coef = ts["latest_ent_coef"]
+                self._latest_normalized_entropy = ts["latest_normalized_entropy"]
+                self._latest_auto_tune_action = ts["latest_auto_tune_action"]
+                self._set_ent_current_text(
+                    self._latest_trainer_ent_coef,
+                    self._latest_normalized_entropy,
+                    self._latest_auto_tune_action,
+                )
                 self.stats_vars["train_line"].set(
                     f"Training:  {ts['total']} games  |  "
                     f"Wins: {ts['wins']} ({ts['win_rate']:.0%})  |  "
@@ -1405,6 +1498,12 @@ class AscensionApp:
                     f"Avg100 Reward: {ts['avg_reward']:.1f}",
                     f"Life Reward: {ts['lifetime_avg_reward']:.1f}",
                 ]
+                if ts["latest_ent_coef"] is not None:
+                    detail_parts.append(f"Ent: {ts['latest_ent_coef']:.6f}")
+                    if ts["latest_normalized_entropy"] is not None:
+                        detail_parts.append(f"NormEnt: {ts['latest_normalized_entropy']:.3f}")
+                    if not self.running and not self._ent_manual_override:
+                        self._sync_ent_from_latest(manual=False)
                 if ts['rollouts_pending']:
                     detail_parts.append(f"Rollouts Queued: {ts['rollouts_pending']}")
                 if ts['model_age']:
@@ -1438,6 +1537,7 @@ class AscensionApp:
                 self.stats_vars["train_line"].set("Training:  no data yet")
                 self.stats_vars["detail_line"].set("")
                 self.stats_vars["combat_line"].set("")
+                self._set_ent_current_text(None, None, "")
 
             bs = self._load_bc_stats()
             if bs:
@@ -2107,6 +2207,8 @@ class AscensionApp:
                     "--ent-coef", str(self._ent_value),
                     "--device", "gpu" if self.gpu_var.get() else "cpu",
                 ]
+                if self._ent_manual_override:
+                    trainer_cmd.append("--override-ent-coef")
                 if self.auto_tune_var.get():
                     trainer_cmd.append("--auto-tune")
                 if self.verbose_var.get():
