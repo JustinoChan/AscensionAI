@@ -619,7 +619,7 @@ class AscensionApp:
         )
         self.model_combo.pack(side="left", padx=(0, 8))
         ttk.Button(self.model_row, text="Refresh",
-                   command=self._refresh_archive_list).pack(side="left", padx=(0, 6))
+                   command=self._refresh_models_and_stats).pack(side="left", padx=(0, 6))
         ttk.Button(self.model_row, text="Archive Current...",
                    command=self._prompt_archive_now).pack(side="left", padx=(0, 6))
         self._refresh_archive_list()
@@ -983,8 +983,7 @@ class AscensionApp:
     _ARCHIVE_LOG_FILES = (
         "training_stats.csv",
         "eval_stats.csv",
-        "bc_stats.csv",
-        "bc_train_stats.csv",
+        "elite_stats.csv",
         "fight_stats.csv",
         "training_plot.png",
     )
@@ -992,17 +991,22 @@ class AscensionApp:
     def _archives_dir(self) -> Path:
         return ROOT / "archives"
 
-    def _archive_source_files(self) -> dict[str, Path]:
-        """Files to copy when archiving: dest-relative path -> live source."""
-        out: dict[str, Path] = {}
+    def _archive_source_files(self) -> tuple[dict[str, Path], dict[str, Path]]:
+        """Return (model_files, log_files) keyed by dest-relative archive path.
+
+        Model files are kept in place after archiving; log files are removed
+        from logs/ so the Progress panel resets for the next run.
+        """
+        models: dict[str, Path] = {}
+        logs: dict[str, Path] = {}
         model_path = ROOT / "models" / "ppo_sts.pt"
         if model_path.exists():
-            out["models/ppo_sts.pt"] = model_path
+            models["models/ppo_sts.pt"] = model_path
         for name in self._ARCHIVE_LOG_FILES:
             p = ROOT / "logs" / name
             if p.exists():
-                out[f"logs/{name}"] = p
-        return out
+                logs[f"logs/{name}"] = p
+        return models, logs
 
     def _scan_archives(self) -> list[tuple[Path, datetime | None]]:
         arch_dir = self._archives_dir()
@@ -1048,6 +1052,10 @@ class AscensionApp:
         suffix = f" — {mtime.strftime('%Y-%m-%d %H:%M')}" if mtime else ""
         return f"{archive_dir.name}{suffix}"
 
+    def _refresh_models_and_stats(self):
+        self._refresh_archive_list()
+        self._refresh_stats_now()
+
     def _refresh_archive_list(self):
         options: dict[str, Path | None] = {}
         active_label = self._active_model_label()
@@ -1076,8 +1084,8 @@ class AscensionApp:
                 "not being written.",
             )
             return
-        sources = self._archive_source_files()
-        if "models/ppo_sts.pt" not in sources:
+        model_files, log_files = self._archive_source_files()
+        if "models/ppo_sts.pt" not in model_files:
             messagebox.showinfo(
                 "Nothing to Archive",
                 "models/ppo_sts.pt does not exist yet — nothing to archive.",
@@ -1103,36 +1111,53 @@ class AscensionApp:
             )
             return
 
-        file_lines = "\n".join(f"  {rel}" for rel in sources)
+        model_lines = "\n".join(f"  {rel}" for rel in model_files)
+        log_lines = "\n".join(f"  {rel}" for rel in log_files) or "  (none)"
         ok = messagebox.askyesno(
             "Confirm Archive",
             f"Create archive 'archives/{slug}/'?\n\n"
-            f"It will contain:\n{file_lines}\n\n"
-            "Your active model and logs will NOT be modified — this is a copy.",
+            f"Model (kept in place after copy):\n{model_lines}\n\n"
+            f"Logs (REMOVED from logs/ after copy):\n{log_lines}\n\n"
+            "The Progress panel will reset so the next run starts with "
+            "fresh stats. The active model file stays as-is.",
         )
         if not ok:
             return
         try:
-            self._perform_archive(target_dir, sources)
+            removed = self._perform_archive(target_dir, model_files, log_files)
         except Exception as e:
             _logger.error(f"Archive failed: {traceback.format_exc()}")
             messagebox.showerror("Archive Failed",
                                  f"Could not create archive:\n{e}")
             return
-        _logger.info(f"Archive created at {target_dir} with "
-                     f"{len(sources)} file(s)")
-        self._append_log("All", f"Archived {len(sources)} file(s) -> archives/{slug}/")
+        total = len(model_files) + len(log_files)
+        _logger.info(
+            f"Archive created at {target_dir}: {total} file(s) copied, "
+            f"{removed} log file(s) removed from logs/"
+        )
+        self._append_log(
+            "All",
+            f"Archived {total} file(s) -> archives/{slug}/; "
+            f"cleared {removed} log file(s) from logs/.",
+        )
         self._refresh_archive_list()
+        self._refresh_stats_now()
         messagebox.showinfo(
             "Archive Complete",
-            f"Archived to:\n  archives/{slug}/",
+            f"Archived to:\n  archives/{slug}/\n\n"
+            f"Cleared {removed} log file(s) from logs/.",
         )
 
     def _perform_archive(self, target_dir: Path,
-                         sources: dict[str, Path]):
+                         model_files: dict[str, Path],
+                         log_files: dict[str, Path]) -> int:
+        """Copy all sources to the archive, then delete log sources.
+
+        Returns the number of log files successfully removed from logs/.
+        """
         target_dir.mkdir(parents=True, exist_ok=False)
         copied: list[dict] = []
-        for rel, src in sources.items():
+        for rel, src in {**model_files, **log_files}.items():
             dst = target_dir / rel
             dst.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(str(src), str(dst))
@@ -1140,19 +1165,38 @@ class AscensionApp:
                 size = dst.stat().st_size
             except OSError:
                 size = None
-            copied.append({"path": rel, "source": str(src),
-                           "size_bytes": size})
+            copied.append({
+                "path": rel,
+                "source": str(src),
+                "size_bytes": size,
+                "moved": rel.startswith("logs/"),
+            })
+
+        removed = 0
+        for rel, src in log_files.items():
+            try:
+                src.unlink()
+                removed += 1
+                _logger.debug(f"Cleared archived log source: {src}")
+            except OSError as e:
+                _logger.warning(
+                    f"Archive copied {rel} but could not remove source "
+                    f"{src}: {e}"
+                )
+
         manifest = {
             "name": target_dir.name,
             "created_at": datetime.now().isoformat(),
             "source_root": str(ROOT),
             "files": copied,
+            "logs_removed_from_source": removed,
         }
         manifest_path = target_dir / "manifest.json"
         tmp = manifest_path.with_suffix(".json.tmp")
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(manifest, f, indent=2)
         os.replace(str(tmp), str(manifest_path))
+        return removed
 
     def _maybe_restore_archive_before_start(self) -> bool:
         """If an archived model is selected, confirm + copy it over models/ppo_sts.pt.
@@ -1779,6 +1823,10 @@ class AscensionApp:
         }
 
     def _refresh_stats(self):
+        self._refresh_stats_now()
+        self.root.after(5000, self._refresh_stats)
+
+    def _refresh_stats_now(self):
         try:
             ts = self._load_training_stats()
             if ts:
@@ -1882,6 +1930,8 @@ class AscensionApp:
                 self.stats_vars["eval_line"].set(
                     "  |  ".join(eval_parts)
                 )
+            else:
+                self.stats_vars["eval_line"].set("Eval:  no data yet")
             if self.running and self.trainer_proc is not None:
                 rc = self.trainer_proc.poll()
                 if rc is not None:
@@ -1890,7 +1940,6 @@ class AscensionApp:
                     self.trainer_proc = None
         except Exception as e:
             _logger.error(f"_refresh_stats error: {e}")
-        self.root.after(5000, self._refresh_stats)
 
     def _show_plot(self):
         csv_path = ROOT / "logs" / "training_stats.csv"
@@ -2141,7 +2190,7 @@ class AscensionApp:
             return 0
 
     def _eval_set_manifest_path(self) -> Path:
-        return ROOT / "logs" / "eval_set_state.json"
+        return ROOT / "Eval" / "eval_set_state.json"
 
     def _load_eval_set_manifest(self) -> dict | None:
         path = self._eval_set_manifest_path()
@@ -2450,8 +2499,9 @@ class AscensionApp:
                     self._append_log("Eval Set", msg)
                     continue
 
-                log_rel = f"logs/eval_{run['key']}_{run['tag']}.log"
+                log_rel = f"Eval/eval_{run['key']}_{run['tag']}.log"
                 log_path = ROOT / log_rel
+                log_path.parent.mkdir(parents=True, exist_ok=True)
                 tab_name = f"Eval {run['label']}"
                 self.root.after(0, lambda name=tab_name: self._add_log_tab(name))
                 run_tailer = LogTailer(log_path, lambda line, name=tab_name: self._append_log(name, line))
@@ -2547,7 +2597,7 @@ class AscensionApp:
                 self._append_log(
                     "Eval Set",
                     "Fixed-seed eval set stopped/failed. "
-                    "Progress saved to logs/eval_set_state.json — relaunch to resume."
+                    "Progress saved to Eval/eval_set_state.json — relaunch to resume."
                 )
             _logger.info(f"_launch_eval_set complete: completed_all={completed_all}")
         except Exception as e:
@@ -2572,7 +2622,7 @@ class AscensionApp:
                 "train":   ("Training",   "logs/train_debug.log"),
                 "bc_ppo":  ("BC\u2192PPO",     "logs/train_bc_ppo_debug.log"),
                 "bc":      ("BC",          "logs/bc_debug.log"),
-                "eval":    ("Evaluation",  "logs/eval_debug.log"),
+                "eval":    ("Evaluation",  "Eval/eval_debug.log"),
                 "logger":  ("Logger",      "logs/game_logger_debug.log"),
             }
             log_name, log_file = _mode_info.get(mode, ("Training", "logs/train_debug.log"))
@@ -3238,7 +3288,7 @@ class AscensionApp:
             "train":   "logs/train_debug.log",
             "bc_ppo":  "logs/train_bc_ppo_debug.log",
             "bc":      "logs/bc_debug.log",
-            "eval":    "logs/eval_debug.log",
+            "eval":    "Eval/eval_debug.log",
             "logger":  "logs/game_logger_debug.log",
         }
         log_file = ROOT / log_map.get(mode, "logs/train_debug.log")

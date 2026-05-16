@@ -74,7 +74,7 @@ _coord_module.write_stdout = _patched_write_stdout
 
 
 os.makedirs(os.path.join(_root, "logs"), exist_ok=True)
-DEBUG_LOG = os.path.join(_root, "logs", "eval_debug.log")
+DEBUG_LOG = os.path.join(_root, "Eval", "eval_debug.log")
 EVAL_CSV = os.path.join(_root, "logs", "eval_stats.csv")
 VERBOSE = os.environ.get("ASCENSION_VERBOSE", "0") == "1"
 
