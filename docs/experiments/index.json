@@ -197,7 +197,7 @@
         "latest_explained_variance": 0.600711,
         "latest_auto_tune_action": "middle:bc_slow_down",
         "stale_rollouts_latest": 6,
-        "stale_rollouts_total": 581,
+        "stale_rollouts_total": 6,
         "legacy_rollouts_total": 0,
         "skipped_rollouts_total": 0,
         "early_stop_rows": 5
@@ -245,7 +245,7 @@
           "unique_seeds": 150
         }
       },
-      "notes": "After 4,136 PPO rollout games, the PPO checkpoint remains clearly above BC on the 150-game evaluation but is still behind the heuristic baseline. The wider eval is lower than the prior 25-game slice, so the larger sample tempers the earlier near-parity signal."
+      "notes": "After 4,136 PPO rollout games, the PPO checkpoint remains clearly above BC on the 150-game evaluation but is still behind the heuristic baseline. Entropy is inside the healthy auto-tune band; the next changes should focus on clean fixed-seed evaluation, controlled update-strength testing, and Act 1 boss/elite data."
     }
   ]
 }

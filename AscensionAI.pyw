@@ -25,6 +25,7 @@ if not _in_venv and _VENV_PYTHONW.exists():
     os.execv(str(_VENV_PYTHONW), [str(_VENV_PYTHONW), str(Path(__file__).resolve())] + sys.argv[1:])
 
 import csv as _csv
+import json
 import logging
 import re
 import shutil
@@ -1741,8 +1742,22 @@ class AscensionApp:
             self.status_var.set(f"Launching evaluation ({n} games)...")
             threading.Thread(target=self._launch_single, args=("eval", n), daemon=True).start()
         elif mode == "eval_set":
-            self.status_var.set(f"Launching fixed-seed eval set ({n} games each)...")
-            threading.Thread(target=self._launch_eval_set, args=(n,), daemon=True).start()
+            resume_manifest = self._prompt_eval_set_resume(n)
+            if resume_manifest is False:
+                self.running = False
+                self.start_btn.configure(state="normal")
+                self.stop_btn.configure(state="disabled")
+                self.graceful_btn.configure(state="disabled")
+                self.status_var.set("Eval set launch cancelled.")
+                return
+            launch_label = "Resuming" if resume_manifest else "Launching"
+            self.status_var.set(f"{launch_label} fixed-seed eval set ({n} games each)...")
+            threading.Thread(
+                target=self._launch_eval_set,
+                args=(n,),
+                kwargs={"resume_manifest": resume_manifest},
+                daemon=True,
+            ).start()
         elif mode == "logger":
             self.status_var.set("Launching passive game logger...")
             threading.Thread(target=self._launch_single, args=("logger",), daemon=True).start()
@@ -1787,6 +1802,117 @@ class AscensionApp:
         except Exception as e:
             _logger.warning(f"Failed to count eval rows for {run_tag}: {e}")
             return 0
+
+    def _eval_set_manifest_path(self) -> Path:
+        return ROOT / "logs" / "eval_set_state.json"
+
+    def _load_eval_set_manifest(self) -> dict | None:
+        path = self._eval_set_manifest_path()
+        if not path.exists():
+            return None
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as e:
+            _logger.warning(f"Failed to read eval set manifest: {e}")
+            return None
+        if not isinstance(data, dict) or "ts" not in data or "runs" not in data:
+            _logger.warning("Eval set manifest is malformed; ignoring.")
+            return None
+        return data
+
+    def _save_eval_set_manifest(self, manifest: dict) -> None:
+        path = self._eval_set_manifest_path()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".json.tmp")
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(manifest, f, indent=2)
+            os.replace(str(tmp), str(path))
+        except Exception as e:
+            _logger.warning(f"Failed to write eval set manifest: {e}")
+
+    def _clear_eval_set_manifest(self) -> None:
+        path = self._eval_set_manifest_path()
+        try:
+            if path.exists():
+                path.unlink()
+        except Exception as e:
+            _logger.warning(f"Failed to clear eval set manifest: {e}")
+
+    def _eval_set_manifest_progress(self, manifest: dict) -> list[tuple[str, int, int]]:
+        games = int(manifest.get("games", 0))
+        out: list[tuple[str, int, int]] = []
+        for run in manifest.get("runs", []) or []:
+            tag = run.get("tag") or ""
+            label = run.get("label") or tag
+            rows = self._count_eval_rows_for_run(tag) if tag else 0
+            out.append((label, rows, games))
+        return out
+
+    def _eval_set_has_resumable_progress(self, manifest: dict) -> bool:
+        progress = self._eval_set_manifest_progress(manifest)
+        if not progress:
+            return False
+        has_rows = any(rows > 0 for _, rows, _ in progress)
+        any_incomplete = any(rows < games for _, rows, games in progress)
+        return has_rows and any_incomplete
+
+    def _prompt_eval_set_resume(self, games: int):
+        """Return a manifest dict to resume from, None to start fresh, or False to abort.
+
+        Called on the UI thread before the eval-set worker is launched. If a manifest
+        from a previous (interrupted) eval set is on disk with any recorded rows,
+        ask the user whether to resume those tags or discard and start over.
+        """
+        manifest = self._load_eval_set_manifest()
+        if manifest is None:
+            return None
+        if not self._eval_set_has_resumable_progress(manifest):
+            self._clear_eval_set_manifest()
+            return None
+
+        current_seed_file = self._selected_seed_file(games)
+        manifest_seed_file = str(manifest.get("seed_file") or "")
+        manifest_games = int(manifest.get("games") or 0)
+        progress_lines = "\n".join(
+            f"  {label}: {rows}/{total}"
+            for label, rows, total in self._eval_set_manifest_progress(manifest)
+        )
+        started_at = manifest.get("started_at") or "?"
+
+        if manifest_seed_file == current_seed_file and manifest_games == int(games):
+            choice = messagebox.askyesnocancel(
+                "Resume Eval Set?",
+                "An incomplete eval set is on disk from "
+                f"{started_at}:\n\n{progress_lines}\n\n"
+                "Yes  — resume and reuse the recorded games.\n"
+                "No   — discard previous progress and start fresh.\n"
+                "Cancel — abort the launch.",
+            )
+            if choice is None:
+                return False
+            if choice:
+                return manifest
+            self._clear_eval_set_manifest()
+            return None
+
+        choice = messagebox.askyesnocancel(
+            "Previous Eval Set Found",
+            "An incomplete eval set is on disk, but its parameters differ "
+            "from this launch:\n\n"
+            f"  Previous: {manifest_seed_file or '?'} × {manifest_games} games "
+            f"(started {started_at})\n"
+            f"{progress_lines}\n\n"
+            f"  Current:  {current_seed_file} × {int(games)} games\n\n"
+            "Yes  — discard previous progress and start fresh with current settings.\n"
+            "No   — keep the previous manifest on disk for later (abort this launch).\n"
+            "Cancel — abort the launch.",
+        )
+        if choice is None or choice is False:
+            return False
+        self._clear_eval_set_manifest()
+        return None
 
     def _eval_python_running_for_run(self, run_tag: str) -> bool | None:
         try:
@@ -1887,8 +2013,8 @@ class AscensionApp:
         except Exception as e:
             _logger.warning(f"Eval cleanup sweep failed for {label}: {e}")
 
-    def _launch_eval_set(self, games: int):
-        _logger.info(f"_launch_eval_set: games={games}")
+    def _launch_eval_set(self, games: int, *, resume_manifest: dict | None = None):
+        _logger.info(f"_launch_eval_set: games={games} resume={bool(resume_manifest)}")
         completed_all = False
         try:
             verbose = bool(self.verbose_var.get())
@@ -1897,31 +2023,76 @@ class AscensionApp:
             self.root.after(0, lambda: self._add_log_tab("Eval Set"))
             time.sleep(0.1)
 
-            if self.eval_generate_seed_var.get() or not seed_path.exists():
-                if not self._generate_seed_file(seed_file, games):
+            if resume_manifest is None:
+                if self.eval_generate_seed_var.get() or not seed_path.exists():
+                    if not self._generate_seed_file(seed_file, games):
+                        self.root.after(0, lambda: messagebox.showerror(
+                            "Seed Generation Failed",
+                            "Could not generate the eval seed file. Check Eval Set logs."
+                        ))
+                        return
+                else:
+                    self._append_log("Eval Set", f"Using existing seed file: {seed_file}")
+            else:
+                if not seed_path.exists():
+                    self._append_log(
+                        "Eval Set",
+                        f"ERROR: resume requested but seed file {seed_file} is missing; aborting."
+                    )
                     self.root.after(0, lambda: messagebox.showerror(
-                        "Seed Generation Failed",
-                        "Could not generate the eval seed file. Check Eval Set logs."
+                        "Resume Failed",
+                        f"Cannot resume: seed file {seed_file} is missing.\n"
+                        "Uncheck 'Generate/overwrite before run' if disabled, or start fresh."
                     ))
                     return
-            else:
-                self._append_log("Eval Set", f"Using existing seed file: {seed_file}")
+                self._append_log("Eval Set", f"Resuming previous eval set; seed file: {seed_file}")
 
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-            runs = [
-                {"label": "Heuristic", "key": "heuristic", "policy": "heuristic", "model": None,
-                 "tag": f"heuristic_{games}_{ts}", "top_actions": 0},
-                {"label": "BC", "key": "bc", "policy": "model", "model": "models/ppo_sts_bc.pt",
-                 "tag": f"bc_{games}_{ts}", "top_actions": 5},
-                {"label": "PPO Current", "key": "ppo_current", "policy": "model", "model": "models/ppo_sts.pt",
-                 "tag": f"ppo_current_{games}_{ts}", "top_actions": 5},
-            ]
+            runs: list[dict] = []
+            if resume_manifest is not None:
+                ts = str(resume_manifest.get("ts") or datetime.now().strftime("%Y%m%d_%H%M%S"))
+                runs = [dict(r) for r in (resume_manifest.get("runs") or []) if isinstance(r, dict)]
+                if not runs:
+                    self._append_log("Eval Set", "Resume manifest had no runs; starting fresh.")
+                    resume_manifest = None
+            if resume_manifest is None:
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                runs = [
+                    {"label": "Heuristic", "key": "heuristic", "policy": "heuristic", "model": None,
+                     "tag": f"heuristic_{games}_{ts}", "top_actions": 0},
+                    {"label": "BC", "key": "bc", "policy": "model", "model": "models/ppo_sts_bc.pt",
+                     "tag": f"bc_{games}_{ts}", "top_actions": 5},
+                    {"label": "PPO Current", "key": "ppo_current", "policy": "model", "model": "models/ppo_sts.pt",
+                     "tag": f"ppo_current_{games}_{ts}", "top_actions": 5},
+                ]
+
+            started_at = (
+                resume_manifest.get("started_at") if resume_manifest else None
+            ) or datetime.now().isoformat(timespec="seconds")
+            manifest_state = {
+                "ts": ts,
+                "games": int(games),
+                "seed_file": seed_file,
+                "started_at": started_at,
+                "runs": runs,
+            }
+            self._save_eval_set_manifest(manifest_state)
 
             self._eval_set_started_at = time.time()
-            self._append_log(
-                "Eval Set",
-                f"Starting fixed-seed eval set: {games} games each, seed_file={seed_file}"
-            )
+            if resume_manifest is not None:
+                progress_summary = ", ".join(
+                    f"{label}={rows}/{total}"
+                    for label, rows, total in self._eval_set_manifest_progress(manifest_state)
+                )
+                self._append_log(
+                    "Eval Set",
+                    f"Resuming fixed-seed eval set ts={ts}: {games} games each, "
+                    f"seed_file={seed_file} ({progress_summary})"
+                )
+            else:
+                self._append_log(
+                    "Eval Set",
+                    f"Starting fixed-seed eval set: {games} games each, seed_file={seed_file}"
+                )
             self._append_log(
                 "Eval Set",
                 "Running eval policies sequentially; concurrent Heuristic/BC/PPO eval is deferred "
@@ -2032,7 +2203,15 @@ class AscensionApp:
             self.root.after(0, lambda: self.graceful_btn.configure(state="disabled"))
             final_status = "Eval set complete" if completed_all else "Eval set stopped/failed"
             self.root.after(0, lambda status=final_status: self.status_var.set(status))
-            self._append_log("Eval Set", "Fixed-seed eval set finished." if completed_all else "Fixed-seed eval set stopped/failed.")
+            if completed_all:
+                self._clear_eval_set_manifest()
+                self._append_log("Eval Set", "Fixed-seed eval set finished.")
+            else:
+                self._append_log(
+                    "Eval Set",
+                    "Fixed-seed eval set stopped/failed. "
+                    "Progress saved to logs/eval_set_state.json — relaunch to resume."
+                )
             _logger.info(f"_launch_eval_set complete: completed_all={completed_all}")
         except Exception as e:
             _logger.error(f"_launch_eval_set FAILED: {traceback.format_exc()}")

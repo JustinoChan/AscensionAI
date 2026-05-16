@@ -67,6 +67,8 @@ Slay the Spire instances
 
 The strongest part of the current project is the complete training and evaluation system. The 4,136-game PPO checkpoint still separates from BC on the 150-game evaluation, but the wider sample shows it remains behind the heuristic baseline and has not produced full victories yet.
 
+Current training read: leave entropy auto-tune enabled, run the next comparison as a clean fixed-seed eval set, and make the next PPO change a small 500-1,000 game update-strength experiment rather than a manual entropy increase. The latest normalized entropy is still in the healthy band; the sharper bottleneck is Act 1 boss/elite decision quality.
+
 ## About
 
 AscensionAI is a reinforcement learning project for training an AI agent to play **Slay the Spire** through a Gymnasium-style environment, Communication Mod integration, behavior cloning warm starts, PPO fine-tuning, action masking, dense reward shaping, and parallel rollout workers. The project focuses on long-running autonomous training, combat decision-making, event handling, map/path choices, relic/card rewards, and live progress tracking for improving Ironclad performance over time.
