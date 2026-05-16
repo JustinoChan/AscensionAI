@@ -35,7 +35,7 @@ import platform
 import subprocess
 import threading
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, simpledialog
 from datetime import datetime
 
 # ---------------------------------------------------------------------------
@@ -219,12 +219,18 @@ def write_config(command: str | None = None, *, verbose: bool = True):
 def build_command(mode: str, worker_id: int = 1, games: int = 20,
                   bc_games: int = 400, ppo_games: int = 200,
                   bc_epochs: int = 50, ent_coef: float = 0.001,
-                  verbose: bool = False) -> str:
+                  worker_games: int = 0, verbose: bool = False) -> str:
     py = escape_properties_path(VENV_PYTHON)
     root = escape_properties_path(ROOT)
     verbose_flag = " --verbose" if verbose else ""
     if mode == "worker":
-        cmd = f"{py} {root}/scripts/rollout_worker.py --model models/ppo_sts.pt --out rollouts_shared --id {worker_id}{verbose_flag}"
+        cmd = (
+            f"{py} {root}/scripts/rollout_worker.py "
+            f"--model models/ppo_sts.pt --out rollouts_shared --id {worker_id}"
+        )
+        if int(worker_games) > 0:
+            cmd += f" --games {int(worker_games)}"
+        cmd += verbose_flag
     elif mode == "train":
         cmd = f"{py} {root}/scripts/train_ppo.py --save models/ppo_sts.pt --resume models/ppo_sts.pt --save-every 5 --ent-coef {ent_coef}{verbose_flag}"
     elif mode == "bc_ppo":
@@ -250,7 +256,8 @@ def build_command(mode: str, worker_id: int = 1, games: int = 20,
         cmd = ""
     _logger.info(f"build_command(mode={mode}, worker_id={worker_id}, games={games}, "
                  f"bc_games={bc_games}, bc_epochs={bc_epochs}, ppo_games={ppo_games}, "
-                 f"ent_coef={ent_coef}, verbose={verbose}) -> {cmd}")
+                 f"ent_coef={ent_coef}, worker_games={worker_games}, "
+                 f"verbose={verbose}) -> {cmd}")
     return cmd
 
 
@@ -494,6 +501,7 @@ class AscensionApp:
         self._worker_checkpoint_paths: dict[int, Path] = {}
         self._worker_restarts: dict[int, int] = {}
         self._worker_launch_time: dict[int, float] = {}
+        self._worker_game_targets: dict[int, int] = {}
         self._parallel_launch_started_at: float = 0.0
         self._n_workers: int = 0
         self._eval_set_started_at: float = 0.0
@@ -597,6 +605,25 @@ class AscensionApp:
         self.status_var = tk.StringVar(value="Idle")
         ttk.Label(row2, textvariable=self.status_var, font=("Segoe UI", 10, "italic")).pack(side="left")
 
+        # Model selection + archive controls (always visible).
+        self.model_row = ttk.Frame(ctrl_frame)
+        self.model_row.pack(fill="x", pady=(6, 0))
+        ttk.Label(self.model_row, text="Model:").pack(side="left", padx=(0, 5))
+        self._archive_options: dict[str, Path | None] = {}
+        self.model_choice_var = tk.StringVar()
+        self.model_combo = ttk.Combobox(
+            self.model_row,
+            textvariable=self.model_choice_var,
+            state="readonly",
+            width=52,
+        )
+        self.model_combo.pack(side="left", padx=(0, 8))
+        ttk.Button(self.model_row, text="Refresh",
+                   command=self._refresh_archive_list).pack(side="left", padx=(0, 6))
+        ttk.Button(self.model_row, text="Archive Current...",
+                   command=self._prompt_archive_now).pack(side="left", padx=(0, 6))
+        self._refresh_archive_list()
+
         # Entropy control row (visible only for modes with a trainer)
         self.ent_row = ttk.Frame(ctrl_frame)
         self.ent_row.pack(fill="x", pady=(6, 0))
@@ -697,6 +724,25 @@ class AscensionApp:
         )
         self.ppo_games_spin.pack(side="left")
         ttk.Label(self.ppo_games_row, text="0 = keep running").pack(side="left", padx=(8, 0))
+
+        # Parallel Workers game-count target (total across slots).
+        self.ppo_workers_games_row = ttk.Frame(ctrl_frame)
+        self.ppo_workers_games_row.pack(fill="x", pady=(6, 0))
+        ttk.Label(self.ppo_workers_games_row, text="Parallel PPO Games:").pack(side="left", padx=(0, 5))
+        self.ppo_workers_games_var = tk.IntVar(value=0)
+        self.ppo_workers_games_spin = ttk.Spinbox(
+            self.ppo_workers_games_row,
+            from_=0,
+            to=100000,
+            increment=25,
+            textvariable=self.ppo_workers_games_var,
+            width=8,
+        )
+        self.ppo_workers_games_spin.pack(side="left")
+        ttk.Label(
+            self.ppo_workers_games_row,
+            text="total across all worker slots; 0 = keep running",
+        ).pack(side="left", padx=(8, 0))
 
         # Fixed-seed evaluation controls. Visible only for Evaluate on Seed Set.
         self.eval_seed_row = ttk.Frame(ctrl_frame)
@@ -848,6 +894,30 @@ class AscensionApp:
         self.ppo_games_var.set(value)
         return value
 
+    def _get_ppo_workers_games(self) -> int:
+        try:
+            value = int(self.ppo_workers_games_var.get())
+        except (tk.TclError, ValueError):
+            value = 0
+        value = max(0, min(100000, value))
+        self.ppo_workers_games_var.set(value)
+        return value
+
+    def _compute_worker_game_targets(self, total_games: int,
+                                     n_workers: int) -> dict[int, int]:
+        """Split a total game goal across worker slots 1..n_workers.
+
+        Example: total=503, n_workers=4 -> {1: 126, 2: 126, 3: 126, 4: 125}.
+        Returns an empty dict when no target is set (workers run until stopped).
+        """
+        total_games = int(total_games)
+        n_workers = int(n_workers)
+        if total_games <= 0 or n_workers <= 0:
+            return {}
+        base, remainder = divmod(total_games, n_workers)
+        return {slot: base + (1 if slot <= remainder else 0)
+                for slot in range(1, n_workers + 1)}
+
     def _get_bc_epochs(self) -> int:
         try:
             value = int(self.bc_epochs_var.get())
@@ -907,6 +977,237 @@ class AscensionApp:
         self.eval_seed_combo.configure(values=values)
         if not self.eval_seed_file_var.get().strip() and values:
             self.eval_seed_file_var.set(values[0])
+
+    # ----- Archive controls -----
+
+    _ARCHIVE_LOG_FILES = (
+        "training_stats.csv",
+        "eval_stats.csv",
+        "bc_stats.csv",
+        "bc_train_stats.csv",
+        "fight_stats.csv",
+        "training_plot.png",
+    )
+
+    def _archives_dir(self) -> Path:
+        return ROOT / "archives"
+
+    def _archive_source_files(self) -> dict[str, Path]:
+        """Files to copy when archiving: dest-relative path -> live source."""
+        out: dict[str, Path] = {}
+        model_path = ROOT / "models" / "ppo_sts.pt"
+        if model_path.exists():
+            out["models/ppo_sts.pt"] = model_path
+        for name in self._ARCHIVE_LOG_FILES:
+            p = ROOT / "logs" / name
+            if p.exists():
+                out[f"logs/{name}"] = p
+        return out
+
+    def _scan_archives(self) -> list[tuple[Path, datetime | None]]:
+        arch_dir = self._archives_dir()
+        if not arch_dir.exists():
+            return []
+        found: list[tuple[Path, datetime | None]] = []
+        try:
+            entries = list(arch_dir.iterdir())
+        except OSError as e:
+            _logger.warning(f"Could not read archives dir: {e}")
+            return []
+        for entry in entries:
+            try:
+                if not entry.is_dir():
+                    continue
+                model_path = entry / "models" / "ppo_sts.pt"
+                if not model_path.exists():
+                    continue
+                try:
+                    mtime = datetime.fromtimestamp(model_path.stat().st_mtime)
+                except OSError:
+                    mtime = None
+                found.append((entry, mtime))
+            except OSError:
+                continue
+        found.sort(key=lambda t: (t[1] or datetime.min), reverse=True)
+        return found
+
+    def _active_model_label(self) -> str:
+        path = ROOT / "models" / "ppo_sts.pt"
+        if not path.exists():
+            return "Active (models/ppo_sts.pt — not present yet)"
+        try:
+            st = path.stat()
+            when = datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M")
+            size_mb = st.st_size / (1024 * 1024)
+            return f"Active (models/ppo_sts.pt — {when}, {size_mb:.1f} MB)"
+        except OSError:
+            return "Active (models/ppo_sts.pt)"
+
+    def _archive_label(self, archive_dir: Path,
+                       mtime: datetime | None) -> str:
+        suffix = f" — {mtime.strftime('%Y-%m-%d %H:%M')}" if mtime else ""
+        return f"{archive_dir.name}{suffix}"
+
+    def _refresh_archive_list(self):
+        options: dict[str, Path | None] = {}
+        active_label = self._active_model_label()
+        options[active_label] = None
+        for arch_dir, mtime in self._scan_archives():
+            options[self._archive_label(arch_dir, mtime)] = arch_dir
+        self._archive_options = options
+        if hasattr(self, "model_combo"):
+            self.model_combo.configure(values=list(options.keys()))
+            current = self.model_choice_var.get()
+            if current not in options:
+                self.model_choice_var.set(active_label)
+
+    def _resolve_selected_archive(self) -> Path | None:
+        return self._archive_options.get(self.model_choice_var.get())
+
+    _ARCHIVE_RELEVANT_MODES = {
+        "worker", "collect", "train", "bc_ppo", "eval", "eval_set",
+    }
+
+    def _prompt_archive_now(self):
+        if self.running:
+            messagebox.showwarning(
+                "Cannot Archive While Running",
+                "Stop training/eval before archiving so the model file is "
+                "not being written.",
+            )
+            return
+        sources = self._archive_source_files()
+        if "models/ppo_sts.pt" not in sources:
+            messagebox.showinfo(
+                "Nothing to Archive",
+                "models/ppo_sts.pt does not exist yet — nothing to archive.",
+            )
+            return
+        default_name = "archive_" + datetime.now().strftime("%Y%m%d_%H%M%S")
+        raw_name = simpledialog.askstring(
+            "Archive Current Model",
+            "Name this archive (used as the folder name under archives/):",
+            initialvalue=default_name,
+            parent=self.root,
+        )
+        if raw_name is None:
+            return
+        slug = re.sub(r"[^A-Za-z0-9_.-]+", "_", raw_name).strip("._-")
+        if not slug:
+            slug = default_name
+        target_dir = self._archives_dir() / slug
+        if target_dir.exists():
+            messagebox.showerror(
+                "Archive Exists",
+                f"An archive named '{slug}' already exists at:\n  {target_dir}",
+            )
+            return
+
+        file_lines = "\n".join(f"  {rel}" for rel in sources)
+        ok = messagebox.askyesno(
+            "Confirm Archive",
+            f"Create archive 'archives/{slug}/'?\n\n"
+            f"It will contain:\n{file_lines}\n\n"
+            "Your active model and logs will NOT be modified — this is a copy.",
+        )
+        if not ok:
+            return
+        try:
+            self._perform_archive(target_dir, sources)
+        except Exception as e:
+            _logger.error(f"Archive failed: {traceback.format_exc()}")
+            messagebox.showerror("Archive Failed",
+                                 f"Could not create archive:\n{e}")
+            return
+        _logger.info(f"Archive created at {target_dir} with "
+                     f"{len(sources)} file(s)")
+        self._append_log("All", f"Archived {len(sources)} file(s) -> archives/{slug}/")
+        self._refresh_archive_list()
+        messagebox.showinfo(
+            "Archive Complete",
+            f"Archived to:\n  archives/{slug}/",
+        )
+
+    def _perform_archive(self, target_dir: Path,
+                         sources: dict[str, Path]):
+        target_dir.mkdir(parents=True, exist_ok=False)
+        copied: list[dict] = []
+        for rel, src in sources.items():
+            dst = target_dir / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(src), str(dst))
+            try:
+                size = dst.stat().st_size
+            except OSError:
+                size = None
+            copied.append({"path": rel, "source": str(src),
+                           "size_bytes": size})
+        manifest = {
+            "name": target_dir.name,
+            "created_at": datetime.now().isoformat(),
+            "source_root": str(ROOT),
+            "files": copied,
+        }
+        manifest_path = target_dir / "manifest.json"
+        tmp = manifest_path.with_suffix(".json.tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, indent=2)
+        os.replace(str(tmp), str(manifest_path))
+
+    def _maybe_restore_archive_before_start(self) -> bool:
+        """If an archived model is selected, confirm + copy it over models/ppo_sts.pt.
+
+        Returns True if the launch should proceed, False if the user cancelled
+        or the restore failed.
+        """
+        archive_dir = self._resolve_selected_archive()
+        if archive_dir is None:
+            return True
+        src = archive_dir / "models" / "ppo_sts.pt"
+        if not src.exists():
+            messagebox.showerror(
+                "Archive Missing Model",
+                f"Selected archive has no model at:\n  {src}",
+            )
+            return False
+        dst = ROOT / "models" / "ppo_sts.pt"
+        dst_info = ""
+        if dst.exists():
+            try:
+                st = dst.stat()
+                when = datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M")
+                size_mb = st.st_size / (1024 * 1024)
+                dst_info = (
+                    f"\n\nThe current active model "
+                    f"({when}, {size_mb:.1f} MB) will be overwritten."
+                )
+            except OSError:
+                pass
+        ok = messagebox.askyesno(
+            "Restore Archived Model",
+            f"Restore archive '{archive_dir.name}' to "
+            f"models/ppo_sts.pt and start?{dst_info}\n\n"
+            "Click No and use 'Archive Current...' first if you want to "
+            "keep the current model.",
+        )
+        if not ok:
+            return False
+        try:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(src), str(dst))
+        except Exception as e:
+            _logger.error(f"Restore failed: {traceback.format_exc()}")
+            messagebox.showerror("Restore Failed",
+                                 f"Could not restore archive:\n{e}")
+            return False
+        _logger.info(f"Restored archive {archive_dir.name} -> {dst}")
+        self._append_log(
+            "All",
+            f"Restored archive '{archive_dir.name}' to models/ppo_sts.pt",
+        )
+        self._refresh_archive_list()
+        self.model_choice_var.set(self._active_model_label())
+        return True
 
     def _selected_seed_file(self, games: int) -> str:
         value = self.eval_seed_file_var.get().strip()
@@ -1048,6 +1349,11 @@ class AscensionApp:
             self.ppo_games_row.pack(fill="x", pady=(6, 0))
         else:
             self.ppo_games_row.pack_forget()
+
+        if mode in ("worker", "collect"):
+            self.ppo_workers_games_row.pack(fill="x", pady=(6, 0))
+        else:
+            self.ppo_workers_games_row.pack_forget()
 
         if mode == "eval_set":
             self._refresh_seed_file_options()
@@ -1632,6 +1938,12 @@ class AscensionApp:
             messagebox.showerror("Cannot Start", errors)
             return
 
+        pending_mode = MODES.get(self.mode_var.get(), "worker")
+        if pending_mode in self._ARCHIVE_RELEVANT_MODES:
+            if not self._maybe_restore_archive_before_start():
+                _logger.info("Start cancelled: archive restore declined or failed")
+                return
+
         self.running = True
         self._graceful_stopping = False
         self._current_mode = MODES.get(self.mode_var.get(), "worker")
@@ -1688,9 +2000,21 @@ class AscensionApp:
             except ValueError as e:
                 self._start_validation_failed(str(e))
                 return
-            self.status_var.set(f"Launching {len(worker_ids)}/{n} workers + trainer...")
+            total_target = self._get_ppo_workers_games()
+            worker_targets = self._compute_worker_game_targets(total_target, n)
+            target_desc = (
+                f", target {total_target} games total ({worker_targets})"
+                if worker_targets else ""
+            )
+            _logger.info(f"Parallel worker game target: total={total_target}, "
+                         f"per-slot={worker_targets}")
+            self.status_var.set(
+                f"Launching {len(worker_ids)}/{n} workers + trainer{target_desc}..."
+            )
             threading.Thread(target=self._launch_parallel,
-                             args=(n,), kwargs={"worker_ids": worker_ids},
+                             args=(n,),
+                             kwargs={"worker_ids": worker_ids,
+                                     "worker_targets": worker_targets},
                              daemon=True).start()
         elif mode == "collect":
             (ROOT / "rollouts_shared").mkdir(exist_ok=True)
@@ -1701,9 +2025,22 @@ class AscensionApp:
             except ValueError as e:
                 self._start_validation_failed(str(e))
                 return
-            self.status_var.set(f"Launching {len(worker_ids)}/{n} collectors (no trainer)...")
+            total_target = self._get_ppo_workers_games()
+            worker_targets = self._compute_worker_game_targets(total_target, n)
+            target_desc = (
+                f", target {total_target} games total ({worker_targets})"
+                if worker_targets else ""
+            )
+            _logger.info(f"Collect-only worker game target: total={total_target}, "
+                         f"per-slot={worker_targets}")
+            self.status_var.set(
+                f"Launching {len(worker_ids)}/{n} collectors (no trainer){target_desc}..."
+            )
             threading.Thread(target=self._launch_parallel,
-                             args=(n,), kwargs={"with_trainer": False, "worker_ids": worker_ids},
+                             args=(n,),
+                             kwargs={"with_trainer": False,
+                                     "worker_ids": worker_ids,
+                                     "worker_targets": worker_targets},
                              daemon=True).start()
         elif mode == "train":
             self.status_var.set("Launching single-instance training...")
@@ -2337,10 +2674,12 @@ class AscensionApp:
         return False
 
     def _launch_parallel(self, n_workers: int, with_trainer: bool = True,
-                         worker_ids: list[int] | None = None):
+                         worker_ids: list[int] | None = None,
+                         worker_targets: dict[int, int] | None = None):
         selected_ids = list(worker_ids or range(1, n_workers + 1))
+        targets = dict(worker_targets or {})
         _logger.info(f"_launch_parallel: n_workers={n_workers}, with_trainer={with_trainer}, "
-                     f"worker_ids={selected_ids}")
+                     f"worker_ids={selected_ids}, targets={targets}")
         try:
             self.worker_launcher_pids.clear()
             self.worker_sts_pids.clear()
@@ -2350,6 +2689,7 @@ class AscensionApp:
             self._worker_checkpoint_paths.clear()
             self._worker_restarts.clear()
             self._worker_launch_time.clear()
+            self._worker_game_targets = dict(targets)
             self._parallel_launch_started_at = time.time()
             self._n_workers = 0
             self._with_trainer = with_trainer
@@ -2358,6 +2698,7 @@ class AscensionApp:
             for i in selected_ids:
                 log_file = ROOT / "logs" / f"worker_{i}_debug.log"
                 heartbeat_file = self._worker_heartbeat_path(i)
+                done_file = self._worker_done_marker_path(i)
                 try:
                     if log_file.exists():
                         _logger.debug(f"Deleting stale log: {log_file} "
@@ -2366,6 +2707,9 @@ class AscensionApp:
                     if heartbeat_file.exists():
                         _logger.debug(f"Deleting stale heartbeat: {heartbeat_file}")
                         heartbeat_file.unlink()
+                    if done_file.exists():
+                        _logger.debug(f"Deleting stale done marker: {done_file}")
+                        done_file.unlink()
                 except OSError as e:
                     _logger.warning(f"Failed to delete stale worker files for {i}: {e}")
 
@@ -2423,12 +2767,20 @@ class AscensionApp:
                 self.root.after(0, lambda tn=tab_name: self._add_log_tab(tn))
                 time.sleep(0.1)
 
+                target_games = int(self._worker_game_targets.get(i, 0) or 0)
                 cmd = build_command("worker", worker_id=i,
+                                    worker_games=target_games,
                                     verbose=bool(self.verbose_var.get()))
                 self._worker_commands[i] = cmd
                 self._worker_modes[i] = "worker"
                 write_config(cmd, verbose=bool(self.verbose_var.get()))
-                self._append_log(tab_name, f"Config written for worker {i}, launching STS...")
+                target_msg = (
+                    f" (target {target_games} games)" if target_games > 0 else ""
+                )
+                self._append_log(
+                    tab_name,
+                    f"Config written for worker {i}{target_msg}, launching STS...",
+                )
 
                 before_java_pids = self._sts_java_pids()
                 proc = launch_sts(skip_launcher=True)
@@ -2652,6 +3004,19 @@ class AscensionApp:
                 if not self.running:
                     break
                 worker_mode = self._worker_modes.get(worker_id, "worker")
+                if worker_mode != "bc_collect" and self._worker_done(worker_id):
+                    target = self._worker_game_targets.get(worker_id, 0)
+                    _logger.info(f"Worker {worker_id}: game target reached "
+                                 f"(target={target}); closing worker")
+                    self._append_log(
+                        f"Worker {worker_id}",
+                        f"Game target reached ({target} games); closing STS instance.",
+                    )
+                    self._stop_single_worker(worker_id)
+                    self._worker_commands.pop(worker_id, None)
+                    self._worker_modes.pop(worker_id, None)
+                    self._worker_game_targets.pop(worker_id, None)
+                    continue
                 if worker_mode == "bc_collect" and self._bc_worker_complete(worker_id):
                     _logger.info(f"BC worker {worker_id}: demo file complete; stopping worker")
                     self._append_log(f"BC {worker_id}", "Demo file complete; closing STS instance.")
@@ -2695,7 +3060,8 @@ class AscensionApp:
                     self._relaunch_worker(worker_id)
                     time.sleep(15.0)
             self._kill_excess_unowned_sts_instances("monitor")
-            if self.running and not self._worker_commands and getattr(self, "_current_mode", "") == "bc_collect":
+            current_mode = getattr(self, "_current_mode", "")
+            if self.running and not self._worker_commands and current_mode == "bc_collect":
                 _logger.info("All BC collection workers completed")
                 self._append_log("BC Collect", "All selected BC workers completed.")
                 self.running = False
@@ -2703,6 +3069,21 @@ class AscensionApp:
                 self.root.after(0, lambda: self.stop_btn.configure(state="disabled"))
                 self.root.after(0, lambda: self.graceful_btn.configure(state="disabled"))
                 self.root.after(0, lambda: self.status_var.set("BC collection complete"))
+                break
+            if (
+                self.running
+                and not self._worker_commands
+                and current_mode in ("worker", "collect")
+                and self._n_workers > 0
+            ):
+                _logger.info("All parallel workers reached game target")
+                self._append_log(
+                    "All", "All workers reached game target. Stopping trainer."
+                )
+                self.root.after(
+                    0, lambda: self.status_var.set("Game target reached; stopping...")
+                )
+                self.root.after(0, self._stop)
                 break
         _logger.info("_monitor_workers: loop ended")
 
@@ -2740,6 +3121,15 @@ class AscensionApp:
     def _worker_heartbeat_path(self, worker_id: int) -> Path:
         return ROOT / "logs" / f"worker_{worker_id}_heartbeat.txt"
 
+    def _worker_done_marker_path(self, worker_id: int) -> Path:
+        return ROOT / "logs" / f"worker_{worker_id}_done.txt"
+
+    def _worker_done(self, worker_id: int) -> bool:
+        try:
+            return self._worker_done_marker_path(worker_id).exists()
+        except OSError:
+            return False
+
     def _worker_heartbeat_age(self, worker_id: int) -> float | None:
         path = self._worker_heartbeat_path(worker_id)
         try:
@@ -2770,6 +3160,12 @@ class AscensionApp:
     def _relaunch_worker(self, worker_id: int):
         """Relaunch a single crashed worker using --skip-launcher."""
         try:
+            if self._worker_done(worker_id):
+                _logger.info(
+                    f"_relaunch_worker: worker {worker_id} has done marker; "
+                    "skipping relaunch"
+                )
+                return
             cmd = self._worker_commands.get(worker_id)
             if not cmd:
                 _logger.error(f"_relaunch_worker: no stored command for worker {worker_id}")
@@ -3380,6 +3776,7 @@ class AscensionApp:
         self._worker_demo_paths.clear()
         self._worker_checkpoint_paths.clear()
         self._worker_launch_time.clear()
+        self._worker_game_targets.clear()
 
         java_orphans = self._kill_orphan_sts_instances()
         py_orphans = self._kill_orphan_python_scripts()

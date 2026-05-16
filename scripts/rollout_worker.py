@@ -44,6 +44,7 @@ if _scripts not in sys.path:
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
 import argparse
+import threading
 import traceback
 import time
 from datetime import datetime
@@ -256,12 +257,13 @@ class TransitionBuffer:
 # ---------------------------------------------------------------------------
 class WorkerAgent:
     def __init__(self, trainer: PPOTrainer, model_path: str, out_dir: str,
-                 worker_id: str, reload_every: int = 5):
+                 worker_id: str, reload_every: int = 5, max_games: int = 0):
         self.trainer = trainer
         self.model_path = model_path
         self.out_dir = out_dir
         self.worker_id = worker_id
         self.reload_every = reload_every
+        self.max_games = max(0, int(max_games))
 
         self.buffer = TransitionBuffer()
         self.reward_tracker = RewardTracker()
@@ -270,6 +272,8 @@ class WorkerAgent:
         self._game_start_steps = 0
         self.episode_reward = 0.0
         self.initialized = False
+        self._stop_requested = False
+        self._exit_scheduled = False
 
         self.prev_obs = None
         self.prev_action = None
@@ -295,6 +299,31 @@ class WorkerAgent:
         self.fight_tracker = FightTracker(
             source="worker", worker=worker_id, log=log
         )
+
+    def _done_marker_path(self) -> str:
+        return os.path.join(_root, "logs", f"worker_{self.worker_id}_done.txt")
+
+    def _write_done_marker(self) -> None:
+        path = self._done_marker_path()
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            tmp = path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                f.write(
+                    f"{datetime.now().isoformat()}\tworker={self.worker_id}\t"
+                    f"games={self.total_games}\ttarget={self.max_games}\n"
+                )
+            os.replace(tmp, path)
+            log(f"Wrote done marker: {path}")
+        except Exception as e:
+            log(f"Failed to write done marker: {e}")
+
+    def _schedule_exit(self, delay: float = 2.0) -> None:
+        if self._exit_scheduled:
+            return
+        self._exit_scheduled = True
+        log(f"Scheduling worker exit in {delay:.1f}s after game target")
+        threading.Timer(delay, lambda: os._exit(0)).start()
 
     def _maybe_reload_model(self):
         """Reload model if a newer checkpoint exists."""
@@ -473,7 +502,11 @@ class WorkerAgent:
         if terminal:
             self._end_game(final_gs=gs, victory=victory)
             proceed_avail = bool(getattr(gs, "proceed_available", False))
-            return Action("proceed") if proceed_avail else Action("state")
+            action = Action("proceed") if proceed_avail else Action("state")
+            if self._stop_requested:
+                self._write_done_marker()
+                self._schedule_exit()
+            return action
 
         no_progress = self._track_state_progress(gs, screen_name, in_combat)
         if no_progress >= 12 and self._progress_key != self._progress_dumped_key:
@@ -631,6 +664,9 @@ class WorkerAgent:
             self.fight_tracker.reset_game()
             self._recent_actions.clear()
             self.initialized = False
+            if self.max_games > 0 and self.total_games >= self.max_games:
+                self._stop_requested = True
+                log(f"Game target reached: {self.total_games}/{self.max_games}")
 
     def on_out_of_game(self) -> Action:
         log(f"OUT OF GAME (games: {self.total_games})")
@@ -655,6 +691,8 @@ def main():
                         help="Worker ID (for logging and filenames)")
     parser.add_argument("--reload-every", type=int, default=5,
                         help="Reload model every N games")
+    parser.add_argument("--games", type=int, default=0,
+                        help="Stop after this many completed games (0 = unlimited)")
     parser.add_argument("--verbose", action="store_true",
                         help="Write detailed per-state/per-action debug logs")
     args = parser.parse_args()
@@ -663,7 +701,7 @@ def main():
     _init_log(args.id)
     log("=== ROLLOUT WORKER STARTING ===")
     log(f"Config: model={args.model} out={args.out} id={args.id} "
-        f"reload_every={args.reload_every} verbose={VERBOSE}")
+        f"reload_every={args.reload_every} max_games={args.games} verbose={VERBOSE}")
 
     model_path = os.path.join(_root, args.model)
     out_dir = os.path.join(_root, args.out)
@@ -684,6 +722,7 @@ def main():
         trainer=trainer, model_path=model_path,
         out_dir=out_dir, worker_id=args.id,
         reload_every=args.reload_every,
+        max_games=args.games,
     )
 
     coord = Coordinator()
