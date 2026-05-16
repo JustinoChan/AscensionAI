@@ -29,11 +29,11 @@ Open the [static results dashboard](dashboard/index.html) to inspect the embedde
 
 | Policy | Games | Avg floor | Avg reward | Win rate | Act 2 reach | Floor 20+ |
 |---|---:|---:|---:|---:|---:|---:|
-| Heuristic | 25 | 16.60 | 11.38 | 0.0% | 32.0% | 32.0% |
-| BC checkpoint | 25 | 13.08 | -0.62 | 0.0% | 12.0% | 12.0% |
-| PPO checkpoint | 25 | 13.08 | -0.62 | 0.0% | 12.0% | 12.0% |
+| Heuristic | 150 | 15.78 | 8.44 | 0.0% | 26.0% | 23.3% |
+| BC checkpoint | 150 | 12.81 | -0.55 | 0.0% | 12.0% | 12.0% |
+| PPO checkpoint | 150 | 14.70 | 2.37 | 0.0% | 18.7% | 18.0% |
 
-The project is presented honestly: the current PPO checkpoint has not yet beaten the heuristic or BC baseline. The engineering value is in the complete training system, deterministic evaluation harness, dashboard, and reproducible reporting pipeline that make future improvements measurable.
+The project is presented honestly: the current PPO checkpoint beats the BC checkpoint on the wider eval, but remains behind the heuristic baseline and has not yet recorded a full win. The engineering value is in the complete training system, deterministic evaluation harness, dashboard, and reproducible reporting pipeline that make future improvements measurable.
 
 ## Links
 

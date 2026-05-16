@@ -260,7 +260,7 @@
         <div class="metric"><span>Action space</span><strong>134</strong></div>
         <div class="metric"><span>Observation vector</span><strong>530</strong></div>
         <div class="metric"><span>BC validation accuracy</span><strong>84.948%</strong></div>
-        <div class="metric"><span>PPO rollout games</span><strong>2,496</strong></div>
+        <div class="metric"><span>PPO rollout games</span><strong>4,136</strong></div>
       </div>
     </section>
 
@@ -318,11 +318,11 @@
 
     <section class="section">
       <h2>Current Results</h2>
-      <p class="lead">The latest PPO snapshot now improves materially over the BC checkpoint and nearly matches the heuristic baseline on the 25-seed slice. The value here is the complete training system and evaluation pipeline, with clear metrics for future improvement.</p>
+      <p class="lead">The latest PPO snapshot still improves over the BC checkpoint on the 150-game evaluation, but the wider sample shows it remains behind the heuristic baseline. The value here is the complete training system and evaluation pipeline, with clear metrics for future improvement.</p>
       <div class="grid">
         <article class="card">
           <h3>Heuristic baseline</h3>
-          <p>25 fixed-seed games: 16.84 average floor, 11.87 average shaped reward, 32.0% Act 2 reach rate.</p>
+          <p>150 eval games: 15.78 average floor, 8.44 average shaped reward, 26.0% Act 2 reach rate.</p>
           <a href="experiments/003_fixed_seed_eval.md">View evaluation</a>
         </article>
         <article class="card">
@@ -332,7 +332,7 @@
         </article>
         <article class="card">
           <h3>Parallel PPO</h3>
-          <p>2,496 rollout games, 311 PPO update batches, zero stale rollouts, and a 16.40 average floor in the latest 25-seed PPO eval.</p>
+          <p>4,136 rollout games, 515 PPO update batches, 6 stale rollouts in the latest trainer batch, and a 14.70 average floor in the latest 150-game PPO eval.</p>
           <a href="experiments/002_parallel_ppo.md">View PPO report</a>
         </article>
       </div>

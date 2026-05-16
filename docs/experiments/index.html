@@ -73,6 +73,11 @@
         <p>~2,500 PPO games, 311 trainer updates, and the May 14 fixed-seed comparison.</p>
         <a href="004_long_ppo_eval.md">Read report</a>
       </article>
+      <article class="card">
+        <h2>005 4,136 PPO Eval</h2>
+        <p>4,136 PPO games, 515 trainer updates, and the May 16 150-game evaluation.</p>
+        <a href="005_ppo_4136_eval.md">Read report</a>
+      </article>
     </section>
     <section>
       <h2>Snapshot Summary</h2>
@@ -82,9 +87,9 @@
             <tr><th>Run</th><th>Games</th><th>Average Floor</th><th>Average Reward</th><th>Notes</th></tr>
           </thead>
           <tbody>
-            <tr><td>Heuristic fixed-seed eval</td><td>25</td><td>16.84</td><td>11.87</td><td>Current reference policy.</td></tr>
-            <tr><td>BC checkpoint fixed-seed eval</td><td>25</td><td>13.08</td><td>-0.62</td><td>Playable warm start below heuristic.</td></tr>
-            <tr><td>PPO checkpoint fixed-seed eval</td><td>25</td><td>16.40</td><td>9.57</td><td>Long PPO run now separates from BC and nearly matches heuristic.</td></tr>
+            <tr><td>Heuristic 150-game eval</td><td>150</td><td>15.78</td><td>8.44</td><td>Current reference policy on the wider eval.</td></tr>
+            <tr><td>BC checkpoint 150-game eval</td><td>150</td><td>12.81</td><td>-0.55</td><td>Playable warm start below heuristic.</td></tr>
+            <tr><td>PPO checkpoint 150-game eval</td><td>150</td><td>14.70</td><td>2.37</td><td>Still above BC, but below heuristic on the wider sample.</td></tr>
           </tbody>
         </table>
       </div>
