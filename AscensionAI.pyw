@@ -138,6 +138,13 @@ SPINNER_CONFIG = {
     "play":    (None, 0, 0, 0),
 }
 
+EVAL_POLICY_OPTIONS = {
+    "PPO Current only": "ppo_current",
+    "Full comparison": "full",
+    "BC only": "bc",
+    "Heuristic only": "heuristic",
+}
+
 
 # ---------------------------------------------------------------------------
 # Hardware detection
@@ -745,6 +752,23 @@ class AscensionApp:
         ).pack(side="left", padx=(8, 0))
 
         # Fixed-seed evaluation controls. Visible only for Evaluate on Seed Set.
+        self.eval_policy_row = ttk.Frame(ctrl_frame)
+        self.eval_policy_row.pack(fill="x", pady=(6, 0))
+        ttk.Label(self.eval_policy_row, text="Eval Policy:").pack(side="left", padx=(0, 5))
+        self.eval_policy_var = tk.StringVar(value="PPO Current only")
+        self.eval_policy_combo = ttk.Combobox(
+            self.eval_policy_row,
+            textvariable=self.eval_policy_var,
+            values=list(EVAL_POLICY_OPTIONS.keys()),
+            state="readonly",
+            width=22,
+        )
+        self.eval_policy_combo.pack(side="left", padx=(0, 8))
+        ttk.Label(
+            self.eval_policy_row,
+            text="use PPO-only for routine checkpoint checks",
+        ).pack(side="left")
+
         self.eval_seed_row = ttk.Frame(ctrl_frame)
         self.eval_seed_row.pack(fill="x", pady=(6, 0))
         ttk.Label(self.eval_seed_row, text="Seed File:").pack(side="left", padx=(0, 5))
@@ -917,6 +941,31 @@ class AscensionApp:
         base, remainder = divmod(total_games, n_workers)
         return {slot: base + (1 if slot <= remainder else 0)
                 for slot in range(1, n_workers + 1)}
+
+    def _count_worker_completed_games(self, worker_id: int) -> int:
+        """Count games logged by a worker in training_stats.csv since the current run started."""
+        stats_path = ROOT / "logs" / "training_stats.csv"
+        if not stats_path.exists():
+            return 0
+        run_start = getattr(self, "_parallel_launch_started_at", None)
+        if run_start is None:
+            return 0
+        from datetime import datetime as _dt
+        run_start_iso = _dt.fromtimestamp(run_start).isoformat()
+        count = 0
+        try:
+            with open(stats_path, "r", encoding="utf-8") as f:
+                import csv as _csv
+                reader = _csv.DictReader(f)
+                wid_str = str(worker_id)
+                for row in reader:
+                    if row.get("worker") == wid_str and row.get("game"):
+                        ts = row.get("timestamp", "")
+                        if ts >= run_start_iso:
+                            count += 1
+        except Exception:
+            pass
+        return count
 
     def _get_bc_epochs(self) -> int:
         try:
@@ -1261,6 +1310,55 @@ class AscensionApp:
         value = value.replace("\\", "/")
         return value
 
+    def _normalize_eval_policy_key(self, key: str | None) -> str:
+        key = str(key or "").strip()
+        if key in EVAL_POLICY_OPTIONS.values():
+            return key
+        return "ppo_current"
+
+    def _selected_eval_policy(self) -> str:
+        return self._normalize_eval_policy_key(
+            EVAL_POLICY_OPTIONS.get(self.eval_policy_var.get().strip())
+        )
+
+    def _eval_policy_label(self, key: str | None = None) -> str:
+        normalized = self._selected_eval_policy() if key is None else self._normalize_eval_policy_key(key)
+        for label, candidate in EVAL_POLICY_OPTIONS.items():
+            if candidate == normalized:
+                return label
+        return "PPO Current only"
+
+    def _eval_runs_for_policy(self, key: str, games: int, ts: str) -> list[dict]:
+        normalized = self._normalize_eval_policy_key(key)
+        run_templates = {
+            "heuristic": {
+                "label": "Heuristic",
+                "key": "heuristic",
+                "policy": "heuristic",
+                "model": None,
+                "tag": f"heuristic_{games}_{ts}",
+                "top_actions": 0,
+            },
+            "bc": {
+                "label": "BC",
+                "key": "bc",
+                "policy": "model",
+                "model": "models/ppo_sts_bc.pt",
+                "tag": f"bc_{games}_{ts}",
+                "top_actions": 5,
+            },
+            "ppo_current": {
+                "label": "PPO Current",
+                "key": "ppo_current",
+                "policy": "model",
+                "model": "models/ppo_sts.pt",
+                "tag": f"ppo_current_{games}_{ts}",
+                "top_actions": 5,
+            },
+        }
+        run_keys = ["heuristic", "bc", "ppo_current"] if normalized == "full" else [normalized]
+        return [dict(run_templates[run_key]) for run_key in run_keys]
+
     def _set_ent_value(self, value: float, *, manual: bool = False):
         try:
             v = float(value)
@@ -1401,8 +1499,10 @@ class AscensionApp:
 
         if mode == "eval_set":
             self._refresh_seed_file_options()
+            self.eval_policy_row.pack(fill="x", pady=(6, 0))
             self.eval_seed_row.pack(fill="x", pady=(6, 0))
         else:
+            self.eval_policy_row.pack_forget()
             self.eval_seed_row.pack_forget()
 
     # ----- Logging -----
@@ -2137,7 +2237,15 @@ class AscensionApp:
                 self.status_var.set("Eval set launch cancelled.")
                 return
             launch_label = "Resuming" if resume_manifest else "Launching"
-            self.status_var.set(f"{launch_label} fixed-seed eval set ({n} games each)...")
+            policy_label = (
+                self._eval_policy_label(str(resume_manifest.get("eval_policy") or "full"))
+                if resume_manifest else self._eval_policy_label()
+            )
+            runs_count = len(resume_manifest.get("runs") or []) if resume_manifest else (
+                3 if self._selected_eval_policy() == "full" else 1
+            )
+            games_desc = f"{n} games each" if runs_count > 1 else f"{n} games"
+            self.status_var.set(f"{launch_label} {policy_label} fixed-seed eval ({games_desc})...")
             threading.Thread(
                 target=self._launch_eval_set,
                 args=(n,),
@@ -2259,19 +2367,26 @@ class AscensionApp:
             return None
 
         current_seed_file = self._selected_seed_file(games)
+        current_eval_policy = self._selected_eval_policy()
         manifest_seed_file = str(manifest.get("seed_file") or "")
         manifest_games = int(manifest.get("games") or 0)
+        manifest_eval_policy = self._normalize_eval_policy_key(manifest.get("eval_policy") or "full")
         progress_lines = "\n".join(
             f"  {label}: {rows}/{total}"
             for label, rows, total in self._eval_set_manifest_progress(manifest)
         )
         started_at = manifest.get("started_at") or "?"
 
-        if manifest_seed_file == current_seed_file and manifest_games == int(games):
+        if (
+            manifest_seed_file == current_seed_file
+            and manifest_games == int(games)
+            and manifest_eval_policy == current_eval_policy
+        ):
             choice = messagebox.askyesnocancel(
                 "Resume Eval Set?",
                 "An incomplete eval set is on disk from "
-                f"{started_at}:\n\n{progress_lines}\n\n"
+                f"{started_at} ({self._eval_policy_label(manifest_eval_policy)}):\n\n"
+                f"{progress_lines}\n\n"
                 "Yes  — resume and reuse the recorded games.\n"
                 "No   — discard previous progress and start fresh.\n"
                 "Cancel — abort the launch.",
@@ -2288,9 +2403,10 @@ class AscensionApp:
             "An incomplete eval set is on disk, but its parameters differ "
             "from this launch:\n\n"
             f"  Previous: {manifest_seed_file or '?'} × {manifest_games} games "
-            f"(started {started_at})\n"
+            f"({self._eval_policy_label(manifest_eval_policy)}, started {started_at})\n"
             f"{progress_lines}\n\n"
-            f"  Current:  {current_seed_file} × {int(games)} games\n\n"
+            f"  Current:  {current_seed_file} × {int(games)} games "
+            f"({self._eval_policy_label(current_eval_policy)})\n\n"
             "Yes  — discard previous progress and start fresh with current settings.\n"
             "No   — keep the previous manifest on disk for later (abort this launch).\n"
             "Cancel — abort the launch.",
@@ -2433,23 +2549,19 @@ class AscensionApp:
                     return
                 self._append_log("Eval Set", f"Resuming previous eval set; seed file: {seed_file}")
 
+            eval_policy = self._selected_eval_policy()
             runs: list[dict] = []
             if resume_manifest is not None:
                 ts = str(resume_manifest.get("ts") or datetime.now().strftime("%Y%m%d_%H%M%S"))
+                eval_policy = self._normalize_eval_policy_key(resume_manifest.get("eval_policy") or "full")
                 runs = [dict(r) for r in (resume_manifest.get("runs") or []) if isinstance(r, dict)]
                 if not runs:
                     self._append_log("Eval Set", "Resume manifest had no runs; starting fresh.")
                     resume_manifest = None
+                    eval_policy = self._selected_eval_policy()
             if resume_manifest is None:
                 ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                runs = [
-                    {"label": "Heuristic", "key": "heuristic", "policy": "heuristic", "model": None,
-                     "tag": f"heuristic_{games}_{ts}", "top_actions": 0},
-                    {"label": "BC", "key": "bc", "policy": "model", "model": "models/ppo_sts_bc.pt",
-                     "tag": f"bc_{games}_{ts}", "top_actions": 5},
-                    {"label": "PPO Current", "key": "ppo_current", "policy": "model", "model": "models/ppo_sts.pt",
-                     "tag": f"ppo_current_{games}_{ts}", "top_actions": 5},
-                ]
+                runs = self._eval_runs_for_policy(eval_policy, int(games), ts)
 
             started_at = (
                 resume_manifest.get("started_at") if resume_manifest else None
@@ -2458,12 +2570,15 @@ class AscensionApp:
                 "ts": ts,
                 "games": int(games),
                 "seed_file": seed_file,
+                "eval_policy": eval_policy,
+                "eval_policy_label": self._eval_policy_label(eval_policy),
                 "started_at": started_at,
                 "runs": runs,
             }
             self._save_eval_set_manifest(manifest_state)
 
             self._eval_set_started_at = time.time()
+            games_desc = f"{games} games each" if len(runs) > 1 else f"{games} games"
             if resume_manifest is not None:
                 progress_summary = ", ".join(
                     f"{label}={rows}/{total}"
@@ -2471,20 +2586,25 @@ class AscensionApp:
                 )
                 self._append_log(
                     "Eval Set",
-                    f"Resuming fixed-seed eval set ts={ts}: {games} games each, "
-                    f"seed_file={seed_file} ({progress_summary})"
+                    f"Resuming fixed-seed eval set ts={ts}: {games_desc}, "
+                    f"seed_file={seed_file}, policy={self._eval_policy_label(eval_policy)} "
+                    f"({progress_summary})"
                 )
             else:
                 self._append_log(
                     "Eval Set",
-                    f"Starting fixed-seed eval set: {games} games each, seed_file={seed_file}"
+                    f"Starting fixed-seed eval set: {games_desc}, seed_file={seed_file}, "
+                    f"policy={self._eval_policy_label(eval_policy)}"
                 )
-            self._append_log(
-                "Eval Set",
-                "Running eval policies sequentially; concurrent Heuristic/BC/PPO eval is deferred "
-                "because CommunicationMod config, process cleanup, and log/stat isolation need "
-                "separate instance ownership first."
-            )
+            if len(runs) > 1:
+                self._append_log(
+                    "Eval Set",
+                    "Running selected eval policies sequentially; concurrent eval is deferred "
+                    "because CommunicationMod config, process cleanup, and log/stat isolation need "
+                    "separate instance ownership first."
+                )
+            else:
+                self._append_log("Eval Set", f"Running {runs[0]['label']} eval only.")
 
             max_restarts = 3
             completed_all = True
@@ -3220,6 +3340,30 @@ class AscensionApp:
             if not cmd:
                 _logger.error(f"_relaunch_worker: no stored command for worker {worker_id}")
                 return
+            original_target = self._worker_game_targets.get(worker_id, 0)
+            if original_target > 0:
+                completed = self._count_worker_completed_games(worker_id)
+                remaining = original_target - completed
+                if remaining <= 0:
+                    _logger.info(
+                        f"_relaunch_worker: worker {worker_id} already completed "
+                        f"{completed}/{original_target} games; writing done marker"
+                    )
+                    self._worker_done_marker_path(worker_id).write_text(
+                        f"completed={completed}\ttarget={original_target}\n",
+                        encoding="utf-8",
+                    )
+                    return
+                cmd = build_command(
+                    "worker", worker_id=worker_id,
+                    worker_games=remaining,
+                    verbose=bool(self.verbose_var.get()),
+                )
+                self._worker_commands[worker_id] = cmd
+                _logger.info(
+                    f"_relaunch_worker: worker {worker_id} adjusted target: "
+                    f"{completed} done, {remaining} remaining (was {original_target})"
+                )
             worker_mode = self._worker_modes.get(worker_id, "worker")
             tab_name = f"BC {worker_id}" if worker_mode == "bc_collect" else f"Worker {worker_id}"
             write_config(cmd, verbose=bool(self.verbose_var.get()))
@@ -3868,7 +4012,13 @@ class AscensionApp:
             seed_file = self._selected_seed_file(self._normalize_spinner_value())
             if not seed_file.lower().endswith(".txt"):
                 issues.append("Seed file must be a .txt file, for example seeds/eval_200.txt")
-            for rel in ("models/ppo_sts_bc.pt", "models/ppo_sts.pt"):
+            eval_policy = self._selected_eval_policy()
+            required_models: list[str] = []
+            if eval_policy in {"full", "bc"}:
+                required_models.append("models/ppo_sts_bc.pt")
+            if eval_policy in {"full", "ppo_current"}:
+                required_models.append("models/ppo_sts.pt")
+            for rel in required_models:
                 if not (ROOT / rel).exists():
                     issues.append(f"Required eval checkpoint not found:\n  {ROOT / rel}")
         if issues:
