@@ -35,20 +35,23 @@ The project is built as an ML systems portfolio piece: it shows how to wrap a li
 
 ## Current Snapshot
 
-These public numbers come from the local May 16, 2026 artifacts summarized in [docs/experiments/index.json](docs/experiments/index.json). Raw logs, rollout files, and model checkpoints stay out of git.
+These public numbers come from the local May 18, 2026 artifacts summarized in [docs/experiments/index.json](docs/experiments/index.json). Raw logs, rollout files, and model checkpoints stay out of git.
 
 | Result | Value |
 |---|---:|
 | BC supervised samples | 86,297 |
 | BC final validation accuracy | 84.948% |
-| Parallel PPO rollout games | 4,136 |
-| PPO update batches | 515 |
+| Parallel PPO rollout games | 5,146 |
+| PPO update batches | 641 |
 | Stale rollouts in latest trainer batch | 6 |
-| Latest PPO eval avg floor | 14.70 |
-| Latest PPO eval avg reward | 2.37 |
+| Latest PPO eval avg floor | 15.44 |
+| Latest PPO eval avg reward | 4.03 |
+| Latest PPO eval best floor | 42 |
+| 200-game PPO elite win rate | 79.9% |
+| 200-game PPO boss win rate | 31.1% |
 | 150-game heuristic avg floor | 15.78 |
 | 150-game BC avg floor | 12.81 |
-| 150-game PPO avg floor | 14.70 |
+| 200-game PPO avg floor | 15.44 |
 
 ![Training plot snapshot](docs/assets/training_plot.png)
 
@@ -65,9 +68,9 @@ Slay the Spire instances
     -> eval_model.py fixed-seed comparisons
 ```
 
-The strongest part of the current project is the complete training and evaluation system. The 4,136-game PPO checkpoint still separates from BC on the 150-game evaluation, but the wider sample shows it remains behind the heuristic baseline and has not produced full victories yet.
+The strongest part of the current project is the complete training and evaluation system. The 5,146-game PPO checkpoint has nearly closed the gap with the heuristic baseline on the 200-game fixed-seed evaluation (15.44 vs 15.78 avg floor). Elite win rate (79.9%) approaches the heuristic (81.9%), while the Act 1 boss remains the primary bottleneck at 31.1% conversion vs the heuristic's 39.0%. The best single run reached floor 42 (Act 3). No full victories yet.
 
-Current training read: leave entropy auto-tune enabled, run the next comparison as a clean fixed-seed eval set, and make the next PPO change a small 500-1,000 game update-strength experiment rather than a manual entropy increase. The latest normalized entropy is still in the healthy band; the sharper bottleneck is Act 1 boss/elite decision quality.
+Current training read: entropy auto-tune is active and healthy (normalized entropy 0.25–0.29), the BC anchor is being gradually relaxed so the policy can explore beyond heuristic play patterns at the Act 1 boss. More training volume at the current settings is the right next step.
 
 ## About
 
@@ -174,6 +177,7 @@ The control panel detects your hardware, recommends how many STS instances to ru
 | **BC → PPO (End-to-End)** | Behavior cloning warm-start then PPO fine-tuning in one session |
 | **Behavior Cloning** | Heuristic plays demonstration games, network learns to imitate |
 | **Evaluation (Greedy)** | Run games with the trained model (no exploration, no updates) |
+| **Evaluation Set** | Batch evaluation: runs heuristic, BC, and PPO fixed-seed evals back-to-back with resumable progress |
 | **Game Logger (Passive)** | Record game states while you play manually |
 | **Play Game (No AI)** | Launch STS without any AI command — play normally or configure mods |
 
@@ -201,6 +205,7 @@ The progress panel keeps the current PPO run and the latest BC baseline separate
 AscensionAI is designed to run multiple live STS instances for many hours, but modded STS can still crash or expose awkward intermediate screens. The launcher and screen handler include guardrails for the common stuck states:
 
 - **Worker relaunch** — parallel workers are monitored and relaunched through ModTheSpire if an instance exits unexpectedly.
+- **Restart STS Every N Games** — optional periodic restart of STS processes to reclaim leaked memory (STS can grow to 7 GB+ over long sessions). Workers exit cleanly without writing done markers; the GUI relaunches them with adjusted game targets. Available for worker, collect, and eval set modes.
 - **Reward screens** — combat reward, card reward, boss relic, chest, and map transitions are guarded against reopen loops.
 - **Boss relics** — boss relic choices are treated as mandatory; the action mask suppresses leave/proceed while relic choices are available.
 - **Events** — event choices use CommunicationMod's real `choice_index`, which matters for events with disabled or hidden options.

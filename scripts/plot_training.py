@@ -6,6 +6,7 @@ and draws rolling-average curves for:
     - Final floor reached
     - Total episode reward
     - Win rate
+    - Boss win rate / Elite win rate
     - Normalized entropy (exploration scaled by legal actions)
     - PPO KL / clip fraction
     - Policy / value loss
