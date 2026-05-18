@@ -134,6 +134,16 @@ def main() -> None:
         act = _num(r.get("final_act"), 0.0)
         floor = _num(r.get("final_floor"), 0.0)
         victories.append(1.0 if v and (act >= 3 or floor >= 50) else 0.0)
+    boss_wins = []
+    elite_wins = []
+    for r in episode_rows:
+        bf = _num(r.get("bosses_fought"), 0.0)
+        bw = _num(r.get("bosses_won"), 0.0)
+        boss_wins.append(bw / bf if bf > 0 else float("nan"))
+        ef = _num(r.get("elites_fought"), 0.0)
+        ew = _num(r.get("elites_won"), 0.0)
+        elite_wins.append(ew / ef if ef > 0 else float("nan"))
+
     pg = [_num(r.get("pg_loss")) for r in update_rows]
     vf = [_num(r.get("vf_loss")) for r in update_rows]
     raw_ent = [_num(r.get("entropy")) for r in update_rows]
@@ -157,6 +167,12 @@ def main() -> None:
     win_avg = _rolling(victories, w)
     win_short = _rolling(victories, sw) if sw else []
     win_lifetime = _expanding(victories)
+    boss_avg = _rolling(boss_wins, w)
+    boss_short = _rolling(boss_wins, sw) if sw else []
+    boss_lifetime = _expanding(boss_wins)
+    elite_avg = _rolling(elite_wins, w)
+    elite_short = _rolling(elite_wins, sw) if sw else []
+    elite_lifetime = _expanding(elite_wins)
     ent_avg = _rolling(ent, w)
     ent_short = _rolling(ent, sw) if sw else []
     raw_ent_avg = _rolling(raw_ent, w)
@@ -196,7 +212,7 @@ def main() -> None:
         print("\nmatplotlib not installed; install with: pip install matplotlib", file=sys.stderr)
         raise SystemExit(1)
 
-    fig, axes = plt.subplots(4, 2, figsize=(13, 12))
+    fig, axes = plt.subplots(5, 2, figsize=(13, 15))
     subtitle = f"primary rolling window = {w}"
     if sw and sw != w:
         subtitle += f", short window = {sw}"
@@ -218,6 +234,18 @@ def main() -> None:
     ax.set_xlabel("Game #")
 
     ax = axes[1][1]
+    _plot_trend(ax, episodes, boss_wins, boss_short, boss_avg, boss_lifetime,
+                "Boss win rate", "#8c564b", "#c49c94", sw, w, per_label="per game")
+    ax.set_ylim(-0.02, 1.02)
+    ax.set_xlabel("Game #")
+
+    ax = axes[2][0]
+    _plot_trend(ax, episodes, elite_wins, elite_short, elite_avg, elite_lifetime,
+                "Elite win rate", "#e377c2", "#f7b6d2", sw, w, per_label="per game")
+    ax.set_ylim(-0.02, 1.02)
+    ax.set_xlabel("Game #")
+
+    ax = axes[2][1]
     if has_norm_entropy:
         ax.axhspan(0.25, 0.50, color="#9467bd", alpha=0.08, label="target 0.25–0.50")
         ax.plot(updates, raw_ent_avg, color="#bbb", lw=0.8, alpha=0.45, label=f"raw entropy avg{w}")
@@ -230,7 +258,7 @@ def main() -> None:
     ax.legend(loc="upper left", fontsize=8)
     ax.grid(alpha=0.3)
 
-    ax = axes[2][0]
+    ax = axes[3][0]
     if sw and sw != w:
         ax.plot(updates, kl_short, color="#ffbb78", lw=1.1, alpha=0.65,
                 label=f"approx_kl avg{sw}")
@@ -241,7 +269,7 @@ def main() -> None:
     ax.legend(loc="upper left", fontsize=8)
     ax.grid(alpha=0.3)
 
-    ax = axes[2][1]
+    ax = axes[3][1]
     if sw and sw != w:
         ax.plot(updates, clip_short, color="#98df8a", lw=1.1, alpha=0.65,
                 label=f"clip_fraction avg{sw}")
@@ -252,7 +280,7 @@ def main() -> None:
     ax.legend(loc="upper left", fontsize=8)
     ax.grid(alpha=0.3)
 
-    ax = axes[3][0]
+    ax = axes[4][0]
     if sw and sw != w:
         ax.plot(updates, pg_short, color="#ffbb78", lw=1.1, alpha=0.65,
                 label=f"pg_loss avg{sw}")
@@ -262,7 +290,7 @@ def main() -> None:
     ax.legend(loc="upper left", fontsize=8)
     ax.grid(alpha=0.3)
 
-    ax = axes[3][1]
+    ax = axes[4][1]
     if sw and sw != w:
         ax.plot(updates, vf_short, color="#9edae5", lw=1.1, alpha=0.65,
                 label=f"vf_loss avg{sw}")

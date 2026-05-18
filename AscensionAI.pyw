@@ -2478,10 +2478,11 @@ class AscensionApp:
         return False
 
     def _wait_for_eval_complete(self, run_tag: str, games: int, proc: subprocess.Popen,
-                                timeout_sec: int) -> str:
+                                timeout_sec: int, restart_every: int = 0) -> str:
         start = time.time()
         last_progress_at = start
         last_count = -1
+        count_at_launch = self._count_eval_rows_for_run(run_tag)
         exit_seen_at = None
         stall_timeout_sec = max(900, min(timeout_sec, 3600))
         exit_grace_sec = 120
@@ -2504,6 +2505,22 @@ class AscensionApp:
                         f"(rc={rc}, rows={count}/{games}); waiting for progress grace period"
                     )
                 eval_running = self._eval_python_running_for_run(run_tag)
+                games_this_launch = count - count_at_launch
+                if (
+                    eval_running is False
+                    and restart_every > 0
+                    and games_this_launch >= restart_every
+                    and count < games
+                ):
+                    _logger.info(
+                        f"Eval run {run_tag}: planned restart-every exit "
+                        f"({games_this_launch} games this launch, {count}/{games} total)"
+                    )
+                    self._append_log(
+                        "Eval Set",
+                        f"RAM cleanup restart: {run_tag} at {count}/{games} games",
+                    )
+                    return "exited"
                 if (
                     eval_running is False
                     and time.time() - exit_seen_at > exit_grace_sec
@@ -2518,6 +2535,21 @@ class AscensionApp:
                         f"CRASH/EXIT: {run_tag} exited with rc={rc} at {count}/{games} games",
                     )
                     return "exited"
+
+            if restart_every > 0 and rc is None:
+                games_this_launch = count - count_at_launch
+                if games_this_launch >= restart_every and count < games:
+                    eval_running = self._eval_python_running_for_run(run_tag)
+                    if eval_running is False:
+                        _logger.info(
+                            f"Eval run {run_tag}: planned restart-every exit "
+                            f"(launcher still alive, {games_this_launch} games, {count}/{games} total)"
+                        )
+                        self._append_log(
+                            "Eval Set",
+                            f"RAM cleanup restart: {run_tag} at {count}/{games} games",
+                        )
+                        return "exited"
 
             elapsed = time.time() - start
             if elapsed > timeout_sec:
@@ -2703,7 +2735,7 @@ class AscensionApp:
                                 f"Evaluating {label} ({games} games)..."
                             ))
                             timeout = max(900, int(games) * 180)
-                            status = self._wait_for_eval_complete(run["tag"], games, proc, timeout)
+                            status = self._wait_for_eval_complete(run["tag"], games, proc, timeout, restart_every=restart_every)
                         finally:
                             self._cleanup_eval_instance(proc, run["label"])
                             time.sleep(3.0)

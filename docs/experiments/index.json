@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "snapshot_date": "2026-05-16",
-  "commit": "088f25d",
+  "snapshot_date": "2026-05-18",
+  "commit": "ae4ab51",
   "notes": "Public summary generated from local logs and checkpoints. Raw logs, rollouts, and model files stay gitignored.",
   "runs": [
     {
@@ -246,6 +246,59 @@
         }
       },
       "notes": "After 4,136 PPO rollout games, the PPO checkpoint remains clearly above BC on the 150-game evaluation but is still behind the heuristic baseline. Entropy is inside the healthy auto-tune band; the next changes should focus on clean fixed-seed evaluation, controlled update-strength testing, and Act 1 boss/elite data."
+    },
+    {
+      "run_id": "ppo_5146_eval_20260518",
+      "report": "006_ppo_5146_eval.md",
+      "model_path": "models/ppo_sts.pt",
+      "training_mode": "parallel_ppo_extended_run",
+      "games": 5146,
+      "worker_count": 5,
+      "hyperparameters": {
+        "batch_games": 8,
+        "learning_rate_initial": 3e-05,
+        "learning_rate_latest": 1.6e-05,
+        "epochs": 4,
+        "clip": 0.15,
+        "target_kl": 0.03,
+        "entropy_coefficient_latest": 0.00065,
+        "bc_anchor_coefficient_latest": 0.01,
+        "max_rollout_lag": 4,
+        "auto_tune": true
+      },
+      "training_metrics": {
+        "ppo_update_rows": 641,
+        "total_update_transitions": 760000,
+        "last_500_average_floor": 13.21,
+        "latest_approx_kl": 0.00734499,
+        "latest_clip_fraction": 0.108192,
+        "latest_normalized_entropy": 0.264956,
+        "stale_rollouts_total": 6,
+        "early_stop_rows": 7
+      },
+      "eval_run_id": "ppo_current_200_20260517_141834",
+      "evaluation": {
+        "games": 200,
+        "average_floor": 15.44,
+        "best_floor": 42,
+        "average_reward": 4.03,
+        "win_rate_percent": 0.0,
+        "act2_reach_rate_percent": 20.0,
+        "floor20_rate_percent": 18.5,
+        "elite_fights": 219,
+        "elite_wins": 175,
+        "boss_fights": 132,
+        "boss_wins": 41
+      },
+      "comparison": {
+        "heuristic_eval_run_id": "heuristic_150_20260515_115841",
+        "heuristic_average_floor": 15.78,
+        "bc_eval_run_id": "bc_150_20260515_172740",
+        "bc_average_floor": 12.81,
+        "ppo_minus_bc_average_floor": 2.63,
+        "ppo_minus_heuristic_average_floor": -0.34
+      },
+      "notes": "After 5,146 PPO rollout games with 200-game fixed-seed eval, the PPO checkpoint is within 0.34 floors of the heuristic (15.44 vs 15.78). Elite win rate reached 79.9%, approaching heuristic's 81.9%. Best single run hit floor 42 (Act 3). The Act 1 boss remains the primary bottleneck with ~31% conversion rate vs heuristic's 39%."
     }
   ]
 }

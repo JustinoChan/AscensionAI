@@ -174,14 +174,14 @@
 
   <header class="dashboard-header">
     <h1>AscensionAI Results Dashboard</h1>
-    <p>Static, hostable viewer for BC, PPO, and fixed-seed evaluation artifacts. It ships with a May 16, 2026 snapshot and can also parse local CSV exports from <code>logs/</code>.</p>
+    <p>Static, hostable viewer for BC, PPO, and fixed-seed evaluation artifacts. It ships with a May 18, 2026 snapshot and can also parse local CSV exports from <code>logs/</code>.</p>
   </header>
 
   <main>
     <div class="toolbar">
       <label class="upload" for="csvInput">Load CSV files</label>
       <input id="csvInput" type="file" accept=".csv" multiple>
-      <span id="status" class="note">Using embedded May 16 public snapshot. Load <code>training_stats.csv</code>, <code>bc_train_stats.csv</code>, and <code>eval_stats.csv</code> for live local charts.</span>
+      <span id="status" class="note">Using embedded May 18 public snapshot. Load <code>training_stats.csv</code>, <code>bc_train_stats.csv</code>, and <code>eval_stats.csv</code> for live local charts.</span>
     </div>
 
     <section class="grid" id="cards"></section>
@@ -219,1142 +219,182 @@
   <script>
     const snapshot = {
       "meta": {
-            "date": "2026-05-16",
-            "commit": "088f25d",
-            "seedFile": "seeds/eval_200.txt",
-            "bcModel": "models/ppo_sts_bc.pt",
-            "ppoModel": "models/ppo_sts.pt",
-            "workers": 5,
-            "staleRollouts": 6,
-            "staleRolloutsTotal": 6,
-            "ppoGames": 4136,
-            "ppoUpdates": 515,
-            "last500AvgFloor": 14.56,
-            "latestEvalAvgFloor": 14.7
+                  "date": "2026-05-18",
+                  "commit": "ae4ab51",
+                  "seedFile": "seeds/eval_200.txt",
+                  "bcModel": "models/ppo_sts_bc.pt",
+                  "ppoModel": "models/ppo_sts.pt",
+                  "workers": 5,
+                  "staleRollouts": 6,
+                  "staleRolloutsTotal": 6,
+                  "ppoGames": 5146,
+                  "ppoUpdates": 641,
+                  "last500AvgFloor": 13.21,
+                  "latestEvalAvgFloor": 15.44
       },
       "training": [
-            {
-                  "game": 4057,
-                  "floor": 8,
-                  "reward": -2.9,
-                  "worker": "2"
-            },
-            {
-                  "game": 4058,
-                  "floor": 6,
-                  "reward": -16.01,
-                  "worker": "1"
-            },
-            {
-                  "game": 4059,
-                  "floor": 29,
-                  "reward": 40.35,
-                  "worker": "3"
-            },
-            {
-                  "game": 4060,
-                  "floor": 24,
-                  "reward": 63.005,
-                  "worker": "5"
-            },
-            {
-                  "game": 4061,
-                  "floor": 16,
-                  "reward": 13.34,
-                  "worker": "2"
-            },
-            {
-                  "game": 4062,
-                  "floor": 13,
-                  "reward": -7.225,
-                  "worker": "1"
-            },
-            {
-                  "game": 4063,
-                  "floor": 11,
-                  "reward": -0.62,
-                  "worker": "4"
-            },
-            {
-                  "game": 4064,
-                  "floor": 8,
-                  "reward": -16.385,
-                  "worker": "3"
-            },
-            {
-                  "game": 4065,
-                  "floor": 6,
-                  "reward": -15.875,
-                  "worker": "2"
-            },
-            {
-                  "game": 4066,
-                  "floor": 16,
-                  "reward": -7.265,
-                  "worker": "5"
-            },
-            {
-                  "game": 4067,
-                  "floor": 10,
-                  "reward": -4.17,
-                  "worker": "1"
-            },
-            {
-                  "game": 4068,
-                  "floor": 10,
-                  "reward": -2.32,
-                  "worker": "4"
-            },
-            {
-                  "game": 4069,
-                  "floor": 11,
-                  "reward": 1.545,
-                  "worker": "3"
-            },
-            {
-                  "game": 4070,
-                  "floor": 16,
-                  "reward": 4.665,
-                  "worker": "2"
-            },
-            {
-                  "game": 4071,
-                  "floor": 14,
-                  "reward": -6.61,
-                  "worker": "4"
-            },
-            {
-                  "game": 4072,
-                  "floor": 16,
-                  "reward": 14.735,
-                  "worker": "1"
-            },
-            {
-                  "game": 4073,
-                  "floor": 11,
-                  "reward": -9.515,
-                  "worker": "3"
-            },
-            {
-                  "game": 4074,
-                  "floor": 16,
-                  "reward": 0.905,
-                  "worker": "5"
-            },
-            {
-                  "game": 4075,
-                  "floor": 10,
-                  "reward": -2.415,
-                  "worker": "3"
-            },
-            {
-                  "game": 4076,
-                  "floor": 16,
-                  "reward": 6.04,
-                  "worker": "4"
-            },
-            {
-                  "game": 4077,
-                  "floor": 16,
-                  "reward": 0.51,
-                  "worker": "2"
-            },
-            {
-                  "game": 4078,
-                  "floor": 16,
-                  "reward": 6.425,
-                  "worker": "1"
-            },
-            {
-                  "game": 4079,
-                  "floor": 8,
-                  "reward": -6.86,
-                  "worker": "3"
-            },
-            {
-                  "game": 4080,
-                  "floor": 14,
-                  "reward": -10.77,
-                  "worker": "1"
-            },
-            {
-                  "game": 4081,
-                  "floor": 27,
-                  "reward": 48.335,
-                  "worker": "5"
-            },
-            {
-                  "game": 4082,
-                  "floor": 11,
-                  "reward": -7.895,
-                  "worker": "3"
-            },
-            {
-                  "game": 4083,
-                  "floor": 22,
-                  "reward": 31.6,
-                  "worker": "4"
-            },
-            {
-                  "game": 4084,
-                  "floor": 6,
-                  "reward": -17.48,
-                  "worker": "1"
-            },
-            {
-                  "game": 4085,
-                  "floor": 16,
-                  "reward": -3.18,
-                  "worker": "2"
-            },
-            {
-                  "game": 4086,
-                  "floor": 10,
-                  "reward": -14.53,
-                  "worker": "3"
-            },
-            {
-                  "game": 4087,
-                  "floor": 16,
-                  "reward": 7.085,
-                  "worker": "5"
-            },
-            {
-                  "game": 4088,
-                  "floor": 10,
-                  "reward": -11.005,
-                  "worker": "4"
-            },
-            {
-                  "game": 4089,
-                  "floor": 16,
-                  "reward": -1.58,
-                  "worker": "1"
-            },
-            {
-                  "game": 4090,
-                  "floor": 12,
-                  "reward": -5.825,
-                  "worker": "3"
-            },
-            {
-                  "game": 4091,
-                  "floor": 11,
-                  "reward": -0.735,
-                  "worker": "5"
-            },
-            {
-                  "game": 4092,
-                  "floor": 16,
-                  "reward": -1.805,
-                  "worker": "2"
-            },
-            {
-                  "game": 4093,
-                  "floor": 7,
-                  "reward": -10.67,
-                  "worker": "3"
-            },
-            {
-                  "game": 4094,
-                  "floor": 16,
-                  "reward": 4.905,
-                  "worker": "4"
-            },
-            {
-                  "game": 4095,
-                  "floor": 16,
-                  "reward": -3.345,
-                  "worker": "5"
-            },
-            {
-                  "game": 4096,
-                  "floor": 8,
-                  "reward": -18.06,
-                  "worker": "4"
-            },
-            {
-                  "game": 4097,
-                  "floor": 25,
-                  "reward": 41.0,
-                  "worker": "1"
-            },
-            {
-                  "game": 4098,
-                  "floor": 16,
-                  "reward": 6.725,
-                  "worker": "3"
-            },
-            {
-                  "game": 4099,
-                  "floor": 16,
-                  "reward": -2.545,
-                  "worker": "2"
-            },
-            {
-                  "game": 4100,
-                  "floor": 16,
-                  "reward": -21.0,
-                  "worker": "3"
-            },
-            {
-                  "game": 4101,
-                  "floor": 6,
-                  "reward": -11.895,
-                  "worker": "1"
-            },
-            {
-                  "game": 4102,
-                  "floor": 11,
-                  "reward": -1.885,
-                  "worker": "4"
-            },
-            {
-                  "game": 4103,
-                  "floor": 16,
-                  "reward": 1.515,
-                  "worker": "5"
-            },
-            {
-                  "game": 4104,
-                  "floor": 16,
-                  "reward": -8.8,
-                  "worker": "2"
-            },
-            {
-                  "game": 4105,
-                  "floor": 13,
-                  "reward": -0.25,
-                  "worker": "4"
-            },
-            {
-                  "game": 4106,
-                  "floor": 16,
-                  "reward": 1.715,
-                  "worker": "1"
-            },
-            {
-                  "game": 4107,
-                  "floor": 8,
-                  "reward": -8.025,
-                  "worker": "4"
-            },
-            {
-                  "game": 4108,
-                  "floor": 24,
-                  "reward": 22.32,
-                  "worker": "3"
-            },
-            {
-                  "game": 4109,
-                  "floor": 16,
-                  "reward": -8.05,
-                  "worker": "5"
-            },
-            {
-                  "game": 4110,
-                  "floor": 8,
-                  "reward": -17.005,
-                  "worker": "2"
-            },
-            {
-                  "game": 4111,
-                  "floor": 16,
-                  "reward": 1.69,
-                  "worker": "1"
-            },
-            {
-                  "game": 4112,
-                  "floor": 11,
-                  "reward": -7.19,
-                  "worker": "2"
-            },
-            {
-                  "game": 4113,
-                  "floor": 14,
-                  "reward": -5.965,
-                  "worker": "1"
-            },
-            {
-                  "game": 4114,
-                  "floor": 16,
-                  "reward": -13.815,
-                  "worker": "5"
-            },
-            {
-                  "game": 4115,
-                  "floor": 16,
-                  "reward": 3.78,
-                  "worker": "4"
-            },
-            {
-                  "game": 4116,
-                  "floor": 19,
-                  "reward": 24.625,
-                  "worker": "3"
-            },
-            {
-                  "game": 4117,
-                  "floor": 16,
-                  "reward": 4.265,
-                  "worker": "1"
-            },
-            {
-                  "game": 4118,
-                  "floor": 16,
-                  "reward": -3.04,
-                  "worker": "5"
-            },
-            {
-                  "game": 4119,
-                  "floor": 16,
-                  "reward": -4.165,
-                  "worker": "4"
-            },
-            {
-                  "game": 4120,
-                  "floor": 21,
-                  "reward": 29.505,
-                  "worker": "2"
-            },
-            {
-                  "game": 4121,
-                  "floor": 11,
-                  "reward": -10.875,
-                  "worker": "1"
-            },
-            {
-                  "game": 4122,
-                  "floor": 16,
-                  "reward": 0.67,
-                  "worker": "3"
-            },
-            {
-                  "game": 4123,
-                  "floor": 16,
-                  "reward": 8.775,
-                  "worker": "5"
-            },
-            {
-                  "game": 4124,
-                  "floor": 16,
-                  "reward": 5.675,
-                  "worker": "1"
-            },
-            {
-                  "game": 4125,
-                  "floor": 12,
-                  "reward": -7.05,
-                  "worker": "3"
-            },
-            {
-                  "game": 4126,
-                  "floor": 6,
-                  "reward": -18.935,
-                  "worker": "5"
-            },
-            {
-                  "game": 4127,
-                  "floor": 6,
-                  "reward": -22.455,
-                  "worker": "3"
-            },
-            {
-                  "game": 4128,
-                  "floor": 22,
-                  "reward": 39.375,
-                  "worker": "4"
-            },
-            {
-                  "game": 4129,
-                  "floor": 23,
-                  "reward": 46.465,
-                  "worker": "2"
-            },
-            {
-                  "game": 4130,
-                  "floor": 12,
-                  "reward": -5.485,
-                  "worker": "3"
-            },
-            {
-                  "game": 4131,
-                  "floor": 11,
-                  "reward": -16.05,
-                  "worker": "4"
-            },
-            {
-                  "game": 4132,
-                  "floor": 19,
-                  "reward": 12.625,
-                  "worker": "1"
-            },
-            {
-                  "game": 4133,
-                  "floor": 14,
-                  "reward": -0.975,
-                  "worker": "2"
-            },
-            {
-                  "game": 4134,
-                  "floor": 22,
-                  "reward": 31.255,
-                  "worker": "5"
-            },
-            {
-                  "game": 4135,
-                  "floor": 14,
-                  "reward": -2.94,
-                  "worker": "1"
-            },
-            {
-                  "game": 4136,
-                  "floor": 22,
-                  "reward": 41.875,
-                  "worker": "4"
-            }
+            {"game": 5067, "floor": 16, "reward": 0.095, "worker": "2"},
+            {"game": 5068, "floor": 5, "reward": -12.67, "worker": "3"},
+            {"game": 5069, "floor": 14, "reward": -2.28, "worker": "1"},
+            {"game": 5070, "floor": 16, "reward": 1.175, "worker": "4"},
+            {"game": 5071, "floor": 16, "reward": 7.62, "worker": "2"},
+            {"game": 5072, "floor": 13, "reward": 3.37, "worker": "1"},
+            {"game": 5073, "floor": 14, "reward": -1.63, "worker": "4"},
+            {"game": 5074, "floor": 8, "reward": -13.245, "worker": "2"},
+            {"game": 5075, "floor": 8, "reward": -12.65, "worker": "4"},
+            {"game": 5076, "floor": 16, "reward": -7.565, "worker": "1"},
+            {"game": 5077, "floor": 8, "reward": -12.585, "worker": "2"},
+            {"game": 5078, "floor": 33, "reward": 77.98, "worker": "3"},
+            {"game": 5079, "floor": 12, "reward": -1.615, "worker": "1"},
+            {"game": 5080, "floor": 16, "reward": -11.41, "worker": "2"},
+            {"game": 5081, "floor": 23, "reward": 41.57, "worker": "4"},
+            {"game": 5082, "floor": 6, "reward": -12.085, "worker": "1"},
+            {"game": 5083, "floor": 13, "reward": -8.48, "worker": "3"},
+            {"game": 5084, "floor": 16, "reward": 1.945, "worker": "4"},
+            {"game": 5085, "floor": 8, "reward": -14.88, "worker": "1"},
+            {"game": 5086, "floor": 16, "reward": 10.93, "worker": "2"},
+            {"game": 5087, "floor": 16, "reward": -7.07, "worker": "3"},
+            {"game": 5088, "floor": 6, "reward": -16.385, "worker": "4"},
+            {"game": 5089, "floor": 11, "reward": -8.27, "worker": "2"},
+            {"game": 5090, "floor": 16, "reward": -0.28, "worker": "1"},
+            {"game": 5091, "floor": 14, "reward": -0.225, "worker": "4"},
+            {"game": 5092, "floor": 14, "reward": 3.78, "worker": "2"},
+            {"game": 5093, "floor": 16, "reward": 0.285, "worker": "1"},
+            {"game": 5094, "floor": 20, "reward": 17.265, "worker": "3"},
+            {"game": 5095, "floor": 16, "reward": -1.925, "worker": "4"},
+            {"game": 5096, "floor": 16, "reward": 11.51, "worker": "2"},
+            {"game": 5097, "floor": 16, "reward": -6.725, "worker": "1"},
+            {"game": 5098, "floor": 16, "reward": 2.565, "worker": "4"},
+            {"game": 5099, "floor": 16, "reward": -1.34, "worker": "3"},
+            {"game": 5100, "floor": 8, "reward": -6.915, "worker": "1"},
+            {"game": 5101, "floor": 12, "reward": -3.18, "worker": "2"},
+            {"game": 5102, "floor": 10, "reward": -5.095, "worker": "4"},
+            {"game": 5103, "floor": 11, "reward": -10.95, "worker": "2"},
+            {"game": 5104, "floor": 16, "reward": 1.615, "worker": "1"},
+            {"game": 5105, "floor": 23, "reward": 35.965, "worker": "3"},
+            {"game": 5106, "floor": 22, "reward": 29.55, "worker": "4"},
+            {"game": 5107, "floor": 16, "reward": -9.59, "worker": "1"},
+            {"game": 5108, "floor": 23, "reward": 25.865, "worker": "2"},
+            {"game": 5109, "floor": 16, "reward": -2.375, "worker": "4"},
+            {"game": 5110, "floor": 22, "reward": 33.84, "worker": "3"},
+            {"game": 5111, "floor": 16, "reward": -0.735, "worker": "1"},
+            {"game": 5112, "floor": 6, "reward": -16.175, "worker": "4"},
+            {"game": 5113, "floor": 22, "reward": 34.22, "worker": "2"},
+            {"game": 5114, "floor": 16, "reward": -0.54, "worker": "3"},
+            {"game": 5115, "floor": 16, "reward": 0.615, "worker": "1"},
+            {"game": 5116, "floor": 16, "reward": -0.915, "worker": "4"},
+            {"game": 5117, "floor": 10, "reward": -8.05, "worker": "3"},
+            {"game": 5118, "floor": 10, "reward": -13.45, "worker": "4"},
+            {"game": 5119, "floor": 14, "reward": 0.65, "worker": "2"},
+            {"game": 5120, "floor": 12, "reward": 7.875, "worker": "3"},
+            {"game": 5121, "floor": 16, "reward": -5.415, "worker": "2"},
+            {"game": 5122, "floor": 16, "reward": 4.235, "worker": "4"},
+            {"game": 5123, "floor": 8, "reward": -8.99, "worker": "4"},
+            {"game": 5124, "floor": 33, "reward": 108.04, "worker": "1"},
+            {"game": 5125, "floor": 22, "reward": 35.945, "worker": "3"},
+            {"game": 5126, "floor": 19, "reward": 18.54, "worker": "2"},
+            {"game": 5127, "floor": 11, "reward": -0.985, "worker": "1"},
+            {"game": 5128, "floor": 16, "reward": -1.72, "worker": "4"},
+            {"game": 5129, "floor": 7, "reward": -13.155, "worker": "3"},
+            {"game": 5130, "floor": 16, "reward": 3.03, "worker": "2"},
+            {"game": 5131, "floor": 8, "reward": -7.705, "worker": "1"},
+            {"game": 5132, "floor": 16, "reward": -3.15, "worker": "4"},
+            {"game": 5133, "floor": 16, "reward": 4.66, "worker": "3"},
+            {"game": 5134, "floor": 16, "reward": 12.71, "worker": "2"},
+            {"game": 5135, "floor": 16, "reward": 8.595, "worker": "1"},
+            {"game": 5136, "floor": 6, "reward": -20.38, "worker": "2"},
+            {"game": 5137, "floor": 16, "reward": -3.945, "worker": "4"},
+            {"game": 5138, "floor": 16, "reward": -5.65, "worker": "3"},
+            {"game": 5139, "floor": 8, "reward": -13.37, "worker": "2"},
+            {"game": 5140, "floor": 14, "reward": -3.715, "worker": "3"},
+            {"game": 5141, "floor": 16, "reward": 0.79, "worker": "2"},
+            {"game": 5142, "floor": 16, "reward": 2.655, "worker": "4"},
+            {"game": 5143, "floor": 33, "reward": 80.645, "worker": "1"},
+            {"game": 5144, "floor": 16, "reward": -2.22, "worker": "3"},
+            {"game": 5145, "floor": 16, "reward": 2.715, "worker": "2"},
+            {"game": 5146, "floor": 16, "reward": 0.37, "worker": "4"}
       ],
       "ppo": [
-            {
-                  "update": 436,
-                  "kl": 0.00789191,
-                  "entropy": 0.229845,
-                  "clip": 0.110781,
-                  "vf_loss": 13.651231,
-                  "pg_loss": 0.0056
-            },
-            {
-                  "update": 437,
-                  "kl": 0.00846227,
-                  "entropy": 0.242167,
-                  "clip": 0.097656,
-                  "vf_loss": 17.164703,
-                  "pg_loss": -0.00718
-            },
-            {
-                  "update": 438,
-                  "kl": 0.00592491,
-                  "entropy": 0.255319,
-                  "clip": 0.098924,
-                  "vf_loss": 16.218102,
-                  "pg_loss": 0.002916
-            },
-            {
-                  "update": 439,
-                  "kl": 0.00303222,
-                  "entropy": 0.241158,
-                  "clip": 0.060246,
-                  "vf_loss": 19.507637,
-                  "pg_loss": 0.001487
-            },
-            {
-                  "update": 440,
-                  "kl": 0.00087529,
-                  "entropy": 0.232942,
-                  "clip": 0.029888,
-                  "vf_loss": 15.217218,
-                  "pg_loss": -0.002705
-            },
-            {
-                  "update": 441,
-                  "kl": 0.00025618,
-                  "entropy": 0.244989,
-                  "clip": 0.059277,
-                  "vf_loss": 17.527376,
-                  "pg_loss": -0.001207
-            },
-            {
-                  "update": 442,
-                  "kl": 0.01737243,
-                  "entropy": 0.231619,
-                  "clip": 0.124715,
-                  "vf_loss": 16.32218,
-                  "pg_loss": 0.001072
-            },
-            {
-                  "update": 443,
-                  "kl": 0.00610225,
-                  "entropy": 0.238884,
-                  "clip": 0.137393,
-                  "vf_loss": 16.386382,
-                  "pg_loss": 0.021201
-            },
-            {
-                  "update": 444,
-                  "kl": 0.00965589,
-                  "entropy": 0.240828,
-                  "clip": 0.119193,
-                  "vf_loss": 9.562079,
-                  "pg_loss": 0.00356
-            },
-            {
-                  "update": 445,
-                  "kl": 0.01138024,
-                  "entropy": 0.252261,
-                  "clip": 0.118688,
-                  "vf_loss": 19.732366,
-                  "pg_loss": 0.0015
-            },
-            {
-                  "update": 446,
-                  "kl": 0.009394,
-                  "entropy": 0.237874,
-                  "clip": 0.068947,
-                  "vf_loss": 18.801367,
-                  "pg_loss": -7.4e-05
-            },
-            {
-                  "update": 447,
-                  "kl": 0.00139253,
-                  "entropy": 0.250175,
-                  "clip": 0.0644,
-                  "vf_loss": 11.812796,
-                  "pg_loss": -0.002296
-            },
-            {
-                  "update": 448,
-                  "kl": 0.01158828,
-                  "entropy": 0.249813,
-                  "clip": 0.110919,
-                  "vf_loss": 21.351494,
-                  "pg_loss": 0.009543
-            },
-            {
-                  "update": 449,
-                  "kl": 0.00177004,
-                  "entropy": 0.239964,
-                  "clip": 0.057062,
-                  "vf_loss": 12.382403,
-                  "pg_loss": 0.002449
-            },
-            {
-                  "update": 450,
-                  "kl": 0.00118586,
-                  "entropy": 0.243383,
-                  "clip": 0.053728,
-                  "vf_loss": 23.407795,
-                  "pg_loss": 0.000663
-            },
-            {
-                  "update": 451,
-                  "kl": 0.00378377,
-                  "entropy": 0.248879,
-                  "clip": 0.058398,
-                  "vf_loss": 14.46725,
-                  "pg_loss": -0.019031
-            },
-            {
-                  "update": 452,
-                  "kl": 0.00819446,
-                  "entropy": 0.25376,
-                  "clip": 0.109949,
-                  "vf_loss": 24.397538,
-                  "pg_loss": 0.005727
-            },
-            {
-                  "update": 453,
-                  "kl": 0.00543872,
-                  "entropy": 0.249178,
-                  "clip": 0.07357,
-                  "vf_loss": 14.657983,
-                  "pg_loss": 0.002344
-            },
-            {
-                  "update": 454,
-                  "kl": 0.00448949,
-                  "entropy": 0.258916,
-                  "clip": 0.073561,
-                  "vf_loss": 16.645655,
-                  "pg_loss": -0.001325
-            },
-            {
-                  "update": 455,
-                  "kl": 0.00571496,
-                  "entropy": 0.246852,
-                  "clip": 0.057892,
-                  "vf_loss": 13.679131,
-                  "pg_loss": -0.000886
-            },
-            {
-                  "update": 456,
-                  "kl": 0.00270042,
-                  "entropy": 0.252476,
-                  "clip": 0.042442,
-                  "vf_loss": 18.835496,
-                  "pg_loss": -0.001879
-            },
-            {
-                  "update": 457,
-                  "kl": 0.00553357,
-                  "entropy": 0.247907,
-                  "clip": 0.040514,
-                  "vf_loss": 21.516533,
-                  "pg_loss": -0.001767
-            },
-            {
-                  "update": 458,
-                  "kl": 0.00121489,
-                  "entropy": 0.242612,
-                  "clip": 0.072701,
-                  "vf_loss": 20.459148,
-                  "pg_loss": 0.00704
-            },
-            {
-                  "update": 459,
-                  "kl": 0.00292806,
-                  "entropy": 0.244352,
-                  "clip": 0.077773,
-                  "vf_loss": 11.021931,
-                  "pg_loss": 0.023336
-            },
-            {
-                  "update": 460,
-                  "kl": 0.00014244,
-                  "entropy": 0.253797,
-                  "clip": 0.056371,
-                  "vf_loss": 22.451476,
-                  "pg_loss": 0.004679
-            },
-            {
-                  "update": 461,
-                  "kl": 0.00162114,
-                  "entropy": 0.244644,
-                  "clip": 0.051032,
-                  "vf_loss": 12.069547,
-                  "pg_loss": 0.001878
-            },
-            {
-                  "update": 462,
-                  "kl": 0.00602333,
-                  "entropy": 0.251282,
-                  "clip": 0.07797,
-                  "vf_loss": 18.704466,
-                  "pg_loss": -0.008449
-            },
-            {
-                  "update": 463,
-                  "kl": 0.00225876,
-                  "entropy": 0.245709,
-                  "clip": 0.055047,
-                  "vf_loss": 19.188389,
-                  "pg_loss": 0.00268
-            },
-            {
-                  "update": 464,
-                  "kl": 0.00435548,
-                  "entropy": 0.25326,
-                  "clip": 0.052995,
-                  "vf_loss": 17.192706,
-                  "pg_loss": -0.003584
-            },
-            {
-                  "update": 465,
-                  "kl": 0.00566412,
-                  "entropy": 0.246197,
-                  "clip": 0.064453,
-                  "vf_loss": 18.023567,
-                  "pg_loss": 0.005531
-            },
-            {
-                  "update": 466,
-                  "kl": 0.00324135,
-                  "entropy": 0.246463,
-                  "clip": 0.072426,
-                  "vf_loss": 23.116044,
-                  "pg_loss": 0.002512
-            },
-            {
-                  "update": 467,
-                  "kl": 0.00175355,
-                  "entropy": 0.257513,
-                  "clip": 0.042732,
-                  "vf_loss": 21.940057,
-                  "pg_loss": -0.002261
-            },
-            {
-                  "update": 468,
-                  "kl": 0.00369539,
-                  "entropy": 0.247587,
-                  "clip": 0.046947,
-                  "vf_loss": 13.290064,
-                  "pg_loss": -0.00387
-            },
-            {
-                  "update": 469,
-                  "kl": 0.0029894,
-                  "entropy": 0.250966,
-                  "clip": 0.066911,
-                  "vf_loss": 16.781275,
-                  "pg_loss": 0.000499
-            },
-            {
-                  "update": 470,
-                  "kl": 0.0041933,
-                  "entropy": 0.240904,
-                  "clip": 0.042435,
-                  "vf_loss": 12.782068,
-                  "pg_loss": -0.000837
-            },
-            {
-                  "update": 471,
-                  "kl": 0.0024872,
-                  "entropy": 0.222608,
-                  "clip": 0.019283,
-                  "vf_loss": 19.079242,
-                  "pg_loss": -0.001484
-            },
-            {
-                  "update": 472,
-                  "kl": 0.00025926,
-                  "entropy": 0.258144,
-                  "clip": 0.030946,
-                  "vf_loss": 17.480892,
-                  "pg_loss": 0.000214
-            },
-            {
-                  "update": 473,
-                  "kl": 0.0007326,
-                  "entropy": 0.249571,
-                  "clip": 0.035794,
-                  "vf_loss": 12.946745,
-                  "pg_loss": -0.000462
-            },
-            {
-                  "update": 474,
-                  "kl": 0.00116143,
-                  "entropy": 0.254875,
-                  "clip": 0.052779,
-                  "vf_loss": 12.597769,
-                  "pg_loss": -0.002777
-            },
-            {
-                  "update": 475,
-                  "kl": 0.00212905,
-                  "entropy": 0.244829,
-                  "clip": 0.071863,
-                  "vf_loss": 24.249648,
-                  "pg_loss": 0.006289
-            },
-            {
-                  "update": 476,
-                  "kl": -0.00018648,
-                  "entropy": 0.260492,
-                  "clip": 0.055773,
-                  "vf_loss": 14.098294,
-                  "pg_loss": 0.002804
-            },
-            {
-                  "update": 477,
-                  "kl": 0.00287446,
-                  "entropy": 0.24649,
-                  "clip": 0.095734,
-                  "vf_loss": 14.829614,
-                  "pg_loss": 0.008282
-            },
-            {
-                  "update": 478,
-                  "kl": 0.00659034,
-                  "entropy": 0.249565,
-                  "clip": 0.081404,
-                  "vf_loss": 15.817703,
-                  "pg_loss": -0.002042
-            },
-            {
-                  "update": 479,
-                  "kl": 0.0018228,
-                  "entropy": 0.264699,
-                  "clip": 0.085894,
-                  "vf_loss": 13.822254,
-                  "pg_loss": -0.00282
-            },
-            {
-                  "update": 480,
-                  "kl": 0.00235291,
-                  "entropy": 0.258604,
-                  "clip": 0.0698,
-                  "vf_loss": 10.548045,
-                  "pg_loss": 0.003301
-            },
-            {
-                  "update": 481,
-                  "kl": 0.0042634,
-                  "entropy": 0.237428,
-                  "clip": 0.064719,
-                  "vf_loss": 20.903357,
-                  "pg_loss": 1.3e-05
-            },
-            {
-                  "update": 482,
-                  "kl": 0.00379156,
-                  "entropy": 0.242127,
-                  "clip": 0.083054,
-                  "vf_loss": 17.362575,
-                  "pg_loss": 0.008665
-            },
-            {
-                  "update": 483,
-                  "kl": 0.00151599,
-                  "entropy": 0.265647,
-                  "clip": 0.053539,
-                  "vf_loss": 15.949832,
-                  "pg_loss": -0.000528
-            },
-            {
-                  "update": 484,
-                  "kl": 0.00504298,
-                  "entropy": 0.243534,
-                  "clip": 0.076643,
-                  "vf_loss": 14.512854,
-                  "pg_loss": 0.007319
-            },
-            {
-                  "update": 485,
-                  "kl": 0.00373014,
-                  "entropy": 0.246098,
-                  "clip": 0.069094,
-                  "vf_loss": 23.898842,
-                  "pg_loss": -0.000704
-            },
-            {
-                  "update": 486,
-                  "kl": 0.00536631,
-                  "entropy": 0.249805,
-                  "clip": 0.070297,
-                  "vf_loss": 14.931434,
-                  "pg_loss": 0.006986
-            },
-            {
-                  "update": 487,
-                  "kl": 0.00515274,
-                  "entropy": 0.253856,
-                  "clip": 0.071953,
-                  "vf_loss": 27.517282,
-                  "pg_loss": 0.008726
-            },
-            {
-                  "update": 488,
-                  "kl": 0.01006841,
-                  "entropy": 0.257641,
-                  "clip": 0.106967,
-                  "vf_loss": 14.843529,
-                  "pg_loss": 0.002824
-            },
-            {
-                  "update": 489,
-                  "kl": 0.0082124,
-                  "entropy": 0.243982,
-                  "clip": 0.068296,
-                  "vf_loss": 17.834319,
-                  "pg_loss": 0.003147
-            },
-            {
-                  "update": 490,
-                  "kl": 0.00344823,
-                  "entropy": 0.234436,
-                  "clip": 0.057229,
-                  "vf_loss": 15.358882,
-                  "pg_loss": -0.000474
-            },
-            {
-                  "update": 491,
-                  "kl": 0.0085329,
-                  "entropy": 0.25156,
-                  "clip": 0.095422,
-                  "vf_loss": 16.597323,
-                  "pg_loss": 0.001901
-            },
-            {
-                  "update": 492,
-                  "kl": 0.00208748,
-                  "entropy": 0.250344,
-                  "clip": 0.036932,
-                  "vf_loss": 13.753945,
-                  "pg_loss": -0.012079
-            },
-            {
-                  "update": 493,
-                  "kl": 0.00045144,
-                  "entropy": 0.265956,
-                  "clip": 0.076747,
-                  "vf_loss": 17.756958,
-                  "pg_loss": 0.003017
-            },
-            {
-                  "update": 494,
-                  "kl": 0.00498322,
-                  "entropy": 0.266525,
-                  "clip": 0.070774,
-                  "vf_loss": 19.260576,
-                  "pg_loss": 0.002359
-            },
-            {
-                  "update": 495,
-                  "kl": 0.00354929,
-                  "entropy": 0.254137,
-                  "clip": 0.06868,
-                  "vf_loss": 17.910976,
-                  "pg_loss": 0.002924
-            },
-            {
-                  "update": 496,
-                  "kl": 0.00562584,
-                  "entropy": 0.270084,
-                  "clip": 0.069228,
-                  "vf_loss": 15.155072,
-                  "pg_loss": 0.002021
-            },
-            {
-                  "update": 497,
-                  "kl": 0.00448101,
-                  "entropy": 0.255248,
-                  "clip": 0.10951,
-                  "vf_loss": 23.954565,
-                  "pg_loss": 0.007301
-            },
-            {
-                  "update": 498,
-                  "kl": 0.00680309,
-                  "entropy": 0.265157,
-                  "clip": 0.097506,
-                  "vf_loss": 17.66588,
-                  "pg_loss": 0.001768
-            },
-            {
-                  "update": 499,
-                  "kl": 0.00113236,
-                  "entropy": 0.245053,
-                  "clip": 0.048633,
-                  "vf_loss": 16.028261,
-                  "pg_loss": -0.000809
-            },
-            {
-                  "update": 500,
-                  "kl": 0.00047129,
-                  "entropy": 0.224651,
-                  "clip": 0.059064,
-                  "vf_loss": 11.300684,
-                  "pg_loss": 0.002221
-            },
-            {
-                  "update": 501,
-                  "kl": -8.672e-05,
-                  "entropy": 0.25519,
-                  "clip": 0.081938,
-                  "vf_loss": 15.556024,
-                  "pg_loss": 0.001802
-            },
-            {
-                  "update": 502,
-                  "kl": 0.0011607,
-                  "entropy": 0.244912,
-                  "clip": 0.031412,
-                  "vf_loss": 22.186896,
-                  "pg_loss": -1e-06
-            },
-            {
-                  "update": 503,
-                  "kl": 0.00583014,
-                  "entropy": 0.242073,
-                  "clip": 0.048483,
-                  "vf_loss": 15.746674,
-                  "pg_loss": 0.007079
-            },
-            {
-                  "update": 504,
-                  "kl": 0.00216127,
-                  "entropy": 0.256603,
-                  "clip": 0.056823,
-                  "vf_loss": 13.581441,
-                  "pg_loss": -0.000405
-            },
-            {
-                  "update": 505,
-                  "kl": 0.00441757,
-                  "entropy": 0.253262,
-                  "clip": 0.083496,
-                  "vf_loss": 22.783346,
-                  "pg_loss": 0.005633
-            },
-            {
-                  "update": 506,
-                  "kl": 0.00116154,
-                  "entropy": 0.252361,
-                  "clip": 0.075597,
-                  "vf_loss": 21.291613,
-                  "pg_loss": 0.008699
-            },
-            {
-                  "update": 507,
-                  "kl": 0.00520083,
-                  "entropy": 0.258639,
-                  "clip": 0.067242,
-                  "vf_loss": 20.81249,
-                  "pg_loss": 0.000499
-            },
-            {
-                  "update": 508,
-                  "kl": 0.00514871,
-                  "entropy": 0.225114,
-                  "clip": 0.07373,
-                  "vf_loss": 11.998969,
-                  "pg_loss": 0.012873
-            },
-            {
-                  "update": 509,
-                  "kl": 0.00499462,
-                  "entropy": 0.252188,
-                  "clip": 0.073242,
-                  "vf_loss": 11.383245,
-                  "pg_loss": -0.009737
-            },
-            {
-                  "update": 510,
-                  "kl": 0.00547863,
-                  "entropy": 0.257348,
-                  "clip": 0.076596,
-                  "vf_loss": 20.487953,
-                  "pg_loss": -0.00089
-            },
-            {
-                  "update": 511,
-                  "kl": 0.00687797,
-                  "entropy": 0.242706,
-                  "clip": 0.074371,
-                  "vf_loss": 17.868741,
-                  "pg_loss": -0.004462
-            },
-            {
-                  "update": 512,
-                  "kl": 0.00726387,
-                  "entropy": 0.247307,
-                  "clip": 0.064899,
-                  "vf_loss": 11.634306,
-                  "pg_loss": -0.001819
-            },
-            {
-                  "update": 513,
-                  "kl": 0.00195902,
-                  "entropy": 0.263665,
-                  "clip": 0.036516,
-                  "vf_loss": 15.181585,
-                  "pg_loss": -0.002611
-            },
-            {
-                  "update": 514,
-                  "kl": 0.00402653,
-                  "entropy": 0.23413,
-                  "clip": 0.055169,
-                  "vf_loss": 17.574119,
-                  "pg_loss": -0.001679
-            },
-            {
-                  "update": 515,
-                  "kl": 0.00362303,
-                  "entropy": 0.241497,
-                  "clip": 0.076596,
-                  "vf_loss": 23.809636,
-                  "pg_loss": -0.004884
-            }
+            {"update": 562, "kl": 0.00325568, "entropy": 0.25127, "clip": 0.086616, "vf_loss": 17.363494, "pg_loss": 0.007313},
+            {"update": 563, "kl": 0.00285988, "entropy": 0.249398, "clip": 0.098003, "vf_loss": 14.389581, "pg_loss": 0.005038},
+            {"update": 564, "kl": 0.0046644, "entropy": 0.248255, "clip": 0.077619, "vf_loss": 12.14059, "pg_loss": 0.005502},
+            {"update": 565, "kl": 0.00659082, "entropy": 0.237697, "clip": 0.048976, "vf_loss": 11.97686, "pg_loss": -0.003472},
+            {"update": 566, "kl": 0.00098844, "entropy": 0.259386, "clip": 0.093557, "vf_loss": 19.222217, "pg_loss": 0.000256},
+            {"update": 567, "kl": 0.00783534, "entropy": 0.256625, "clip": 0.089313, "vf_loss": 22.393935, "pg_loss": 0.00786},
+            {"update": 568, "kl": 0.00505867, "entropy": 0.262037, "clip": 0.096937, "vf_loss": 14.058614, "pg_loss": 0.002456},
+            {"update": 569, "kl": 0.00893862, "entropy": 0.267086, "clip": 0.052734, "vf_loss": 17.249691, "pg_loss": -0.001739},
+            {"update": 570, "kl": 0.00269141, "entropy": 0.263744, "clip": 0.065013, "vf_loss": 11.958687, "pg_loss": -0.001289},
+            {"update": 571, "kl": 0.0050436, "entropy": 0.256817, "clip": 0.065758, "vf_loss": 17.453359, "pg_loss": 0.001396},
+            {"update": 572, "kl": 0.00363279, "entropy": 0.240482, "clip": 0.08162, "vf_loss": 17.892743, "pg_loss": 0.009018},
+            {"update": 573, "kl": 0.00553142, "entropy": 0.265745, "clip": 0.080718, "vf_loss": 19.234612, "pg_loss": 0.002777},
+            {"update": 574, "kl": 0.00132551, "entropy": 0.265306, "clip": 0.089898, "vf_loss": 16.473377, "pg_loss": 0.001942},
+            {"update": 575, "kl": 0.00625251, "entropy": 0.280544, "clip": 0.04987, "vf_loss": 9.350783, "pg_loss": -0.005294},
+            {"update": 576, "kl": 0.00640846, "entropy": 0.256836, "clip": 0.095599, "vf_loss": 15.165731, "pg_loss": 0.003523},
+            {"update": 577, "kl": 0.00396302, "entropy": 0.264124, "clip": 0.090506, "vf_loss": 11.940882, "pg_loss": 0.006377},
+            {"update": 578, "kl": 0.00615282, "entropy": 0.257064, "clip": 0.067434, "vf_loss": 16.070674, "pg_loss": 0.000582},
+            {"update": 579, "kl": 0.0072059, "entropy": 0.287525, "clip": 0.088326, "vf_loss": 10.679425, "pg_loss": -0.001441},
+            {"update": 580, "kl": 0.00564773, "entropy": 0.260838, "clip": 0.102203, "vf_loss": 10.502857, "pg_loss": 0.011285},
+            {"update": 581, "kl": 0.00172541, "entropy": 0.262584, "clip": 0.087345, "vf_loss": 15.336681, "pg_loss": -0.001644},
+            {"update": 582, "kl": 0.00111609, "entropy": 0.275084, "clip": 0.09743, "vf_loss": 19.499469, "pg_loss": 0.011035},
+            {"update": 583, "kl": 0.00750312, "entropy": 0.272209, "clip": 0.064047, "vf_loss": 9.279644, "pg_loss": -0.000845},
+            {"update": 584, "kl": 0.0070472, "entropy": 0.246999, "clip": 0.065794, "vf_loss": 11.845275, "pg_loss": -0.004472},
+            {"update": 585, "kl": 0.00587615, "entropy": 0.271443, "clip": 0.049716, "vf_loss": 10.107524, "pg_loss": 0.001103},
+            {"update": 586, "kl": 0.00177839, "entropy": 0.251391, "clip": 0.036719, "vf_loss": 11.858191, "pg_loss": -0.006653},
+            {"update": 587, "kl": 0.00267434, "entropy": 0.27409, "clip": 0.071023, "vf_loss": 19.10424, "pg_loss": -0.005591},
+            {"update": 588, "kl": 8.441e-05, "entropy": 0.264331, "clip": 0.097593, "vf_loss": 12.674917, "pg_loss": 0.004787},
+            {"update": 589, "kl": 0.00634361, "entropy": 0.266098, "clip": 0.087334, "vf_loss": 12.994846, "pg_loss": 0.005192},
+            {"update": 590, "kl": 0.00016511, "entropy": 0.259384, "clip": 0.062669, "vf_loss": 12.045284, "pg_loss": 0.004479},
+            {"update": 591, "kl": 0.00221662, "entropy": 0.265379, "clip": 0.052475, "vf_loss": 10.960851, "pg_loss": 0.002406},
+            {"update": 592, "kl": 0.00295751, "entropy": 0.248668, "clip": 0.061266, "vf_loss": 23.664153, "pg_loss": 0.004273},
+            {"update": 593, "kl": 0.00211867, "entropy": 0.268452, "clip": 0.088373, "vf_loss": 12.050647, "pg_loss": -0.001722},
+            {"update": 594, "kl": 0.00289016, "entropy": 0.282959, "clip": 0.070176, "vf_loss": 12.151467, "pg_loss": -0.000187},
+            {"update": 595, "kl": 0.00464202, "entropy": 0.24409, "clip": 0.073177, "vf_loss": 10.592988, "pg_loss": -7.2e-05},
+            {"update": 596, "kl": 0.00337092, "entropy": 0.261333, "clip": 0.051313, "vf_loss": 10.322842, "pg_loss": 0.008033},
+            {"update": 597, "kl": 0.0049346, "entropy": 0.27402, "clip": 0.0816, "vf_loss": 12.927295, "pg_loss": 0.005585},
+            {"update": 598, "kl": 0.00407068, "entropy": 0.282367, "clip": 0.062554, "vf_loss": 14.71051, "pg_loss": 0.002976},
+            {"update": 599, "kl": 0.00534306, "entropy": 0.264051, "clip": 0.073845, "vf_loss": 19.299657, "pg_loss": 0.004985},
+            {"update": 600, "kl": 0.01069582, "entropy": 0.2659, "clip": 0.087141, "vf_loss": 15.559018, "pg_loss": 0.000972},
+            {"update": 601, "kl": 0.00275699, "entropy": 0.260641, "clip": 0.055215, "vf_loss": 14.523527, "pg_loss": -0.001911},
+            {"update": 602, "kl": 0.00055191, "entropy": 0.269655, "clip": 0.060678, "vf_loss": 13.037259, "pg_loss": -0.001372},
+            {"update": 603, "kl": 0.00391534, "entropy": 0.271017, "clip": 0.068596, "vf_loss": 17.093625, "pg_loss": -0.003544},
+            {"update": 604, "kl": 0.00311897, "entropy": 0.266782, "clip": 0.061198, "vf_loss": 15.393233, "pg_loss": 0.001609},
+            {"update": 605, "kl": 0.00421918, "entropy": 0.26401, "clip": 0.092135, "vf_loss": 19.936887, "pg_loss": 0.002228},
+            {"update": 606, "kl": 0.0112975, "entropy": 0.261901, "clip": 0.08459, "vf_loss": 15.696782, "pg_loss": 0.001538},
+            {"update": 607, "kl": 0.0044976, "entropy": 0.267425, "clip": 0.094219, "vf_loss": 20.600314, "pg_loss": 0.017854},
+            {"update": 608, "kl": 0.00580828, "entropy": 0.275884, "clip": 0.104885, "vf_loss": 19.015289, "pg_loss": 0.000229},
+            {"update": 609, "kl": 0.00799429, "entropy": 0.264744, "clip": 0.113359, "vf_loss": 18.663722, "pg_loss": 0.00228},
+            {"update": 610, "kl": 0.00610415, "entropy": 0.256845, "clip": 0.076602, "vf_loss": 10.524839, "pg_loss": 0.007646},
+            {"update": 611, "kl": 0.00061568, "entropy": 0.262771, "clip": 0.103705, "vf_loss": 17.68874, "pg_loss": -0.009436},
+            {"update": 612, "kl": 0.00385479, "entropy": 0.288157, "clip": 0.101639, "vf_loss": 15.439382, "pg_loss": -0.006694},
+            {"update": 613, "kl": 0.0072632, "entropy": 0.273661, "clip": 0.118034, "vf_loss": 17.408322, "pg_loss": 0.003899},
+            {"update": 614, "kl": 0.00483033, "entropy": 0.268835, "clip": 0.115667, "vf_loss": 13.543398, "pg_loss": 0.006223},
+            {"update": 615, "kl": 0.00923481, "entropy": 0.277713, "clip": 0.117668, "vf_loss": 16.997593, "pg_loss": -0.000732},
+            {"update": 616, "kl": 0.00596167, "entropy": 0.26076, "clip": 0.069193, "vf_loss": 13.983295, "pg_loss": 0.002254},
+            {"update": 617, "kl": 0.00749755, "entropy": 0.259384, "clip": 0.093056, "vf_loss": 18.619275, "pg_loss": -0.007926},
+            {"update": 618, "kl": 0.00139365, "entropy": 0.282461, "clip": 0.062004, "vf_loss": 15.642549, "pg_loss": -0.000879},
+            {"update": 619, "kl": 0.01428847, "entropy": 0.279514, "clip": 0.103244, "vf_loss": 19.128266, "pg_loss": 0.006063},
+            {"update": 620, "kl": 0.00659798, "entropy": 0.27368, "clip": 0.09375, "vf_loss": 16.378087, "pg_loss": -0.002739},
+            {"update": 621, "kl": 0.00337646, "entropy": 0.26853, "clip": 0.074308, "vf_loss": 13.214813, "pg_loss": -4.1e-05},
+            {"update": 622, "kl": 0.00540401, "entropy": 0.250568, "clip": 0.08724, "vf_loss": 13.286223, "pg_loss": 0.000237},
+            {"update": 623, "kl": 0.00872101, "entropy": 0.28827, "clip": 0.090021, "vf_loss": 18.798259, "pg_loss": 0.002205},
+            {"update": 624, "kl": 0.00970797, "entropy": 0.2627, "clip": 0.100185, "vf_loss": 17.126328, "pg_loss": 0.008216},
+            {"update": 625, "kl": 0.00056861, "entropy": 0.258522, "clip": 0.08373, "vf_loss": 12.381654, "pg_loss": 0.005749},
+            {"update": 626, "kl": -0.0004966, "entropy": 0.274015, "clip": 0.082079, "vf_loss": 14.24624, "pg_loss": -0.003455},
+            {"update": 627, "kl": 0.00734499, "entropy": 0.264956, "clip": 0.108192, "vf_loss": 14.437463, "pg_loss": 0.001733},
+            {"update": 628, "kl": 0.00169633, "entropy": 0.257523, "clip": 0.077536, "vf_loss": 15.781148, "pg_loss": 0.003781},
+            {"update": 629, "kl": 0.00863857, "entropy": 0.254483, "clip": 0.087738, "vf_loss": 10.498538, "pg_loss": 0.007046},
+            {"update": 630, "kl": 0.00443635, "entropy": 0.268443, "clip": 0.091, "vf_loss": 14.32252, "pg_loss": 0.002778},
+            {"update": 631, "kl": 0.01159376, "entropy": 0.260367, "clip": 0.117125, "vf_loss": 24.063451, "pg_loss": 0.007362},
+            {"update": 632, "kl": 0.00246029, "entropy": 0.263438, "clip": 0.077823, "vf_loss": 11.329222, "pg_loss": -0.002514},
+            {"update": 633, "kl": 0.00427492, "entropy": 0.262728, "clip": 0.054194, "vf_loss": 22.426148, "pg_loss": -0.001978},
+            {"update": 634, "kl": 0.00146736, "entropy": 0.264689, "clip": 0.066713, "vf_loss": 22.039757, "pg_loss": 0.002137},
+            {"update": 635, "kl": 0.00064494, "entropy": 0.255335, "clip": 0.059958, "vf_loss": 14.503457, "pg_loss": 0.014315},
+            {"update": 636, "kl": 0.00531216, "entropy": 0.265005, "clip": 0.071293, "vf_loss": 9.064674, "pg_loss": 0.003093},
+            {"update": 637, "kl": 0.00707221, "entropy": 0.249632, "clip": 0.092134, "vf_loss": 18.263348, "pg_loss": 0.001321},
+            {"update": 638, "kl": 0.00407164, "entropy": 0.252847, "clip": 0.083949, "vf_loss": 14.226525, "pg_loss": 0.000175},
+            {"update": 639, "kl": 0.03493165, "entropy": 0.266301, "clip": 0.097222, "vf_loss": 26.709688, "pg_loss": -0.00032},
+            {"update": 640, "kl": 0.00284205, "entropy": 0.258293, "clip": 0.086549, "vf_loss": 17.966095, "pg_loss": 0.001226},
+            {"update": 641, "kl": 0.00237718, "entropy": 0.265869, "clip": 0.041226, "vf_loss": 17.961481, "pg_loss": 0.000672}
       ],
       "bc": [
             {
@@ -1419,44 +459,12 @@
             }
       ],
       "comparison": [
-            {
-                  "run": "heuristic_150_20260515_115841",
-                  "label": "Heuristic",
-                  "games": 150,
-                  "avg_floor": 15.78,
-                  "avg_reward": 8.44,
-                  "win_rate": 0.0,
-                  "act2_rate": 26.0,
-                  "floor20_rate": 23.3,
-                  "elite": "176/215",
-                  "boss": "39/100"
-            },
-            {
-                  "run": "bc_150_20260515_172740",
-                  "label": "BC checkpoint",
-                  "games": 150,
-                  "avg_floor": 12.81,
-                  "avg_reward": -0.55,
-                  "win_rate": 0.0,
-                  "act2_rate": 12.0,
-                  "floor20_rate": 12.0,
-                  "elite": "121/179",
-                  "boss": "19/62"
-            },
-            {
-                  "run": "ppo_current_150_20260515_172740",
-                  "label": "PPO checkpoint",
-                  "games": 150,
-                  "avg_floor": 14.7,
-                  "avg_reward": 2.37,
-                  "win_rate": 0.0,
-                  "act2_rate": 18.7,
-                  "floor20_rate": 18.0,
-                  "elite": "116/155",
-                  "boss": "28/92"
-            }
+            {"run": "heuristic_150_20260515_115841", "label": "Heuristic", "games": 150, "avg_floor": 15.78, "avg_reward": 8.44, "win_rate": 0.0, "act2_rate": 26.0, "floor20_rate": 23.3, "elite": "176/215", "boss": "39/100"},
+            {"run": "bc_150_20260515_172740", "label": "BC checkpoint", "games": 150, "avg_floor": 12.81, "avg_reward": -0.55, "win_rate": 0.0, "act2_rate": 12.0, "floor20_rate": 12.0, "elite": "121/179", "boss": "19/62"},
+            {"run": "ppo_current_150_20260515_172740", "label": "PPO 4k (150-game)", "games": 150, "avg_floor": 14.7, "avg_reward": 2.37, "win_rate": 0.0, "act2_rate": 18.7, "floor20_rate": 18.0, "elite": "116/155", "boss": "28/92"},
+            {"run": "ppo_current_200_20260517_141834", "label": "PPO 5k (200-game)", "games": 200, "avg_floor": 15.44, "avg_reward": 4.03, "win_rate": 0.0, "act2_rate": 20.0, "floor20_rate": 18.5, "elite": "175/219", "boss": "41/132"}
       ]
-};
+    };
 
     let state = structuredClone(snapshot);
 
