@@ -257,13 +257,15 @@ class TransitionBuffer:
 # ---------------------------------------------------------------------------
 class WorkerAgent:
     def __init__(self, trainer: PPOTrainer, model_path: str, out_dir: str,
-                 worker_id: str, reload_every: int = 5, max_games: int = 0):
+                 worker_id: str, reload_every: int = 5, max_games: int = 0,
+                 restart_every: int = 0):
         self.trainer = trainer
         self.model_path = model_path
         self.out_dir = out_dir
         self.worker_id = worker_id
         self.reload_every = reload_every
         self.max_games = max(0, int(max_games))
+        self.restart_every = max(0, int(restart_every))
 
         self.buffer = TransitionBuffer()
         self.reward_tracker = RewardTracker()
@@ -667,6 +669,9 @@ class WorkerAgent:
             if self.max_games > 0 and self.total_games >= self.max_games:
                 self._stop_requested = True
                 log(f"Game target reached: {self.total_games}/{self.max_games}")
+            elif self.restart_every > 0 and self.total_games >= self.restart_every:
+                log(f"Restart-every threshold reached: {self.total_games}/{self.restart_every} — exiting for RAM cleanup")
+                self._schedule_exit()
 
     def on_out_of_game(self) -> Action:
         log(f"OUT OF GAME (games: {self.total_games})")
@@ -693,6 +698,8 @@ def main():
                         help="Reload model every N games")
     parser.add_argument("--games", type=int, default=0,
                         help="Stop after this many completed games (0 = unlimited)")
+    parser.add_argument("--restart-every", type=int, default=0,
+                        help="Exit after this many games to free RAM; GUI relaunches (0 = disabled)")
     parser.add_argument("--verbose", action="store_true",
                         help="Write detailed per-state/per-action debug logs")
     args = parser.parse_args()
@@ -701,7 +708,8 @@ def main():
     _init_log(args.id)
     log("=== ROLLOUT WORKER STARTING ===")
     log(f"Config: model={args.model} out={args.out} id={args.id} "
-        f"reload_every={args.reload_every} max_games={args.games} verbose={VERBOSE}")
+        f"reload_every={args.reload_every} max_games={args.games} "
+        f"restart_every={args.restart_every} verbose={VERBOSE}")
 
     model_path = os.path.join(_root, args.model)
     out_dir = os.path.join(_root, args.out)
@@ -723,6 +731,7 @@ def main():
         out_dir=out_dir, worker_id=args.id,
         reload_every=args.reload_every,
         max_games=args.games,
+        restart_every=args.restart_every,
     )
 
     coord = Coordinator()

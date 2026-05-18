@@ -215,6 +215,7 @@ class EvalAgent:
         seeds: Optional[list[str]] = None,
         top_actions: int = 0,
         completed_rows: Optional[list[dict]] = None,
+        restart_every: int = 0,
     ):
         self.trainer = trainer
         self.target_games = target_games
@@ -223,9 +224,11 @@ class EvalAgent:
         self.model_label = model_label
         self.seeds = seeds or []
         self.top_actions = top_actions
+        self.restart_every = max(0, int(restart_every))
         self.reward_tracker = RewardTracker()
         completed_rows = completed_rows or []
         self.games_played = len(completed_rows)
+        self._games_at_start = self.games_played
         self.total_steps = 0
         self.episode_reward = 0.0
         self.initialized = False
@@ -287,6 +290,13 @@ class EvalAgent:
 
         if terminal:
             self._end_game(gs, victory)
+            games_this_process = self.games_played - self._games_at_start
+            if (self.restart_every > 0
+                    and games_this_process >= self.restart_every
+                    and self.games_played < self.target_games):
+                log(f"Restart-every threshold reached: {games_this_process}/{self.restart_every} "
+                    f"— exiting for RAM cleanup ({self.games_played}/{self.target_games} total)")
+                os._exit(0)
             if self.games_played >= self.target_games:
                 log("target games reached — requesting exit")
                 summary = (
@@ -436,6 +446,8 @@ def main() -> None:
                         help="Log top N model actions at each RL decision")
     parser.add_argument("--resume-run", action="store_true",
                         help="Resume from completed rows in logs/eval_stats.csv for this run tag")
+    parser.add_argument("--restart-every", type=int, default=0,
+                        help="Exit after this many games to free RAM; GUI relaunches (0 = disabled)")
     parser.add_argument("--log-file", type=str, default=None,
                         help="Debug log path for this eval run")
     parser.add_argument("--verbose", action="store_true",
@@ -497,6 +509,7 @@ def main() -> None:
         seeds=seeds,
         top_actions=max(0, args.top_actions),
         completed_rows=completed_rows,
+        restart_every=args.restart_every,
     )
 
     coord = Coordinator()

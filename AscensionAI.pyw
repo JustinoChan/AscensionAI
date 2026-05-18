@@ -226,7 +226,8 @@ def write_config(command: str | None = None, *, verbose: bool = True):
 def build_command(mode: str, worker_id: int = 1, games: int = 20,
                   bc_games: int = 400, ppo_games: int = 200,
                   bc_epochs: int = 50, ent_coef: float = 0.001,
-                  worker_games: int = 0, verbose: bool = False) -> str:
+                  worker_games: int = 0, verbose: bool = False,
+                  restart_every: int = 0) -> str:
     py = escape_properties_path(VENV_PYTHON)
     root = escape_properties_path(ROOT)
     verbose_flag = " --verbose" if verbose else ""
@@ -237,6 +238,8 @@ def build_command(mode: str, worker_id: int = 1, games: int = 20,
         )
         if int(worker_games) > 0:
             cmd += f" --games {int(worker_games)}"
+        if int(restart_every) > 0:
+            cmd += f" --restart-every {int(restart_every)}"
         cmd += verbose_flag
     elif mode == "train":
         cmd = f"{py} {root}/scripts/train_ppo.py --save models/ppo_sts.pt --resume models/ppo_sts.pt --save-every 5 --ent-coef {ent_coef}{verbose_flag}"
@@ -295,7 +298,8 @@ def build_bc_collect_command(worker_id: int, games: int, *,
 def build_eval_command(*, policy: str, games: int, seed_file: str, run_tag: str,
                        model: str | None = None, top_actions: int = 0,
                        verbose: bool = False, resume_run: bool = False,
-                       log_file: str | None = None) -> str:
+                       log_file: str | None = None,
+                       restart_every: int = 0) -> str:
     """Build a CommunicationMod command for one fixed-seed eval run."""
     py = escape_properties_path(VENV_PYTHON)
     root = escape_properties_path(ROOT)
@@ -309,6 +313,8 @@ def build_eval_command(*, policy: str, games: int, seed_file: str, run_tag: str,
     )
     if resume_run:
         cmd += " --resume-run"
+    if int(restart_every) > 0:
+        cmd += f" --restart-every {int(restart_every)}"
     if log_file:
         safe_log_file = str(log_file).replace("\\", "/")
         cmd += f" --log-file {safe_log_file}"
@@ -509,6 +515,7 @@ class AscensionApp:
         self._worker_restarts: dict[int, int] = {}
         self._worker_launch_time: dict[int, float] = {}
         self._worker_game_targets: dict[int, int] = {}
+        self._worker_games_at_launch: dict[int, int] = {}
         self._parallel_launch_started_at: float = 0.0
         self._n_workers: int = 0
         self._eval_set_started_at: float = 0.0
@@ -751,6 +758,22 @@ class AscensionApp:
             text="total across all worker slots; 0 = keep running",
         ).pack(side="left", padx=(8, 0))
 
+        # Restart STS every N games (RAM leak mitigation)
+        self.restart_sts_row = ttk.Frame(ctrl_frame)
+        self.restart_sts_row.pack(fill="x", pady=(6, 0))
+        ttk.Label(self.restart_sts_row, text="Restart STS Every:").pack(side="left", padx=(0, 5))
+        self.restart_sts_var = tk.IntVar(value=0)
+        self.restart_sts_spin = ttk.Spinbox(
+            self.restart_sts_row,
+            from_=0, to=10000, increment=25,
+            textvariable=self.restart_sts_var, width=8,
+        )
+        self.restart_sts_spin.pack(side="left")
+        ttk.Label(
+            self.restart_sts_row,
+            text="games per instance; 0 = disabled",
+        ).pack(side="left", padx=(8, 0))
+
         # Fixed-seed evaluation controls. Visible only for Evaluate on Seed Set.
         self.eval_policy_row = ttk.Frame(ctrl_frame)
         self.eval_policy_row.pack(fill="x", pady=(6, 0))
@@ -925,6 +948,15 @@ class AscensionApp:
             value = 0
         value = max(0, min(100000, value))
         self.ppo_workers_games_var.set(value)
+        return value
+
+    def _get_restart_sts_every(self) -> int:
+        try:
+            value = int(self.restart_sts_var.get())
+        except (tk.TclError, ValueError):
+            value = 0
+        value = max(0, min(10000, value))
+        self.restart_sts_var.set(value)
         return value
 
     def _compute_worker_game_targets(self, total_games: int,
@@ -1496,6 +1528,11 @@ class AscensionApp:
             self.ppo_workers_games_row.pack(fill="x", pady=(6, 0))
         else:
             self.ppo_workers_games_row.pack_forget()
+
+        if mode in ("worker", "collect", "eval_set"):
+            self.restart_sts_row.pack(fill="x", pady=(6, 0))
+        else:
+            self.restart_sts_row.pack_forget()
 
         if mode == "eval_set":
             self._refresh_seed_file_options()
@@ -2606,7 +2643,10 @@ class AscensionApp:
             else:
                 self._append_log("Eval Set", f"Running {runs[0]['label']} eval only.")
 
+            restart_every = self._get_restart_sts_every()
             max_restarts = 3
+            if restart_every > 0 and games > 0:
+                max_restarts = max(3, (games // restart_every) + 3)
             completed_all = True
             for run in runs:
                 if not self.running:
@@ -2643,6 +2683,7 @@ class AscensionApp:
                             run_tag=run["tag"], model=model,
                             top_actions=int(run["top_actions"]), verbose=verbose,
                             resume_run=resume_run, log_file=log_rel,
+                            restart_every=restart_every,
                         )
                         attempt_label = "resume" if resume_run else "fresh"
                         self._append_log(
@@ -2859,6 +2900,7 @@ class AscensionApp:
             self._worker_checkpoint_paths.clear()
             self._worker_restarts.clear()
             self._worker_launch_time.clear()
+            self._worker_games_at_launch.clear()
             self._worker_game_targets = dict(targets)
             self._parallel_launch_started_at = time.time()
             self._n_workers = 0
@@ -2938,9 +2980,11 @@ class AscensionApp:
                 time.sleep(0.1)
 
                 target_games = int(self._worker_game_targets.get(i, 0) or 0)
+                restart_every = self._get_restart_sts_every()
                 cmd = build_command("worker", worker_id=i,
                                     worker_games=target_games,
-                                    verbose=bool(self.verbose_var.get()))
+                                    verbose=bool(self.verbose_var.get()),
+                                    restart_every=restart_every)
                 self._worker_commands[i] = cmd
                 self._worker_modes[i] = "worker"
                 write_config(cmd, verbose=bool(self.verbose_var.get()))
@@ -2958,6 +3002,7 @@ class AscensionApp:
                 self.worker_launcher_pids[i] = proc.pid
                 self.worker_sts_pids[i] = set()
                 self._worker_restarts[i] = 0
+                self._worker_games_at_launch[i] = 0
                 self._worker_launch_time[i] = time.time()
                 _logger.info(f"Worker {i}: launcher PID={proc.pid}, "
                              f"total processes tracked={len(self.processes)}")
@@ -3341,8 +3386,14 @@ class AscensionApp:
                 _logger.error(f"_relaunch_worker: no stored command for worker {worker_id}")
                 return
             original_target = self._worker_game_targets.get(worker_id, 0)
+            completed = self._count_worker_completed_games(worker_id)
+            last_launch_completed = self._worker_games_at_launch.get(worker_id, 0)
+            games_since_launch = completed - last_launch_completed
+            restart_every = self._get_restart_sts_every()
+            is_planned_restart = (
+                restart_every > 0 and games_since_launch >= restart_every
+            )
             if original_target > 0:
-                completed = self._count_worker_completed_games(worker_id)
                 remaining = original_target - completed
                 if remaining <= 0:
                     _logger.info(
@@ -3358,12 +3409,20 @@ class AscensionApp:
                     "worker", worker_id=worker_id,
                     worker_games=remaining,
                     verbose=bool(self.verbose_var.get()),
+                    restart_every=restart_every,
                 )
                 self._worker_commands[worker_id] = cmd
                 _logger.info(
                     f"_relaunch_worker: worker {worker_id} adjusted target: "
                     f"{completed} done, {remaining} remaining (was {original_target})"
                 )
+            elif restart_every > 0:
+                cmd = build_command(
+                    "worker", worker_id=worker_id,
+                    verbose=bool(self.verbose_var.get()),
+                    restart_every=restart_every,
+                )
+                self._worker_commands[worker_id] = cmd
             worker_mode = self._worker_modes.get(worker_id, "worker")
             tab_name = f"BC {worker_id}" if worker_mode == "bc_collect" else f"Worker {worker_id}"
             write_config(cmd, verbose=bool(self.verbose_var.get()))
@@ -3372,11 +3431,21 @@ class AscensionApp:
             self.processes.append(proc)
             self.worker_launcher_pids[worker_id] = proc.pid
             self.worker_sts_pids[worker_id] = set()
-            self._worker_restarts[worker_id] = self._worker_restarts.get(worker_id, 0) + 1
+            if is_planned_restart:
+                _logger.info(
+                    f"Worker {worker_id}: planned RAM cleanup restart "
+                    f"({games_since_launch} games since last launch)"
+                )
+            else:
+                self._worker_restarts[worker_id] = self._worker_restarts.get(worker_id, 0) + 1
+            self._worker_games_at_launch[worker_id] = completed
             self._worker_launch_time[worker_id] = time.time()
             _logger.info(f"Worker {worker_id} relaunched: PID {proc.pid}")
-            self._append_log(tab_name,
-                             f"Relaunched STS instance (PID {proc.pid}, --skip-launcher)")
+            self._append_log(
+                tab_name,
+                f"{'RAM cleanup restart' if is_planned_restart else 'Relaunched'} "
+                f"STS instance (PID {proc.pid}, --skip-launcher)",
+            )
 
             threading.Thread(
                 target=self._capture_sts_pids_for_worker,
@@ -3971,6 +4040,7 @@ class AscensionApp:
         self._worker_checkpoint_paths.clear()
         self._worker_launch_time.clear()
         self._worker_game_targets.clear()
+        self._worker_games_at_launch.clear()
 
         java_orphans = self._kill_orphan_sts_instances()
         py_orphans = self._kill_orphan_python_scripts()
