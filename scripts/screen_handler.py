@@ -22,37 +22,39 @@ from spirecomm.communication.action import Action, ChooseAction
 GOOD_CARDS = frozenset({
     # Powers — scaling / build-defining
     "inflame", "demon form", "metallicize", "barricade", "corruption",
-    "feel no pain", "dark embrace", "evolve", "berserk",
-    # Skills — universally strong
+    "feel no pain", "dark embrace", "evolve",
+    # Skills — exhaust engine (S/A-tier per modern consensus)
     "shrug it off", "offering", "battle trance", "impervious",
     "disarm", "shockwave", "burning pact", "double tap",
-    "spot weakness",
+    "spot weakness", "flame barrier", "second wind", "true grit",
+    "power through", "seeing red", "bloodletting", "exhume",
     # Attacks — high impact
-    "uppercut", "headbutt", "feed", "reaper", "whirlwind",
-    "immolate", "fiend fire", "limit break",
+    "pommel strike", "uppercut", "headbutt", "feed", "reaper",
+    "whirlwind", "immolate", "fiend fire", "limit break",
+    "body slam",
     # Colorless
     "apotheosis",
-    "hand of greed", "master of strategy", "dark shackles", "panic button",
+    "master of strategy", "dark shackles", "panic button",
     "finesse", "flash of steel", "trip",
 })
 OK_CARDS = frozenset({
     # Common attacks
-    "anger", "cleave", "thunderclap", "iron wave", "body slam",
-    "heavy blade", "pommel strike", "sword boomerang",
+    "anger", "cleave", "thunderclap", "iron wave",
+    "heavy blade", "sword boomerang",
     # Uncommon attacks
-    "carnage", "pummel", "dropkick", "blood for blood",
-    "hemokinesis", "sever soul", "bludgeon",
+    "carnage", "pummel", "dropkick",
+    "hemokinesis", "bludgeon",
     # Skills
-    "flame barrier", "second wind", "ghostly armor", "clothesline",
-    "power through", "true grit", "entrench", "intimidate",
-    "sentinel", "seeing red", "warcry", "armaments", "exhume",
+    "ghostly armor", "clothesline",
+    "entrench", "intimidate",
+    "warcry", "armaments",
     # Powers
-    "fire breathing", "brutality", "rage", "juggernaut",
-    "combust", "bloodletting", "flex", "twin strike", "perfected strike",
+    "brutality", "rage", "juggernaut",
 })
 PREMIUM_CARDS = frozenset({
     "offering", "immolate", "feed", "reaper", "impervious",
-    "demon form", "corruption", "barricade", "apotheosis",
+    "demon form", "corruption", "apotheosis",
+    "fiend fire", "battle trance", "shockwave",
 })
 EARLY_ATTACKS = frozenset({
     "pommel strike", "anger", "cleave", "twin strike", "headbutt",
@@ -60,7 +62,7 @@ EARLY_ATTACKS = frozenset({
 })
 AVOID_CARDS = frozenset({
     "clash", "berserk", "havoc", "wild strike", "searing blow",
-    "fire breathing", "rupture", "barricade",
+    "fire breathing", "rupture", "perfected strike",
 })
 JUNK_CARDS = frozenset({
     "wound", "burn", "dazed", "slimed", "void",
@@ -125,6 +127,19 @@ def _choice_indices(lower: list[str], keyword: str, *, blocked: bool = False) ->
     return out
 
 
+DIMINISHING_CARDS: dict[str, int] = {
+    "battle trance": 1,
+}
+
+
+def _deck_count(gs, card_name: str) -> int:
+    deck = list(getattr(gs, "deck", []) or [])
+    return sum(
+        1 for c in deck
+        if (getattr(c, "name", "") or "").lower().rstrip("+").strip() == card_name
+    )
+
+
 def pick_card_reward(choice_list: list, gs=None) -> int:
     lower = [str(c).lower() for c in choice_list]
     act = int(getattr(gs, "act", 1) or 1) if gs is not None else 1
@@ -154,6 +169,11 @@ def pick_card_reward(choice_list: list, gs=None) -> int:
             "power through",
         }:
             score -= 1.5
+        if gs is not None and name in DIMINISHING_CARDS:
+            cap = DIMINISHING_CARDS[name]
+            copies = _deck_count(gs, name)
+            if copies >= cap:
+                score -= 15.0
         if score > best_score:
             best_score = score
             best_idx = i
@@ -423,12 +443,92 @@ def pick_rest(choice_list: list, gs) -> int:
     return 0
 
 
+def _event_id_norm(gs) -> str:
+    """Normalized event ID for matching."""
+    scr = getattr(gs, "screen", None)
+    raw = str(getattr(scr, "event_id", "") or "")
+    return raw.lower().replace(" ", "").replace("_", "").replace("'", "")
+
+
+def _pick_keyword(choices: list[str], prefer: list[str],
+                  avoid: list[str] | None = None) -> int:
+    """Pick best option by keyword matching."""
+    avoid = avoid or []
+    for keyword in prefer:
+        for i, c in enumerate(choices):
+            if keyword in c and not _choice_is_locked(c):
+                return i
+    avoid_set: set[int] = set()
+    for keyword in avoid:
+        for i, c in enumerate(choices):
+            if keyword in c:
+                avoid_set.add(i)
+    for i, c in enumerate(choices):
+        if i not in avoid_set and not _choice_is_locked(c):
+            return i
+    for i, c in enumerate(choices):
+        if not _choice_is_locked(c):
+            return i
+    return 0
+
+
 def pick_event(choice_list: list, gs) -> int:
     lower = [str(c).lower() for c in choice_list]
     hp_pct = int(getattr(gs, "current_hp", 0) or 0) / max(
         1, int(getattr(gs, "max_hp", 1) or 1))
     if len(lower) > 3 and any(c.startswith("card") for c in lower):
         return pick_hand_select(choice_list)
+
+    eid = _event_id_norm(gs)
+
+    # Sssserpent — Doubt curse not worth the gold
+    if "serpent" in eid:
+        return _pick_keyword(lower, ["disagree", "refuse", "leave"],
+                             ["agree", "accept"])
+
+    # Mushrooms — Pet heals 25%, Stomp gives Parasite curse
+    if "mushroom" in eid:
+        return _pick_keyword(lower, ["pet", "eat", "heal"],
+                             ["stomp"])
+
+    # Vampires — losing Burning Blood is devastating for Ironclad
+    if "vampire" in eid:
+        return _pick_keyword(lower, ["refuse", "no", "leave"],
+                             ["accept", "agree"])
+
+    # The Cleric — remove a card is usually better than heal
+    if "cleric" in eid:
+        return _pick_keyword(lower, ["purify", "purge", "remove"],
+                             ["leave"])
+
+    # Big Fish — heal if low HP, else max HP; avoid curse relic box
+    if "bigfish" in eid:
+        if hp_pct < 0.6:
+            return _pick_keyword(lower, ["banana", "heal", "nourish"])
+        return _pick_keyword(lower, ["donut", "max"],
+                             ["box", "curse"])
+
+    # Living Wall — remove > upgrade
+    if "livingwall" in eid:
+        return _pick_keyword(lower, ["forget", "remove", "cut",
+                                     "grow", "upgrade"],
+                             ["change", "transform"])
+
+    # Knowing Skull — only interact at high HP
+    if "knowingskull" in eid:
+        if hp_pct < 0.5:
+            return _pick_keyword(lower, ["done", "leave", "go"])
+
+    # Golden Shrine — gold gain has a curse risk
+    if "goldenshrine" in eid:
+        if hp_pct < 0.4:
+            return _pick_keyword(lower, ["leave", "refuse"])
+
+    # Sensory Stone / Scrap Ooze — interact for relic (take damage)
+    if ("scrapooze" in eid or "sensorystone" in eid) and hp_pct < 0.3:
+        return _pick_keyword(lower, ["leave", "refuse"])
+
+    # Default behavior
     if hp_pct < 0.35:
         for i, c in enumerate(lower):
             if "leave" in c:
@@ -456,12 +556,13 @@ def pick_boss_relic(choice_list: list) -> int:
     lower = [str(c).lower() for c in choice_list]
     avoid = {
         "busted crown", "coffee dripper", "sozu", "runic dome",
-        "ectoplasm", "snecko eye", "velvet choker",
+        "ectoplasm", "snecko eye", "velvet choker", "calling bell",
+        "tiny house",
     }
     prefer = {
         "cursed key", "fusion hammer", "slavers collar", "mark of pain",
-        "black star", "calling bell", "empty cage", "astrolabe",
-        "pandoras box", "runic pyramid",
+        "black star", "empty cage", "astrolabe",
+        "runic pyramid",
     }
     for i, c in enumerate(lower):
         if c in prefer:
@@ -498,9 +599,11 @@ def pick_grid_card(choice_list: list) -> int:
 def _pick_grid_upgrade(choice_list: list) -> int:
     """Pick best card to upgrade from GRID."""
     upgrade_priority = [
-        "bash", "uppercut", "shockwave", "offering", "armaments",
-        "inflame", "demon form", "immolate", "feed", "limit break",
-        "impervious", "corruption", "apotheosis",
+        "bash", "offering", "limit break", "armaments",
+        "pommel strike", "impervious", "battle trance",
+        "shrug it off", "burning pact", "inflame", "true grit",
+        "demon form", "corruption", "immolate", "feed",
+        "uppercut", "shockwave", "apotheosis", "flame barrier",
     ]
     lower = [str(c).lower().rstrip("+") for c in choice_list]
     for card in upgrade_priority:
@@ -947,8 +1050,13 @@ def auto_handle_screen(
         if scr is not None and gold >= 30:
             for card in (getattr(scr, "cards", None) or []):
                 name = str(getattr(card, "name", "") or "")
+                name_lower = name.lower()
                 price = int(getattr(card, "price", 999) or 999)
-                if name.lower() in GOOD_CARDS and gold >= price:
+                if name_lower in DIMINISHING_CARDS:
+                    cap = DIMINISHING_CARDS[name_lower]
+                    if _deck_count(gs, name_lower) >= cap:
+                        continue
+                if name_lower in GOOD_CARDS and gold >= price:
                     return ChooseAction(name=name)
             if getattr(scr, "purge_available", False):
                 purge_cost = int(getattr(scr, "purge_cost", 999) or 999)
