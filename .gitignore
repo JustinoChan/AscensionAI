@@ -62,3 +62,6 @@ tmp/
 temp/
 *.tmp
 .venv*
+
+# Local docs
+roadmap.md

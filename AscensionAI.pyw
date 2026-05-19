@@ -335,8 +335,15 @@ def build_eval_command(*, policy: str, games: int, seed_file: str, run_tag: str,
     return cmd
 
 
-def launch_sts(skip_launcher: bool = False) -> subprocess.Popen:
-    args = [str(GAME_JAVA_EXE), "-jar", str(MTS_LAUNCHER)]
+JVM_HEAP_OPTIONS = ["Default", "512m", "1g", "1536m", "2g", "2560m", "3g", "4g"]
+
+
+def launch_sts(skip_launcher: bool = False,
+               jvm_heap: str = "Default") -> subprocess.Popen:
+    args = [str(GAME_JAVA_EXE)]
+    if jvm_heap and jvm_heap != "Default":
+        args.append(f"-Xmx{jvm_heap}")
+    args.extend(["-jar", str(MTS_LAUNCHER)])
 
     # Prefer ModTheSpire's real CLI flags over any GUI automation.
     # --mods implies launcher skipping on supported ModTheSpire versions.
@@ -774,6 +781,24 @@ class AscensionApp:
             text="games per instance; 0 = disabled",
         ).pack(side="left", padx=(8, 0))
 
+        # JVM heap cap per STS instance (RAM management)
+        self.jvm_heap_row = ttk.Frame(ctrl_frame)
+        self.jvm_heap_row.pack(fill="x", pady=(6, 0))
+        ttk.Label(self.jvm_heap_row, text="STS RAM Limit:").pack(side="left", padx=(0, 5))
+        self.jvm_heap_var = tk.StringVar(value="Default")
+        self.jvm_heap_combo = ttk.Combobox(
+            self.jvm_heap_row,
+            textvariable=self.jvm_heap_var,
+            values=JVM_HEAP_OPTIONS,
+            state="readonly",
+            width=10,
+        )
+        self.jvm_heap_combo.pack(side="left")
+        ttk.Label(
+            self.jvm_heap_row,
+            text="max heap per Java instance (-Xmx)",
+        ).pack(side="left", padx=(8, 0))
+
         # Fixed-seed evaluation controls. Visible only for Evaluate on Seed Set.
         self.eval_policy_row = ttk.Frame(ctrl_frame)
         self.eval_policy_row.pack(fill="x", pady=(6, 0))
@@ -958,6 +983,12 @@ class AscensionApp:
         value = max(0, min(10000, value))
         self.restart_sts_var.set(value)
         return value
+
+    def _get_jvm_heap(self) -> str:
+        try:
+            return str(self.jvm_heap_var.get()).strip()
+        except (tk.TclError, ValueError):
+            return "Default"
 
     def _compute_worker_game_targets(self, total_games: int,
                                      n_workers: int) -> dict[int, int]:
@@ -1531,8 +1562,10 @@ class AscensionApp:
 
         if mode in ("worker", "collect", "eval_set"):
             self.restart_sts_row.pack(fill="x", pady=(6, 0))
+            self.jvm_heap_row.pack(fill="x", pady=(6, 0))
         else:
             self.restart_sts_row.pack_forget()
+            self.jvm_heap_row.pack_forget()
 
         if mode == "eval_set":
             self._refresh_seed_file_options()
@@ -2728,7 +2761,7 @@ class AscensionApp:
                         write_config(cmd, verbose=verbose)
                         proc = None
                         try:
-                            proc = launch_sts(skip_launcher=True)
+                            proc = launch_sts(skip_launcher=True, jvm_heap=self._get_jvm_heap())
                             self.processes.append(proc)
                             _logger.info(f"Eval set {run['label']} STS launched: PID {proc.pid}")
                             self.root.after(0, lambda label=run['label']: self.status_var.set(
@@ -2825,7 +2858,7 @@ class AscensionApp:
             time.sleep(0.1)
 
             self._append_log(log_name, f"Config written, launching STS ({mode})...")
-            proc = launch_sts()
+            proc = launch_sts(jvm_heap=self._get_jvm_heap())
             self.processes.append(proc)
             self._append_log(log_name, f"STS launched (PID {proc.pid})")
             _logger.info(f"STS launched for {mode}: PID {proc.pid}, total processes tracked: {len(self.processes)}")
@@ -3029,7 +3062,7 @@ class AscensionApp:
                 )
 
                 before_java_pids = self._sts_java_pids()
-                proc = launch_sts(skip_launcher=True)
+                proc = launch_sts(skip_launcher=True, jvm_heap=self._get_jvm_heap())
                 self.processes.append(proc)
                 self.worker_launcher_pids[i] = proc.pid
                 self.worker_sts_pids[i] = set()
@@ -3151,7 +3184,7 @@ class AscensionApp:
                 self._append_log(tab_name, f"Config written for BC worker {worker_id}, launching STS...")
 
                 before_java_pids = self._sts_java_pids()
-                proc = launch_sts(skip_launcher=True)
+                proc = launch_sts(skip_launcher=True, jvm_heap=self._get_jvm_heap())
                 self.processes.append(proc)
                 self.worker_launcher_pids[worker_id] = proc.pid
                 self.worker_sts_pids[worker_id] = set()
@@ -3459,7 +3492,7 @@ class AscensionApp:
             tab_name = f"BC {worker_id}" if worker_mode == "bc_collect" else f"Worker {worker_id}"
             write_config(cmd, verbose=bool(self.verbose_var.get()))
             before_java_pids = self._sts_java_pids()
-            proc = launch_sts(skip_launcher=True)
+            proc = launch_sts(skip_launcher=True, jvm_heap=self._get_jvm_heap())
             self.processes.append(proc)
             self.worker_launcher_pids[worker_id] = proc.pid
             self.worker_sts_pids[worker_id] = set()
