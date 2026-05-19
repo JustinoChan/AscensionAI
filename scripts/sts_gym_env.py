@@ -349,6 +349,9 @@ PRIORITY_MONSTER_WEIGHTS = {
     "GremlinLeader": 0.04,
     "Reptomancer": 0.04,
     "BronzeAutomaton": 0.03,
+    "Donu": 0.08,
+    "TorchHead": 0.06,
+    "BronzeOrb": 0.08,
 }
 PRIORITY_KILL_BONUS = {
     "GremlinWizard": 4.0,
@@ -369,6 +372,9 @@ PRIORITY_KILL_BONUS = {
     "GremlinLeader": 2.0,
     "Reptomancer": 2.0,
     "BronzeAutomaton": 1.5,
+    "Donu": 5.0,
+    "TorchHead": 2.0,
+    "BronzeOrb": 3.0,
 }
 
 HP_LOSS_PENALTY = 0.08
@@ -380,6 +386,46 @@ VICTORY_REWARD = 60.0
 DEFEAT_PENALTY = 25.0
 DEFEAT_FLOOR_OFFSET = 0.25
 MAX_HP_GAIN_REWARD = 0.10
+
+# ---------------------------------------------------------------------------
+# Boss fight reward shaping
+# ---------------------------------------------------------------------------
+ACT1_BOSS_IDS = frozenset({"Hexaghost", "TheGuardian", "SlimeBoss"})
+ACT2_BOSS_IDS = frozenset({"BronzeAutomaton", "TheCollector", "Champ"})
+ACT3_BOSS_IDS = frozenset({"AwakenedOne", "Donu", "Deca", "TimeEater"})
+ALL_BOSS_IDS = ACT1_BOSS_IDS | ACT2_BOSS_IDS | ACT3_BOSS_IDS
+BOSS_KILL_REWARD = 8.0
+RETALIATION_PENALTY = 0.25
+BIG_HIT_THRESHOLD = 20
+BIG_HIT_EXTRA_PENALTY = 0.10
+
+_RETALIATION_POWERS = frozenset({"thorns", "sharphide"})
+
+
+def _get_boss(gs: Any) -> Any:
+    for m in (getattr(gs, "monsters", []) or []):
+        mid = str(getattr(m, "monster_id", "") or "")
+        if mid in ALL_BOSS_IDS and not getattr(m, "is_gone", False):
+            hp = int(getattr(m, "current_hp", 0) or 0)
+            if hp > 0 or getattr(m, "half_dead", False):
+                return m
+    return None
+
+
+def _monster_has_retaliation(m: Any) -> int:
+    for p in (getattr(m, "powers", []) or []):
+        pid = str(getattr(p, "power_id", "") or "").lower().replace(" ", "").replace("_", "")
+        if pid in _RETALIATION_POWERS:
+            return max(0, int(getattr(p, "amount", 0) or 0))
+    return 0
+
+
+def _monster_strength(m: Any) -> int:
+    for p in (getattr(m, "powers", []) or []):
+        pid = str(getattr(p, "power_id", "") or "").lower().replace(" ", "").replace("_", "")
+        if pid == "strength":
+            return int(getattr(p, "amount", 0) or 0)
+    return 0
 
 
 class RewardTracker:
@@ -397,6 +443,10 @@ class RewardTracker:
         self.last_alive = 0
         self._last_act = 0
         self._last_priority_hp: Dict[str, int] = {}
+        self._boss_fight_start_hp = 0
+        self._boss_id = ""
+        self._boss_last_hp = 0
+        self._boss_max_hp = 0
 
     def _enemy_stats(self, gs: Any) -> Tuple[Optional[int], int]:
         total_hp = 0
@@ -432,9 +482,19 @@ class RewardTracker:
         self.last_floor = int(getattr(gs, "floor", 0) or 0)
         self.last_in_combat = bool(getattr(gs, "in_combat", False))
         self._last_act = int(getattr(gs, "act", 0) or 0)
+        self._boss_fight_start_hp = 0
+        self._boss_id = ""
+        self._boss_last_hp = 0
+        self._boss_max_hp = 0
         if self.last_in_combat:
             self.last_enemy_hp, self.last_alive = self._enemy_stats(gs)
             self._last_priority_hp = self._priority_hp_map(gs)
+            boss = _get_boss(gs)
+            if boss is not None:
+                self._boss_fight_start_hp = self.last_hp
+                self._boss_id = str(getattr(boss, "monster_id", "") or "")
+                self._boss_last_hp = int(getattr(boss, "current_hp", 0) or 0)
+                self._boss_max_hp = int(getattr(boss, "max_hp", 0) or 0)
         else:
             self.last_enemy_hp, self.last_alive = None, 0
             self._last_priority_hp = {}
@@ -459,7 +519,8 @@ class RewardTracker:
             reward += FLOOR_ADVANCE_REWARD
 
         if in_combat:
-            reward -= max(0, self.last_hp - hp) * HP_LOSS_PENALTY
+            hp_lost = max(0, self.last_hp - hp)
+            reward -= hp_lost * HP_LOSS_PENALTY
             e_hp, alive = self._enemy_stats(gs)
             if e_hp is not None and self.last_enemy_hp is not None:
                 reward += max(0, self.last_enemy_hp - e_hp) * ENEMY_DAMAGE_REWARD
@@ -475,6 +536,68 @@ class RewardTracker:
                 if prev_hp > 0 and cur_hp <= 0:
                     reward += PRIORITY_KILL_BONUS.get(mid, 1.0)
 
+            # --- Boss fight shaping ---
+            boss = _get_boss(gs)
+            if boss is not None:
+                boss_id = str(getattr(boss, "monster_id", "") or "")
+                if not self._boss_id:
+                    self._boss_fight_start_hp = self.last_hp
+                    self._boss_id = boss_id
+                    self._boss_last_hp = int(getattr(boss, "current_hp", 0) or 0)
+                    self._boss_max_hp = int(getattr(boss, "max_hp", 0) or 0)
+
+                boss_hp = int(getattr(boss, "current_hp", 0) or 0)
+
+                # -- Act 1 --
+
+                # Guardian: Sharp Hide in defensive mode deals 3 dmg per
+                # attack card played. Penalize HP lost while it's active.
+                if boss_id == "TheGuardian":
+                    ret = _monster_has_retaliation(boss)
+                    if ret > 0 and hp_lost > 0:
+                        reward -= hp_lost * RETALIATION_PENALTY
+
+                # Hexaghost: Divider (turn 2, scales with player HP) and
+                # Inferno (every ~7 turns, 6-hit multi-attack) deal huge
+                # damage. Extra penalty for big hits teaches blocking.
+                if boss_id == "Hexaghost" and hp_lost >= BIG_HIT_THRESHOLD:
+                    reward -= hp_lost * BIG_HIT_EXTRA_PENALTY
+
+                # Slime Boss: splits at 50% HP; spawned slimes inherit
+                # current HP.  Reward overkill past the 50% threshold —
+                # the further below 50% the boss is when it splits, the
+                # weaker the slimes.
+                if boss_id == "SlimeBoss" and self._boss_max_hp > 0:
+                    half = self._boss_max_hp / 2.0
+                    if self._boss_last_hp > 0 and boss_hp <= 0:
+                        overkill = max(0.0, half - boss_hp)
+                        reward += min(overkill * 0.05, 4.0)
+
+                # -- Act 2 --
+
+                # Bronze Automaton: Hyper Beam deals 45 damage, then
+                # Stunned (does nothing). Penalize big hits (Hyper Beam);
+                # the base damage reward during Stunned turn is enough
+                # incentive to attack then.
+                if boss_id == "BronzeAutomaton" and hp_lost >= BIG_HIT_THRESHOLD:
+                    reward -= hp_lost * BIG_HIT_EXTRA_PENALTY
+
+                # Champ: at <50% HP, enrages (+9 Str, clears debuffs)
+                # then uses Execute (10x2). Penalize HP loss when Champ
+                # has high strength (post-enrage).
+                if boss_id == "Champ":
+                    str_val = _monster_strength(boss)
+                    if str_val >= 6 and hp_lost > 0:
+                        reward -= hp_lost * BIG_HIT_EXTRA_PENALTY
+
+                # -- Act 3 --
+
+                # Donu & Deca: Donu buffs +3 Str to both every other
+                # turn. Reward damage to Donu specifically via priority.
+                # (Donu is added to PRIORITY_MONSTER_WEIGHTS below.)
+
+                self._boss_last_hp = boss_hp
+
         if terminated:
             if victory:
                 reward += VICTORY_REWARD
@@ -485,6 +608,10 @@ class RewardTracker:
         act = int(getattr(gs, "act", 0) or 0)
         if act > self._last_act and act > 1:
             reward += ACT_ADVANCE_REWARD
+            # Boss kill bonus: reward HP preserved through the boss fight
+            if self._boss_id and hp > 0 and self._boss_fight_start_hp > 0:
+                hp_ratio = hp / max(1, self._boss_fight_start_hp)
+                reward += BOSS_KILL_REWARD + hp_ratio * BOSS_KILL_REWARD
         self._last_act = act
 
         self.last_gold = gold
@@ -500,6 +627,10 @@ class RewardTracker:
         else:
             self.last_enemy_hp, self.last_alive = None, 0
             self._last_priority_hp = {}
+            self._boss_id = ""
+            self._boss_fight_start_hp = 0
+            self._boss_last_hp = 0
+            self._boss_max_hp = 0
 
         return reward
 
