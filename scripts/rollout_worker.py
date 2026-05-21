@@ -700,16 +700,23 @@ def main():
                         help="Stop after this many completed games (0 = unlimited)")
     parser.add_argument("--restart-every", type=int, default=0,
                         help="Exit after this many games to free RAM; GUI relaunches (0 = disabled)")
+    parser.add_argument("--net-arch", type=str, default="512,256,256",
+                        help="Comma-separated hidden layer sizes (default: 512,256,256)")
+    parser.add_argument("--activation", type=str, default="gelu",
+                        choices=["tanh", "gelu", "relu"],
+                        help="Activation function for shared layers (default: gelu)")
     parser.add_argument("--verbose", action="store_true",
                         help="Write detailed per-state/per-action debug logs")
     args = parser.parse_args()
     VERBOSE = VERBOSE or args.verbose
 
     _init_log(args.id)
+    net_arch = tuple(int(x) for x in args.net_arch.split(","))
     log("=== ROLLOUT WORKER STARTING ===")
     log(f"Config: model={args.model} out={args.out} id={args.id} "
         f"reload_every={args.reload_every} max_games={args.games} "
-        f"restart_every={args.restart_every} verbose={VERBOSE}")
+        f"restart_every={args.restart_every} net_arch={net_arch} "
+        f"activation={args.activation} verbose={VERBOSE}")
 
     model_path = os.path.join(_root, args.model)
     out_dir = os.path.join(_root, args.out)
@@ -717,7 +724,7 @@ def main():
 
     trainer = PPOTrainer(
         obs_size=OBS_SIZE, n_actions=NUM_ACTIONS, device="cpu",
-        net_arch=(256, 256),
+        net_arch=net_arch, activation=args.activation,
     )
 
     if os.path.isfile(model_path):

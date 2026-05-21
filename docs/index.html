@@ -255,12 +255,12 @@
   <main>
     <section class="section">
       <h2>Project Snapshot</h2>
-      <p class="lead">The current public snapshot focuses on making the existing ML systems work legible: training infrastructure, deterministic evaluation, dashboarding, architecture documentation, and honest early results.</p>
+      <p class="lead">May 21, 2026: 12,088 training games, 1,488 PPO updates, boss reward shaping for all Act 1&ndash;3 bosses, and accelerated BC anchor decay. The 256x256 MLP has plateaued; network upgrade to (512, 256, 256) is next.</p>
       <div class="metric-grid">
         <div class="metric"><span>Action space</span><strong>134</strong></div>
         <div class="metric"><span>Observation vector</span><strong>530</strong></div>
         <div class="metric"><span>BC validation accuracy</span><strong>84.948%</strong></div>
-        <div class="metric"><span>PPO rollout games</span><strong>4,136</strong></div>
+        <div class="metric"><span>PPO rollout games</span><strong>12,088</strong></div>
       </div>
     </section>
 
@@ -318,22 +318,22 @@
 
     <section class="section">
       <h2>Current Results</h2>
-      <p class="lead">The latest PPO snapshot still improves over the BC checkpoint on the 150-game evaluation, but the wider sample shows it remains behind the heuristic baseline. The value here is the complete training system and evaluation pipeline, with clear metrics for future improvement.</p>
+      <p class="lead">12,088 PPO rollout games with boss reward shaping and accelerated BC decay. The policy is in an exploration valley after loosening the heuristic anchor; a network upgrade is the next milestone to break the capacity plateau.</p>
       <div class="grid">
         <article class="card">
           <h3>Heuristic baseline</h3>
-          <p>150 eval games: 15.78 average floor, 8.44 average shaped reward, 26.0% Act 2 reach rate.</p>
+          <p>150 eval games: 15.78 average floor, 39% boss conversion, 26.0% Act 2 reach rate.</p>
           <a href="experiments/003_fixed_seed_eval.md">View evaluation</a>
         </article>
         <article class="card">
-          <h3>BC checkpoint</h3>
-          <p>86,297 supervised samples and 84.948% final validation accuracy from heuristic demonstrations.</p>
-          <a href="experiments/001_bc_baseline.md">View BC report</a>
+          <h3>PPO 12k checkpoint</h3>
+          <p>200 eval games: 14.83 average floor, 21.7% boss conversion. Boss reward shaping for all bosses, BC anchor auto-tuned. In exploration valley after BC decay acceleration.</p>
+          <a href="experiments/007_ppo_12k_boss_shaping.md">View report</a>
         </article>
         <article class="card">
-          <h3>Parallel PPO</h3>
-          <p>4,136 rollout games, 515 PPO update batches, 6 stale rollouts in the latest trainer batch, and a 14.70 average floor in the latest 150-game PPO eval.</p>
-          <a href="experiments/002_parallel_ppo.md">View PPO report</a>
+          <h3>PPO 5k checkpoint (peak)</h3>
+          <p>200 eval games: 15.44 average floor, 31.1% boss conversion. Best eval result before boss shaping and BC decay changes.</p>
+          <a href="experiments/005_ppo_4136_eval.md">View PPO report</a>
         </article>
       </div>
     </section>

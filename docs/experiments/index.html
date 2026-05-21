@@ -78,6 +78,16 @@
         <p>4,136 PPO games, 515 trainer updates, and the May 16 150-game evaluation.</p>
         <a href="005_ppo_4136_eval.md">Read report</a>
       </article>
+      <article class="card">
+        <h2>006 5,146 PPO Eval</h2>
+        <p>5,146 PPO games, 641 updates, and the May 18 200-game evaluation (peak pre-shaping).</p>
+        <a href="006_ppo_5146_eval.md">Read report</a>
+      </article>
+      <article class="card">
+        <h2>007 12k PPO + Boss Shaping</h2>
+        <p>12,088 PPO games, 1,488 updates, boss reward shaping for all bosses, accelerated BC anchor decay, and the May 20 200-game evaluation.</p>
+        <a href="007_ppo_12k_boss_shaping.md">Read report</a>
+      </article>
     </section>
     <section>
       <h2>Snapshot Summary</h2>
@@ -87,9 +97,10 @@
             <tr><th>Run</th><th>Games</th><th>Average Floor</th><th>Average Reward</th><th>Notes</th></tr>
           </thead>
           <tbody>
-            <tr><td>Heuristic 150-game eval</td><td>150</td><td>15.78</td><td>8.44</td><td>Current reference policy on the wider eval.</td></tr>
+            <tr><td>Heuristic 150-game eval</td><td>150</td><td>15.78</td><td>8.44</td><td>Reference policy baseline.</td></tr>
             <tr><td>BC checkpoint 150-game eval</td><td>150</td><td>12.81</td><td>-0.55</td><td>Playable warm start below heuristic.</td></tr>
-            <tr><td>PPO checkpoint 150-game eval</td><td>150</td><td>14.70</td><td>2.37</td><td>Still above BC, but below heuristic on the wider sample.</td></tr>
+            <tr><td>PPO 5k (200-game eval)</td><td>200</td><td>15.44</td><td>4.03</td><td>Peak PPO performance before boss shaping changes.</td></tr>
+            <tr><td>PPO 12k (200-game eval)</td><td>200</td><td>14.83</td><td>-0.95</td><td>Post boss-shaping + BC decay. In exploration valley; 21.7% boss conversion, 49.5% deaths on floor 16.</td></tr>
           </tbody>
         </table>
       </div>

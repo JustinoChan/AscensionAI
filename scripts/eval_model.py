@@ -450,6 +450,11 @@ def main() -> None:
                         help="Exit after this many games to free RAM; GUI relaunches (0 = disabled)")
     parser.add_argument("--log-file", type=str, default=None,
                         help="Debug log path for this eval run")
+    parser.add_argument("--net-arch", type=str, default="512,256,256",
+                        help="Comma-separated hidden layer sizes (default: 512,256,256)")
+    parser.add_argument("--activation", type=str, default="gelu",
+                        choices=["tanh", "gelu", "relu"],
+                        help="Activation function for shared layers (default: gelu)")
     parser.add_argument("--verbose", action="store_true",
                         help="Write detailed per-state/per-action debug logs")
     args = parser.parse_args()
@@ -486,13 +491,15 @@ def main() -> None:
         f"run_tag={args.run_tag} policy={args.policy} verbose={VERBOSE} "
         f"seeds={len(seeds)} top_actions={args.top_actions} "
         f"resume={args.resume_run} completed={len(completed_rows)}")
+    net_arch = tuple(int(x) for x in args.net_arch.split(","))
     if args.policy == "model":
-        log(f"Loading model from {model_path}")
+        log(f"Loading model from {model_path} net_arch={net_arch} activation={args.activation}")
         trainer = PPOTrainer(
             obs_size=OBS_SIZE,
             n_actions=NUM_ACTIONS,
             device="cpu",
-            net_arch=(256, 256),
+            net_arch=net_arch,
+            activation=args.activation,
         )
         if os.path.exists(model_path):
             trainer.load(model_path)

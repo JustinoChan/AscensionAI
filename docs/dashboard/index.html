@@ -174,14 +174,14 @@
 
   <header class="dashboard-header">
     <h1>AscensionAI Results Dashboard</h1>
-    <p>Static, hostable viewer for BC, PPO, and fixed-seed evaluation artifacts. It ships with a May 18, 2026 snapshot and can also parse local CSV exports from <code>logs/</code>.</p>
+    <p>Static, hostable viewer for BC, PPO, and fixed-seed evaluation artifacts. It ships with a May 21, 2026 snapshot (12,088 games / 1,488 updates) and can also parse local CSV exports from <code>logs/</code>.</p>
   </header>
 
   <main>
     <div class="toolbar">
       <label class="upload" for="csvInput">Load CSV files</label>
       <input id="csvInput" type="file" accept=".csv" multiple>
-      <span id="status" class="note">Using embedded May 18 public snapshot. Load <code>training_stats.csv</code>, <code>bc_train_stats.csv</code>, and <code>eval_stats.csv</code> for live local charts.</span>
+      <span id="status" class="note">Using embedded May 21 public snapshot (12,088 games). Load <code>training_stats.csv</code>, <code>bc_train_stats.csv</code>, and <code>eval_stats.csv</code> for live local charts.</span>
     </div>
 
     <section class="grid" id="cards"></section>
@@ -214,23 +214,72 @@
       <h2>Run Metadata</h2>
       <table id="metadataTable"></table>
     </section>
+
+    <section class="table-panel">
+      <h2>Changelog: May 18 &rarr; May 21</h2>
+      <table>
+        <thead><tr><th>Area</th><th>Change</th><th>Impact</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>Boss reward shaping</strong></td>
+            <td>Added per-boss combat signals for all Act 1&ndash;3 bosses: Guardian (Sharp Hide penalty), Hexaghost (big-hit penalty), Slime Boss (overkill bonus past 50% HP), Bronze Automaton (Hyper Beam penalty), Champ (enraged penalty). Priority kill targets for Donu, TorchHead, and BronzeOrb. Boss kill reward: +8 base + up to +8 scaled by HP preserved.</td>
+            <td>Gives the RL policy direct feedback on boss-specific mechanics instead of only a binary win/loss signal. The policy is currently in an &ldquo;exploration valley&rdquo; absorbing these new signals.</td>
+          </tr>
+          <tr>
+            <td><strong>BC anchor decay</strong></td>
+            <td>Accelerated auto-decay: fast decay 0.90&rarr;0.85, slow decay 0.98&rarr;0.95, floor lowered from 0.01&rarr;0.001. Auto-tune now oscillates BC coefficient between 0.001&ndash;0.009.</td>
+            <td>Lets the RL policy escape the heuristic faster. Caused a temporary boss conversion dip (24%&rarr;19%) as the policy explores beyond heuristic habits.</td>
+          </tr>
+          <tr>
+            <td><strong>Heuristic overhaul</strong></td>
+            <td>Reworked card tier scoring, added Battle Trance diminishing returns (S-tier first copy, penalized duplicates), improved event handler logic, and refined boss relic pick priorities.</td>
+            <td>Better heuristic demonstrations for BC anchor. Card pick quality improved for runs still using heuristic fallback on non-combat screens.</td>
+          </tr>
+          <tr>
+            <td><strong>Infrastructure</strong></td>
+            <td>Reduced workers 7&rarr;5 (eliminated ~48 stale rollouts/update&rarr;0). Added JVM heap limiter per instance. STS restart cycling for memory leak prevention.</td>
+            <td>Every rollout now trains on the current policy version. Training throughput is more efficient despite fewer workers.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="table-panel">
+      <h2>Heuristic vs RL Decision Boundary</h2>
+      <p style="color:#5d6875; margin:0 0 12px;">
+        Non-combat screens (card rewards, rest sites, map pathing, shop, events, boss relics) are currently handled by hand-coded heuristics. The RL policy only controls combat actions. Over time, these heuristic screens will migrate under full RL control as the policy matures and network capacity increases, eventually removing the heuristic layer entirely. The goal is a single end-to-end RL policy that handles every decision in the game.
+      </p>
+      <table>
+        <thead><tr><th>Screen</th><th>Current Handler</th><th>Future Plan</th></tr></thead>
+        <tbody>
+          <tr><td>Combat (play card, use potion, end turn)</td><td>RL policy</td><td>RL policy (no change)</td></tr>
+          <tr><td>Card reward picks</td><td>Heuristic (tier scoring)</td><td>RL policy</td></tr>
+          <tr><td>Rest site (rest vs smith)</td><td>Heuristic</td><td>RL policy</td></tr>
+          <tr><td>Map pathing</td><td>Heuristic</td><td>RL policy</td></tr>
+          <tr><td>Boss relic picks</td><td>Heuristic</td><td>RL policy</td></tr>
+          <tr><td>Shop purchases</td><td>Heuristic</td><td>RL policy</td></tr>
+          <tr><td>Events</td><td>Heuristic (per-event logic)</td><td>RL policy</td></tr>
+          <tr><td>Chest, grid, confirms</td><td>Heuristic (mechanical)</td><td>Heuristic (no decision value)</td></tr>
+        </tbody>
+      </table>
+    </section>
   </main>
 
   <script>
     const snapshot = {
       "meta": {
-                  "date": "2026-05-18",
-                  "commit": "ae4ab51",
+                  "date": "2026-05-21",
+                  "commit": "f8f93b7",
                   "seedFile": "seeds/eval_200.txt",
                   "bcModel": "models/ppo_sts_bc.pt",
                   "ppoModel": "models/ppo_sts.pt",
                   "workers": 5,
-                  "staleRollouts": 6,
-                  "staleRolloutsTotal": 6,
-                  "ppoGames": 5146,
-                  "ppoUpdates": 641,
-                  "last500AvgFloor": 13.21,
-                  "latestEvalAvgFloor": 15.44
+                  "staleRollouts": 0,
+                  "staleRolloutsTotal": 0,
+                  "ppoGames": 12088,
+                  "ppoUpdates": 1488,
+                  "last500AvgFloor": 14.73,
+                  "latestEvalAvgFloor": 14.83
       },
       "training": [
             {"game": 5067, "floor": 16, "reward": 0.095, "worker": "2"},
@@ -462,7 +511,8 @@
             {"run": "heuristic_150_20260515_115841", "label": "Heuristic", "games": 150, "avg_floor": 15.78, "avg_reward": 8.44, "win_rate": 0.0, "act2_rate": 26.0, "floor20_rate": 23.3, "elite": "176/215", "boss": "39/100"},
             {"run": "bc_150_20260515_172740", "label": "BC checkpoint", "games": 150, "avg_floor": 12.81, "avg_reward": -0.55, "win_rate": 0.0, "act2_rate": 12.0, "floor20_rate": 12.0, "elite": "121/179", "boss": "19/62"},
             {"run": "ppo_current_150_20260515_172740", "label": "PPO 4k (150-game)", "games": 150, "avg_floor": 14.7, "avg_reward": 2.37, "win_rate": 0.0, "act2_rate": 18.7, "floor20_rate": 18.0, "elite": "116/155", "boss": "28/92"},
-            {"run": "ppo_current_200_20260517_141834", "label": "PPO 5k (200-game)", "games": 200, "avg_floor": 15.44, "avg_reward": 4.03, "win_rate": 0.0, "act2_rate": 20.0, "floor20_rate": 18.5, "elite": "175/219", "boss": "41/132"}
+            {"run": "ppo_current_200_20260517_141834", "label": "PPO 5k (200-game)", "games": 200, "avg_floor": 15.44, "avg_reward": 4.03, "win_rate": 0.0, "act2_rate": 20.0, "floor20_rate": 18.5, "elite": "175/219", "boss": "41/132"},
+            {"run": "ppo_current_200_20260520_141810", "label": "PPO 12k (200-game)", "games": 200, "avg_floor": 14.83, "avg_reward": -0.95, "win_rate": 0.0, "act2_rate": 13.5, "floor20_rate": 10.5, "elite": "153/198", "boss": "28/129"}
       ]
     };
 

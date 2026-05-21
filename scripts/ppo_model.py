@@ -51,7 +51,8 @@ class PPOTrainer:
                  lr: float = 3e-4, gamma: float = 0.99, gae_lambda: float = 0.95,
                  clip_range: float = 0.2, ent_coef: float = 0.001, vf_coef: float = 0.5,
                  max_grad_norm: float = 0.5, n_epochs: int = 4, batch_size: int = 64,
-                 net_arch: tuple = (256, 256), target_kl: float = 0.03):
+                 net_arch: tuple = (256, 256), target_kl: float = 0.03,
+                 activation: str = "tanh"):
         self.device = torch.device(device)
         self.gamma = gamma
         self.gae_lambda = gae_lambda
@@ -63,12 +64,17 @@ class PPOTrainer:
         self.batch_size = batch_size
         self.n_actions = n_actions
         self.target_kl = target_kl
+        self.net_arch = tuple(net_arch)
+        self.activation = activation
+
+        act_fn = {"tanh": torch.nn.Tanh, "gelu": torch.nn.GELU, "relu": torch.nn.ReLU}
+        act_cls = act_fn.get(activation.lower(), torch.nn.Tanh)
 
         layers = []
         in_dim = obs_size
         for h in net_arch:
             layers.append(torch.nn.Linear(in_dim, h))
-            layers.append(torch.nn.Tanh())
+            layers.append(act_cls())
             in_dim = h
         self.shared = torch.nn.Sequential(*layers).to(self.device)
         self.policy_head = torch.nn.Linear(in_dim, n_actions).to(self.device)
@@ -373,6 +379,8 @@ class PPOTrainer:
             "lr": self.get_lr(),
             "ent_coef": self.ent_coef,
             "bc_coef": self.bc_coef,
+            "net_arch": self.net_arch,
+            "activation": self.activation,
         }, tmp)
         os.replace(tmp, path)
 
@@ -384,8 +392,6 @@ class PPOTrainer:
             self.value_head.load_state_dict(ckpt["value_head"])
             self.optimizer.load_state_dict(ckpt["optimizer"])
         except RuntimeError:
-            # Shape mismatch (e.g. OBS_SIZE changed) — start fresh weights
-            # but keep total_updates so logs stay coherent.
             pass
         self.total_updates = ckpt.get("total_updates", 0)
         self._loaded_bc_coef = None
@@ -396,3 +402,81 @@ class PPOTrainer:
                 self._loaded_bc_coef = self.bc_coef
             if "lr" in ckpt:
                 self.set_lr(float(ckpt["lr"]))
+
+    def warm_load(self, path: str, load_hparams: bool = False):
+        """Load a checkpoint from a smaller architecture with intelligent weight transfer.
+
+        Copies matching dimensions from old layers into the new (larger) layers,
+        zero-initializes extra capacity, and uses identity initialization for new
+        layers so the network starts with approximately the same behavior.
+        """
+        ckpt = torch.load(path, map_location=self.device, weights_only=True)
+        old_shared = ckpt.get("shared", {})
+        old_policy = ckpt.get("policy_head", {})
+        old_value = ckpt.get("value_head", {})
+
+        new_shared = self.shared.state_dict()
+        new_policy = self.policy_head.state_dict()
+        new_value = self.value_head.state_dict()
+
+        transferred = []
+        for key in new_shared:
+            if key not in old_shared:
+                continue
+            old_t = old_shared[key]
+            new_t = new_shared[key]
+            if old_t.shape == new_t.shape:
+                new_shared[key] = old_t
+                transferred.append(f"shared.{key} exact")
+            elif old_t.dim() == 2 and new_t.dim() == 2:
+                # Weight matrix: copy old into top-left corner
+                r = min(old_t.shape[0], new_t.shape[0])
+                c = min(old_t.shape[1], new_t.shape[1])
+                new_shared[key][:r, :c] = old_t[:r, :c]
+                transferred.append(f"shared.{key} {old_t.shape}->{new_t.shape}")
+            elif old_t.dim() == 1 and new_t.dim() == 1:
+                # Bias vector: copy shared prefix
+                r = min(old_t.shape[0], new_t.shape[0])
+                new_shared[key][:r] = old_t[:r]
+                transferred.append(f"shared.{key} {old_t.shape}->{new_t.shape}")
+
+        # Identity-initialize any fully new layers (not partially transferred)
+        old_layer_count = len([k for k in old_shared if "weight" in k])
+        new_layer_count = len([k for k in new_shared if "weight" in k])
+        if new_layer_count > old_layer_count:
+            last_layer_idx = (new_layer_count - 1) * 2
+            w_key = f"{last_layer_idx}.weight"
+            b_key = f"{last_layer_idx}.bias"
+            if w_key in new_shared and w_key not in old_shared:
+                w = new_shared[w_key]
+                dim = min(w.shape[0], w.shape[1])
+                new_shared[w_key] = torch.zeros_like(w)
+                new_shared[w_key][:dim, :dim] = torch.eye(dim, device=w.device, dtype=w.dtype)
+                new_shared[b_key] = torch.zeros_like(new_shared[b_key])
+                transferred.append(f"shared.{w_key} identity-init")
+
+        self.shared.load_state_dict(new_shared)
+
+        for key in new_policy:
+            if key in old_policy and old_policy[key].shape == new_policy[key].shape:
+                new_policy[key] = old_policy[key]
+                transferred.append(f"policy_head.{key} exact")
+        self.policy_head.load_state_dict(new_policy)
+
+        for key in new_value:
+            if key in old_value and old_value[key].shape == new_value[key].shape:
+                new_value[key] = old_value[key]
+                transferred.append(f"value_head.{key} exact")
+        self.value_head.load_state_dict(new_value)
+
+        self.total_updates = ckpt.get("total_updates", 0)
+        self._loaded_bc_coef = None
+        if load_hparams:
+            self.ent_coef = float(ckpt.get("ent_coef", self.ent_coef))
+            if "bc_coef" in ckpt:
+                self.bc_coef = float(ckpt["bc_coef"])
+                self._loaded_bc_coef = self.bc_coef
+            if "lr" in ckpt:
+                self.set_lr(float(ckpt["lr"]))
+
+        return transferred

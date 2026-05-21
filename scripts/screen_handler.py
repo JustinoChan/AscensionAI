@@ -910,7 +910,7 @@ def auto_handle_screen(
     # ---- CHEST ----
     if screen_name == "CHEST":
         if scr and getattr(scr, "chest_open", False):
-            return Action("proceed") if proceed_avail else Action("state")
+            return _proceed_or_state(gs)
         return ChooseAction(name="open")
 
     # ---- HAND_SELECT ----

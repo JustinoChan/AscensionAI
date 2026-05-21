@@ -448,6 +448,13 @@ def main():
     parser.add_argument("--auto-high-clip", type=float, default=0.25)
     parser.add_argument("--auto-low-norm-entropy", type=float, default=0.20)
     parser.add_argument("--auto-high-norm-entropy", type=float, default=0.50)
+    parser.add_argument("--net-arch", type=str, default="512,256,256",
+                        help="Comma-separated hidden layer sizes (default: 512,256,256)")
+    parser.add_argument("--activation", type=str, default="gelu",
+                        choices=["tanh", "gelu", "relu"],
+                        help="Activation function for shared layers (default: gelu)")
+    parser.add_argument("--warm-transfer", action="store_true",
+                        help="Warm-transfer weights from existing checkpoint into new architecture")
     parser.add_argument("--device", type=str, default="auto",
                         choices=["auto", "cpu", "gpu"],
                         help="Device for training: auto (GPU if available), cpu, or gpu")
@@ -466,23 +473,31 @@ def main():
     log("=== OFFLINE TRAINER STARTING ===")
     log(f"Model: {model_path}")
     log(f"Data dir: {data_dir}")
+    net_arch = tuple(int(x) for x in args.net_arch.split(","))
     log(f"Hyperparams: lr={args.lr}, epochs={args.epochs}, "
         f"batch_size={args.batch_size}, ent_coef={args.ent_coef}, "
         f"clip={args.clip}, target_kl={args.target_kl}, "
         f"batch_games={args.batch_games}, max_rollout_lag={args.max_rollout_lag}, "
         f"bc_coef={args.bc_coef}, auto_tune={args.auto_tune}, "
         f"override_ent_coef={args.override_ent_coef}, allow_legacy={args.allow_legacy_rollouts}, "
-        f"device={device}, verbose={VERBOSE}")
+        f"net_arch={net_arch}, activation={args.activation}, "
+        f"warm_transfer={args.warm_transfer}, device={device}, verbose={VERBOSE}")
 
     trainer = PPOTrainer(
         obs_size=OBS_SIZE, n_actions=NUM_ACTIONS, device=device,
         lr=args.lr, n_epochs=args.epochs, batch_size=args.batch_size,
-        ent_coef=args.ent_coef, clip_range=args.clip, net_arch=(256, 256),
-        target_kl=args.target_kl,
+        ent_coef=args.ent_coef, clip_range=args.clip, net_arch=net_arch,
+        target_kl=args.target_kl, activation=args.activation,
     )
 
     if os.path.isfile(model_path):
-        trainer.load(model_path, load_hparams=args.auto_tune)
+        if args.warm_transfer:
+            transferred = trainer.warm_load(model_path, load_hparams=args.auto_tune)
+            log(f"Warm transfer from {model_path}: {len(transferred)} weight groups transferred")
+            for desc in transferred:
+                log(f"  {desc}")
+        else:
+            trainer.load(model_path, load_hparams=args.auto_tune)
         if args.auto_tune:
             loaded_ent = float(getattr(trainer, "ent_coef", args.ent_coef) or 0.0)
             if args.override_ent_coef:
