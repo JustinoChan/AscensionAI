@@ -35,23 +35,24 @@ The project is built as an ML systems portfolio piece: it shows how to wrap a li
 
 ## Current Snapshot
 
-These public numbers come from the local May 18, 2026 artifacts summarized in the [experiment registry](https://justinochan.github.io/AscensionAI/experiments/index.json). Raw logs, rollout files, and model checkpoints stay out of git.
+Updated May 22, 2026. Raw logs, rollout files, and model checkpoints stay out of git. Public experiment reports are in the [experiment registry](https://justinochan.github.io/AscensionAI/experiments/index.json).
 
 | Result | Value |
 |---|---:|
 | BC supervised samples | 86,297 |
 | BC final validation accuracy | 84.948% |
-| Parallel PPO rollout games | 5,146 |
-| PPO update batches | 641 |
-| Stale rollouts in latest trainer batch | 6 |
-| Latest PPO eval avg floor | 15.44 |
-| Latest PPO eval avg reward | 4.03 |
-| Latest PPO eval best floor | 42 |
-| 200-game PPO elite win rate | 79.9% |
-| 200-game PPO boss win rate | 31.1% |
+| Network architecture | (512, 256, 256) GELU, ~504K params |
+| Parallel PPO rollout games | 13,600+ |
+| PPO update batches | 1,678+ |
+| Stale rollouts in latest trainer batch | 0 |
+| Training avg floor (last 500) | 14.8 |
+| Training elite win rate | 76% |
+| Training Act 1 boss win rate | 19% |
+| 200-game PPO eval avg floor | 14.83 |
+| 200-game PPO eval boss conversion | 21.7% |
 | 150-game heuristic avg floor | 15.78 |
-| 150-game BC avg floor | 12.81 |
-| 200-game PPO avg floor | 15.44 |
+| 150-game heuristic boss conversion | 39.0% |
+| Best single run (training) | Floor 46 (Act 3) |
 
 ![Training plot snapshot](docs/assets/training_plot.png)
 
@@ -68,9 +69,21 @@ Slay the Spire instances
     -> eval_model.py fixed-seed comparisons
 ```
 
-The strongest part of the current project is the complete training and evaluation system. The 5,146-game PPO checkpoint has nearly closed the gap with the heuristic baseline on the 200-game fixed-seed evaluation (15.44 vs 15.78 avg floor). Elite win rate (79.9%) approaches the heuristic (81.9%), while the Act 1 boss remains the primary bottleneck at 31.1% conversion vs the heuristic's 39.0%. The best single run reached floor 42 (Act 3). No full victories yet.
+The strongest part of the current project is the complete training and evaluation system. The network was upgraded from (256, 256) Tanh to (512, 256, 256) GELU via warm transfer, doubling representational capacity without losing learned behavior. The Act 1 boss remains the primary bottleneck: the agent reaches floor 16 in 66% of games but only beats the boss 19% of the time. The best single training run reached floor 46 (Act 3, beat 2 bosses). No full victories yet.
 
-Current training read: entropy auto-tune is active and healthy (normalized entropy 0.25–0.29), the BC anchor is being gradually relaxed so the policy can explore beyond heuristic play patterns at the Act 1 boss. More training volume at the current settings is the right next step.
+Current training read: data analysis revealed that elite fights were reward-neutral (+0.09 net vs normal fights) despite games with 2+ elites having double the boss win rate. An elite win bonus (+3.0) and HP-scaled floor advance (0.50 + 0.25 × HP ratio) were added to correct this. Training is ongoing on the new reward structure.
+
+## Planned Changes
+
+| Priority | Change | Rationale |
+|---|---|---|
+| **Active** | Monitor elite bonus effect on pathing and boss conversion | Elite win bonus should shift the agent from 0-1 elites (83% of games) toward 2+ elites, which doubles boss win rate |
+| **Next** | Bounded eval after ~1,000 games on new rewards | Compare elite count distribution, boss conversion, and early-floor deaths vs baseline |
+| **If needed** | Tune HP-scaled floor advance ratio | If elite count rises but deaths get reckless, adjust the 0.50/0.25 split |
+| **Medium-term** | Migrate shop decisions to RL | Shop is the last strategic screen still fully heuristic |
+| **Medium-term** | Richer map path features | If elite count doesn't shift despite reward fix, the 39-d map observation may need more path-planning features |
+| **Long-term** | Additional characters (Silent, Defect, Watcher) | Each needs new card/relic tables, BC heuristics, and character-specific observation blocks |
+| **Long-term** | Ascension progression | Higher ascensions add elite/boss modifiers requiring curriculum-style training |
 
 ## About
 
@@ -364,7 +377,7 @@ python scripts\analyze_training_rewards.py --csv logs\training_stats.csv
 
 - The project currently targets **Ironclad** only.
 - Training assumes normal live STS gameplay through CommunicationMod; it is not a fast headless simulator.
-- Some screens are intentionally heuristic-driven while the RL policy handles the main decision surfaces. This keeps training moving, but means the learned policy is not yet responsible for every possible game choice.
+- The RL policy controls all strategic decisions (combat, card rewards, rest sites, map pathing, boss relics, events). Shop purchases and mechanical screens (chests, grids, confirms) remain heuristic.
 - The README examples assume a local Windows install at `C:/AscensionAI`; adjust paths if your clone lives elsewhere.
 
 ## Project Structure
@@ -414,7 +427,7 @@ AscensionAI/
 
 2. **Action space** (`sts_gym_env.py`): 134 discrete actions covering targeted/untargeted card plays (50+10), end turn, targeted/untargeted potions (25+5), choice selection (40), proceed, leave, and no-op. Illegal actions are masked out per game state.
 
-3. **Reward shaping** (`sts_gym_env.py`): Dense per-step rewards for gold, relics, max HP, floor progression, combat damage, card management, and act advancement — plus stronger survival incentives (+60 victory, -25 defeat, and higher HP-loss penalty). Urgent targets such as daggers, Gremlin Wizard, Red/Blue Slaver, Gremlin Nob, Book of Stabbing, Exploder, and minion-spawner bosses receive extra damage/kill rewards to teach healthier target priority.
+3. **Reward shaping** (`sts_gym_env.py`): Dense per-step rewards for gold, relics, max HP, HP-scaled floor progression, combat damage, card management, elite win bonus (+3.0), boss kill rewards (scaled by HP preserved), and act advancement — plus stronger survival incentives (+60 victory, -25 defeat, and higher HP-loss penalty). Urgent targets such as daggers, Gremlin Wizard, Red/Blue Slaver, Gremlin Nob, Book of Stabbing, Exploder, and minion-spawner bosses receive extra damage/kill rewards to teach healthier target priority. Boss-specific shaping penalizes Guardian Sharp Hide attacks, Hexaghost big hits, and Champ enraged damage.
 
    **Combat analytics**: Elite and boss fight outcomes are tracked per-game in `training_stats.csv` and per-fight in `fight_stats.csv`, including which monsters were fought, HP before/after, win/loss, and whether the fight ended through a terminal death state. The Control Panel progress panel shows aggregate elite and boss win rates from the per-fight log.
 
