@@ -1,7 +1,7 @@
 # AscensionAI Technical Writeup
 
-**Version:** 0.4.0
-**Document Date:** 2026-05-07
+**Version:** 0.5.0
+**Document Date:** 2026-05-21
 **Author:** Justin Chan
 **Repository:** https://github.com/JustinoChan/AscensionAI
 
@@ -9,7 +9,7 @@
 
 ## Abstract
 
-AscensionAI is a reinforcement learning system that trains an autonomous agent to play *Slay the Spire* (Ironclad) end-to-end against the live, modded game process. The system uses a structured 530-dimensional observation encoder, a 134-action discrete action space with legal-action masking, dense reward shaping, behavior cloning warm-start, and Proximal Policy Optimization (PPO) fine-tuning. Training is parallelized across multiple live game instances feeding a central offline trainer over a checkpoint-tagged rollout protocol. The system currently runs on Windows and integrates with ModTheSpire, BaseMod, CommunicationMod, and a bundled SpireComm Python interface. This document describes the architecture, algorithmic choices, implementation, observed throughput, current limitations, and a phased roadmap.
+AscensionAI is a reinforcement learning system that trains an autonomous agent to play *Slay the Spire* (Ironclad) end-to-end against the live, modded game process. The system uses a structured 530-dimensional observation encoder, a 134-action discrete action space with legal-action masking, dense reward shaping, behavior cloning warm-start, and Proximal Policy Optimization (PPO) fine-tuning. Training is parallelized across multiple live game instances feeding a central offline trainer over a checkpoint-tagged rollout protocol, with fixed-seed evaluation and dashboard artifacts used to separate real policy progress from run-to-run variance. As of 2026-05-21, the project has moved beyond the original 256x256 Tanh MLP plateau diagnosis and now supports a larger `(512, 256, 256)` GELU network through warm-transfer loading from older checkpoints. The system currently runs on Windows and integrates with ModTheSpire, BaseMod, CommunicationMod, and a bundled SpireComm Python interface. This document describes the architecture, algorithmic choices, implementation, observed throughput, current limitations, and a phased roadmap.
 
 ---
 
@@ -17,27 +17,30 @@ AscensionAI is a reinforcement learning system that trains an autonomous agent t
 
 | Aspect | Status |
 |---|---|
-| Environment integration | Complete — live STS via CommunicationMod / SpireComm |
-| Observation encoder | Complete — 530-d vector across 11 feature blocks |
-| Action space | Complete — 134 discrete actions, legal-action masking |
-| Reward shaping | Complete — dense per-step + sparse terminal rewards |
-| Behavior cloning | Complete — heuristic demos, supervised cross-entropy, resumable checkpointing |
-| PPO fine-tuning | Complete — clipped policy, GAE, entropy annealing, BC anchor loss, target-KL early stop |
-| Parallel rollout collection | Complete — multi-instance workers with stale-rollout rejection |
-| Offline trainer | Complete — batch-merge, atomic checkpoint save |
-| GUI control panel | Complete — Windows-native launcher and monitor |
-| Win-rate convergence | **Not yet demonstrated** at scale |
+| Environment integration | Complete - live STS via CommunicationMod / SpireComm |
+| Observation encoder | Complete - 530-d vector across 11 feature blocks |
+| Action space | Complete - 134 discrete actions, legal-action masking |
+| Reward shaping | Complete - dense per-step, terminal, elite/spawner, and boss-specific signals |
+| Behavior cloning | Complete - heuristic demos, supervised cross-entropy, resumable checkpointing |
+| PPO fine-tuning | Complete - clipped policy, GAE, entropy/BC auto-tuning, BC anchor loss, target-KL early stop |
+| Parallel rollout collection | Complete - multi-instance workers with checkpoint metadata and stale-rollout rejection |
+| Offline trainer | Complete - batch merge, auto-tune, warm transfer, atomic checkpoint save |
+| GUI control panel | Complete - Windows-native launcher, monitor, archive controls, eval set mode, RAM cap controls |
+| Evaluation/reporting | Complete - deterministic seed sets, resumable eval logs, experiment reports, static dashboard |
+| Win-rate convergence | **Not yet demonstrated**; no recorded full victory in the published fixed-seed evals |
 | Cross-platform support | **Windows-only** for now |
 
 **Headline metrics (current state):**
 
 - Observation dimensionality: 530
 - Action space size: 134
-- Policy/value network: 530 → 256 → 256 → {134 logits + 1 value}, ~235K parameters
-- Monster knowledge base: 66 monsters × 7 behavioral flags × 8-d identity embedding
-- Typical BC game length: 60–200 transitions
-- Typical BC throughput: 1 game / 30–90 seconds (Fast Mode + Super Fast Mode)
-- Per-step inference: <5 ms on CPU (no GPU required)
+- Current offline PPO architecture: 530 -> 512 -> 256 -> 256 -> {134 logits + 1 value}, GELU, ~504K parameters
+- Legacy / single-trainer default architecture: 530 -> 256 -> 256 -> {134 logits + 1 value}, Tanh, ~236K parameters
+- Monster knowledge base: 66 monsters x 7 behavioral flags x 8-d identity embedding
+- Latest 200-game PPO eval before boss-shaping exploration valley: 15.44 average floor, 4.03 average reward, best floor 42, 79.9% elite win rate, 31.1% boss conversion
+- Latest 200-game PPO eval after boss reward shaping and BC-anchor loosening: 14.83 average floor, -0.95 average reward, 77.3% elite win rate, 21.7% boss conversion
+- Current diagnosis: floor-16 Act 1 boss remains the bottleneck; the 256x256 network appeared capacity-limited, motivating the 512/256/256 GELU warm-transfer upgrade
+- Per-step inference: <5 ms on CPU (no GPU required for play/eval)
 
 ---
 
@@ -60,6 +63,7 @@ AscensionAI is a reinforcement learning system that trains an autonomous agent t
 15. [Metrics Reference](#15-metrics-reference)
 16. [Hyperparameter Reference](#16-hyperparameter-reference)
 17. [Glossary](#17-glossary)
+18. [May 21, 2026 Current-System Addendum](#18-may-21-2026-current-system-addendum)
 
 ---
 
@@ -76,10 +80,10 @@ The project is designed around long-running autonomous training rather than one-
 | Ascension level | 0 |
 | Environment interface | CommunicationMod via SpireComm |
 | RL framework | Custom PPO implementation in PyTorch |
-| Policy | Actor-critic MLP, 2 hidden layers of 256 units, Tanh activation |
+| Policy | Actor-critic MLP; current offline PPO default is `(512, 256, 256)` with GELU, while legacy checkpoints use `(256, 256)` with Tanh |
 | Warm-start | Behavior cloning from a hand-coded heuristic |
 | Scaling strategy | Multiple rollout workers + central offline trainer |
-| Hardware target | CPU-only (no GPU required) |
+| Hardware target | CPU inference/play; offline trainer can run on CPU, GPU, or auto-selected device when available |
 
 ---
 
@@ -563,9 +567,9 @@ Long-running modded *Slay the Spire* sessions are fragile. Concrete reliability 
 
 ### 12.3 Algorithmic / training risk
 
-- **No proven win-rate convergence yet.** The full pipeline is in place but has not been run for the full ~3000-game budget needed to demonstrate convergence.
+- **No proven win-rate convergence yet.** The full pipeline has now produced multi-thousand-game PPO checkpoints and 200-game fixed-seed evaluations, but no published eval has recorded a full victory. The best documented PPO eval reached floor 42, and the main bottleneck remains Act 1 boss conversion around floor 16.
 - **Reward shaping bias risk.** Dense shaping accelerates learning but can encode biases (e.g., over-prioritizing damage dealt vs. healthy block usage). The reward-correlation analyzer exists but tuning is ongoing.
-- **PPO can forget BC.** With high entropy / learning rate / KL movement, PPO can drift away from valuable BC priors. The BC anchor loss mitigates but does not eliminate this.
+- **PPO can forget BC.** With high entropy / learning rate / KL movement, PPO can drift away from valuable BC priors. The BC anchor loss and auto-tuned BC coefficient mitigate this but do not eliminate the exploration-valley risk.
 - **Rollout staleness.** Workers cache the model and lag the trainer by N games. Beyond ~10 updates lag the importance ratios are stale; rollouts get rejected, throughput drops.
 
 ### 12.4 Coverage gaps
@@ -715,12 +719,15 @@ For *Slay the Spire*, **avg-25 is too noisy** — one early death or one deep ru
 
 ### 16.3 Network
 
-| Parameter | Default |
-|---|---|
-| Hidden layers | (256, 256) |
-| Activation | Tanh |
-| Optimizer | Adam |
-| Total parameters | ~235,000 |
+| Parameter | Legacy default | Current offline PPO default |
+|---|---|---|
+| Hidden layers | (256, 256) | (512, 256, 256) |
+| Activation | Tanh | GELU |
+| Optimizer | Adam | Adam |
+| Total parameters | ~236,000 | ~504,000 |
+| Migration path | direct checkpoint load | `--warm-transfer` from compatible older checkpoints |
+
+The `PPOTrainer` class still accepts arbitrary `net_arch` and `activation` values. The May 21 offline-training path defaults to the larger GELU architecture because the 12k-game diagnosis showed the 256x256 MLP plateauing around 15 average floor with explained variance roughly flat near 0.78. Warm transfer copies compatible weight blocks from the old checkpoint and partially initializes widened layers so the policy does not restart from scratch.
 
 ---
 
@@ -742,6 +749,50 @@ For *Slay the Spire*, **avg-25 is too noisy** — one early death or one deep ru
 
 ---
 
+## 18. May 21, 2026 Current-System Addendum
+
+This addendum captures the major work after the original May 7 technical writeup. The important shift is that the project moved from "pipeline exists and needs a first long run" to "long-run PPO evidence exists, the Act 1 boss wall is measured, and the next architecture iteration is implemented."
+
+### 18.1 Commit range covered
+
+The original 0.4 writeup landed at `71964ad` and the PDF layout fix landed at `fc243ed`. Since then, the repository added 33 commits through `5d9edb1` on `main`. The changes fall into these themes:
+
+| Theme | Representative commits | Why it mattered |
+|---|---|---|
+| PPO/BC stability | `ed17d2b`, `82f257e`, `e8fa0bf`, `2842221`, `2d9bd02`, `db01b9d`, `e4c5dd0` | Tracked BC baselines, tuned entropy and BC coefficients, added auto-tuning, normalized stats, and made the GUI expose the controls needed to keep a BC-warm-started PPO run from drifting blindly. |
+| Behavior cloning strength | `d6d4bb7`, `af06ee9`, `2670c91` | Improved BC throughput and resume behavior, preserved BC anchors, and fixed event-choice handling so the supervised warm start receives cleaner decisions. |
+| Public reporting | `6ed45f1`, `e62483a`, `c31e02b`, `45b6557`, `44a5bde`, `b62c31c`, `4fa198e`, `4c252a0` | Added the static site, dashboard, demo assets, experiment index, and May 18 result snapshot so training claims are inspectable outside raw logs. |
+| Evaluation hardening | `e92bb0b`, `d198ad8`, `1df9765`, `9010ee1`, `a69febf`, `5c16406` | Published long-run evals, made fixed-seed eval resumable/clean, separated eval artifacts into `Eval/`, and added GUI controls for bounded worker/eval modes. |
+| Long-run process reliability | `5433f95`, `ae4ab51`, `60cd5ba` | Added game targets, model archiving, restart-every cycling, relaunch-count fixes, and per-instance JVM heap limits to reduce memory growth and stale rollouts. |
+| Policy quality and capacity | `b9f244e`, `f8f93b7`, `5d9edb1` | Overhauled heuristic card/event/relic logic, added boss reward shaping and faster BC-anchor decay, then upgraded to the `(512, 256, 256)` GELU model via warm transfer. |
+
+### 18.2 Current training diagnosis
+
+The 5,146-game PPO checkpoint was the strongest published pre-shaping result: 15.44 average floor, 4.03 average reward, best floor 42, 79.9% elite win rate, and 31.1% boss conversion on the 200-game fixed-seed eval. That nearly matched the heuristic average floor of 15.78 but still trailed the heuristic on boss conversion.
+
+The 12,088-game result after boss reward shaping and accelerated BC-anchor decay regressed to 14.83 average floor and 21.7% boss conversion. This is documented as an exploration valley rather than a simple infrastructure failure: the policy loosened from heuristic imitation while the new boss signals had not yet converted into better boss-specific behavior. The key measured bottleneck is still floor 16, where roughly half of deaths occur in the 12k eval.
+
+The 256x256 network appeared to plateau: it reached roughly 15 average floor early and explained variance stayed around 0.78 for thousands of games. The May 21 network upgrade responds to that diagnosis by doubling representational capacity to roughly 504K parameters and switching to GELU while preserving as much learned behavior as possible through warm transfer.
+
+### 18.3 Code-level changes to remember
+
+- `scripts/ppo_model.py` now supports configurable activations and `warm_load()`, including partial tensor transfer and identity initialization for newly inserted compatible layers.
+- `scripts/train_offline.py` now defaults to `--net-arch 512,256,256`, supports `--activation gelu`, `--warm-transfer`, auto device selection, and richer auto-tune behavior for learning rate, entropy coefficient, and BC coefficient.
+- `scripts/sts_gym_env.py` contains boss-specific reward shaping for Guardian, Hexaghost, Slime Boss, Bronze Automaton, Champ, and Donu/Deca-style priority targets, with boss kill rewards scaled by remaining HP.
+- `scripts/screen_handler.py` and `scripts/behavior_clone.py` have newer event, card-tier, boss-relic, grid, and rest-site handling so disabled choices, Coffee Dripper/Fusion Hammer constraints, Match and Keep, and boss relic screens do not poison training data or freeze workers.
+- `AscensionAI.pyw` now includes archive controls, eval-set orchestration, auto-tune and entropy display, bounded worker games, restart-every cycling, and per-instance JVM heap caps.
+- `docs/dashboard/`, `docs/experiments/`, and `docs/index.html` are no longer decorative; they are the public evidence layer for comparing BC, PPO, heuristic, and fixed-seed results.
+
+### 18.4 Near-term operating guidance
+
+1. Treat the current larger GELU network as a transition experiment, not as proof of convergence.
+2. Re-evaluate around 15k games using the same fixed seed file before changing reward weights again.
+3. Watch boss conversion, floor-16 deaths, normalized entropy, explained variance, and stale-rollout counts together; no single metric is sufficient.
+4. Keep auto-tune enabled unless normalized entropy collapses below the healthy band or KL/clip behavior shows unstable updates.
+5. Preserve checkpoints and dashboard snapshots before any major reward or architecture experiment so regressions remain explainable.
+
+---
+
 ## Document History
 
 | Version | Date | Notes |
@@ -750,3 +801,4 @@ For *Slay the Spire*, **avg-25 is too noisy** — one early death or one deep ru
 | 0.2 | 2026-04-26 | Added monster knowledge base, parallel architecture |
 | 0.3 | 2026-05-06 | Added BC progress checkpointing, refined sections |
 | 0.4 | 2026-05-07 | Full restructure with tables, estimates, ASCII charts, expanded limitations and roadmap |
+| 0.5 | 2026-05-21 | Updated current status after 33 post-writeup commits, 12k PPO diagnosis, boss reward shaping, auto-tune maturation, dashboard/eval hardening, and 512/256/256 GELU warm-transfer upgrade |
