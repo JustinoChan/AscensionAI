@@ -380,7 +380,9 @@ PRIORITY_KILL_BONUS = {
 HP_LOSS_PENALTY = 0.08
 ENEMY_DAMAGE_REWARD = 0.015
 MONSTER_KILL_REWARD = 0.75
-FLOOR_ADVANCE_REWARD = 0.75
+FLOOR_ADVANCE_BASE = 0.50
+FLOOR_ADVANCE_HP_BONUS = 0.25
+ELITE_WIN_BONUS = 3.0
 ACT_ADVANCE_REWARD = 12.0
 VICTORY_REWARD = 60.0
 DEFEAT_PENALTY = 25.0
@@ -447,6 +449,7 @@ class RewardTracker:
         self._boss_id = ""
         self._boss_last_hp = 0
         self._boss_max_hp = 0
+        self._in_elite_fight = False
 
     def _enemy_stats(self, gs: Any) -> Tuple[Optional[int], int]:
         total_hp = 0
@@ -486,6 +489,7 @@ class RewardTracker:
         self._boss_id = ""
         self._boss_last_hp = 0
         self._boss_max_hp = 0
+        self._in_elite_fight = False
         if self.last_in_combat:
             self.last_enemy_hp, self.last_alive = self._enemy_stats(gs)
             self._last_priority_hp = self._priority_hp_map(gs)
@@ -516,7 +520,17 @@ class RewardTracker:
             reward += (self.last_deck_size - deck_size) * 0.2
 
         if floor_num > self.last_floor:
-            reward += FLOOR_ADVANCE_REWARD
+            max_hp = max(1, int(getattr(gs, "max_hp", 1) or 1))
+            hp_ratio = hp / max_hp
+            reward += FLOOR_ADVANCE_BASE + FLOOR_ADVANCE_HP_BONUS * hp_ratio
+            if self._in_elite_fight:
+                reward += ELITE_WIN_BONUS
+                self._in_elite_fight = False
+
+        if in_combat and not self.last_in_combat:
+            room = str(getattr(gs, "room_type", "") or "")
+            if "Elite" in room:
+                self._in_elite_fight = True
 
         if in_combat:
             hp_lost = max(0, self.last_hp - hp)
