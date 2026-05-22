@@ -10,16 +10,16 @@ The project is built as an ML systems portfolio piece: it shows how to wrap a li
 
 | Artifact | Why it matters |
 |---|---|
-| [GitHub Pages landing page](docs/index.html) | Welcome page for the public project site at the Pages root. |
-| [Static dashboard](docs/dashboard/index.html) | Hostable results viewer for BC, PPO, and fixed-seed metrics. |
-| [Scripts reference](docs/scripts.html) | Explains what each launcher, training, evaluation, environment, and analysis script does. |
-| [Docs hub](docs/docs.html) | Central navigation for architecture, reports, writeups, assets, and portfolio framing. |
-| [Experiment reports](docs/experiments/) | Reproducible summaries for BC baseline, parallel PPO, and fixed-seed evaluation. |
-| [Architecture doc](docs/architecture.md) | Explains the trainer/worker/checkpoint topology and reliability story. |
-| [Technical writeup](docs/AscensionAI_Technical_Writeup.md) | Deeper implementation notes on observations, actions, rewards, PPO, and limitations. |
-| [Portfolio page](docs/portfolio.md) | Screenshot-rich project page for recruiters and hiring managers. |
-| [Public demo assets](docs/demo_assets.md) | Diagrams, dashboard, plot snapshot, and public-safe visual assets. |
-| [Resume framing](docs/resume_portfolio.md) | Concise portfolio description and resume-ready bullets. |
+| [GitHub Pages landing page](https://justinochan.github.io/AscensionAI/) | Welcome page for the public project site. |
+| [Static dashboard](https://justinochan.github.io/AscensionAI/dashboard/) | Hostable results viewer for BC, PPO, and fixed-seed metrics. |
+| [Scripts reference](https://justinochan.github.io/AscensionAI/scripts.html) | Explains what each launcher, training, evaluation, environment, and analysis script does. |
+| [Docs hub](https://justinochan.github.io/AscensionAI/docs.html) | Central navigation for architecture, reports, writeups, assets, and portfolio framing. |
+| [Experiment reports](https://justinochan.github.io/AscensionAI/experiments/) | Reproducible summaries for BC baseline, parallel PPO, and fixed-seed evaluation. |
+| [Architecture doc](https://justinochan.github.io/AscensionAI/architecture) | Explains the trainer/worker/checkpoint topology and reliability story. |
+| [Technical writeup](https://justinochan.github.io/AscensionAI/AscensionAI_Technical_Writeup) | Deeper implementation notes on observations, actions, rewards, PPO, and limitations. |
+| [Portfolio page](https://justinochan.github.io/AscensionAI/portfolio) | Screenshot-rich project page for recruiters and hiring managers. |
+| [Public demo assets](https://justinochan.github.io/AscensionAI/demo_assets) | Diagrams, dashboard, plot snapshot, and public-safe visual assets. |
+| [Resume framing](https://justinochan.github.io/AscensionAI/resume_portfolio) | Concise portfolio description and resume-ready bullets. |
 
 ## Engineering Highlights
 
@@ -35,7 +35,7 @@ The project is built as an ML systems portfolio piece: it shows how to wrap a li
 
 ## Current Snapshot
 
-These public numbers come from the local May 18, 2026 artifacts summarized in [docs/experiments/index.json](docs/experiments/index.json). Raw logs, rollout files, and model checkpoints stay out of git.
+These public numbers come from the local May 18, 2026 artifacts summarized in the [experiment registry](https://justinochan.github.io/AscensionAI/experiments/index.json). Raw logs, rollout files, and model checkpoints stay out of git.
 
 | Result | Value |
 |---|---:|
