@@ -850,10 +850,45 @@ def pick_map(choice_list: list, gs) -> int:
     return best_idx
 
 
+_GOOD_SHOP_RELICS = frozenset({
+    "vajra", "oddly smooth stone", "bag of preparation", "orichalcum",
+    "kunai", "shuriken", "paper krane", "paper phrog", "mummified hand",
+    "gremlin horn", "frozen egg", "molten egg", "toxic egg",
+    "calipers", "dead branch", "ice cream", "incense burner",
+    "lizard tail", "ginger", "torii", "tungsten rod", "pocketwatch",
+    "thread and needle", "orange pellets", "necronomicon", "chemical x",
+    "unceasing top", "clockwork souvenir", "fossilized helix",
+    "champion belt", "ornamental fan", "meat on the bone",
+    "horn cleat", "ink bottle", "red skull", "self-forming clay",
+    "lee's waffle", "sling of courage", "anchor",
+    "bag of marbles", "bronze scales", "happy flower", "pen nib",
+    "akabeko", "lantern",
+})
+
+_GOOD_SHOP_POTIONS = frozenset({
+    "fire potion", "explosive potion", "strength potion",
+    "block potion", "dexterity potion", "speed potion",
+    "energy potion", "duplication potion", "fairy in a bottle",
+    "flex potion", "blood potion", "essence of steel",
+    "entropic brew", "power potion", "fear potion", "weak potion",
+    "liquid bronze",
+})
+
+_SHOP_POTION_PRICE_CAP = 75
+_SHOP_GOLD_FLOOR = 40
+
+
+def _has_relic(gs, name_lower: str) -> bool:
+    for r in (getattr(gs, "relics", []) or []):
+        if str(getattr(r, "name", "") or "").lower() == name_lower:
+            return True
+    return False
+
+
 def pick_shop_item(choice_list: list, gs, scr) -> Optional[int]:
     """Pick an item to buy in the shop, or None to leave."""
     gold = int(getattr(gs, "gold", 0) or 0)
-    if scr is None or gold < 50:
+    if scr is None or gold < _SHOP_GOLD_FLOOR:
         return None
     prices: dict = {}
     for attr in ("cards", "potions", "relics"):
@@ -870,15 +905,18 @@ def pick_shop_item(choice_list: list, gs, scr) -> Optional[int]:
         price = prices.get(item_str)
         if price is None or price <= 0 or gold < price:
             continue
+        if name_lower in PREMIUM_CARDS:
+            return i
+    for i, item in enumerate(choice_list):
+        item_str = str(item)
+        name_lower = item_str.lower()
+        if name_lower in ("purge",):
+            continue
+        price = prices.get(item_str)
+        if price is None or price <= 0 or gold < price:
+            continue
         if name_lower in GOOD_CARDS:
             return i
-    for it in (getattr(scr, "relics", None) or []):
-        relic_name = str(getattr(it, "name", ""))
-        price = prices.get(relic_name)
-        if price is not None and gold >= price:
-            for i, c in enumerate(choice_list):
-                if str(c) == relic_name:
-                    return i
     return None
 
 
@@ -1047,38 +1085,76 @@ def auto_handle_screen(
 
     if screen_name == "SHOP_SCREEN":
         gold = int(getattr(gs, "gold", 0) or 0)
-        if scr is not None and gold >= 30:
+        if scr is not None and gold >= _SHOP_GOLD_FLOOR:
+            deck_size = len(getattr(gs, "deck", []) or [])
+            potions_full = bool(getattr(gs, "are_potions_full", lambda: False)())
+            has_sozu = _has_relic(gs, "sozu")
+
+            def _can_afford(price: int) -> bool:
+                return gold >= price and (gold - price) >= 0
+
+            # 1. Premium cards — must-buy
             for card in (getattr(scr, "cards", None) or []):
                 name = str(getattr(card, "name", "") or "")
                 name_lower = name.lower()
                 price = int(getattr(card, "price", 999) or 999)
                 if name_lower in DIMINISHING_CARDS:
-                    cap = DIMINISHING_CARDS[name_lower]
-                    if _deck_count(gs, name_lower) >= cap:
+                    if _deck_count(gs, name_lower) >= DIMINISHING_CARDS[name_lower]:
                         continue
-                if name_lower in GOOD_CARDS and gold >= price:
+                if name_lower in PREMIUM_CARDS and _can_afford(price):
                     return ChooseAction(name=name)
+
+            # 2. Card removal — prioritize when deck has junk or is bloated
             if getattr(scr, "purge_available", False):
                 purge_cost = int(getattr(scr, "purge_cost", 999) or 999)
-                if gold >= purge_cost:
+                has_junk = any(
+                    str(getattr(c, "name", "") or "").lower() in ("strike", "defend")
+                    or str(getattr(c, "name", "") or "").lower() in JUNK_CARDS
+                    for c in (getattr(gs, "deck", []) or [])
+                )
+                if _can_afford(purge_cost) and (has_junk or deck_size > 15):
                     return ChooseAction(name="purge")
+
+            # 3. Good cards
             for card in (getattr(scr, "cards", None) or []):
                 name = str(getattr(card, "name", "") or "")
+                name_lower = name.lower()
                 price = int(getattr(card, "price", 999) or 999)
-                if name.lower() in OK_CARDS and gold >= price:
+                if name_lower in DIMINISHING_CARDS:
+                    if _deck_count(gs, name_lower) >= DIMINISHING_CARDS[name_lower]:
+                        continue
+                if name_lower in GOOD_CARDS and _can_afford(price):
                     return ChooseAction(name=name)
+
+            # 4. Good relics only
             for relic in (getattr(scr, "relics", None) or []):
                 name = str(getattr(relic, "name", "") or "")
                 price = int(getattr(relic, "price", 999) or 999)
-                if gold >= price:
+                if name.lower() in _GOOD_SHOP_RELICS and _can_afford(price):
                     return ChooseAction(name=name)
-            potions_full = bool(getattr(gs, "are_potions_full", lambda: False)())
-            if not potions_full:
+
+            # 5. OK cards (skip if deck is already large)
+            if deck_size <= 25:
+                for card in (getattr(scr, "cards", None) or []):
+                    name = str(getattr(card, "name", "") or "")
+                    name_lower = name.lower()
+                    price = int(getattr(card, "price", 999) or 999)
+                    if name_lower in DIMINISHING_CARDS:
+                        if _deck_count(gs, name_lower) >= DIMINISHING_CARDS[name_lower]:
+                            continue
+                    if name_lower in OK_CARDS and _can_afford(price):
+                        return ChooseAction(name=name)
+
+            # 6. Useful potions at reasonable price
+            if not potions_full and not has_sozu:
                 for pot in (getattr(scr, "potions", None) or []):
                     name = str(getattr(pot, "name", "") or "")
                     price = int(getattr(pot, "price", 999) or 999)
-                    if gold >= price:
+                    if (name.lower() in _GOOD_SHOP_POTIONS
+                            and price <= _SHOP_POTION_PRICE_CAP
+                            and _can_afford(price)):
                         return ChooseAction(name=name)
+
         return Action("cancel")
 
     # ---- EVENT ----
