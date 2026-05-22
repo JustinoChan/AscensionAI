@@ -20,7 +20,7 @@ AscensionAI is a reinforcement learning system that trains an autonomous agent t
 | Environment integration | Complete - live STS via CommunicationMod / SpireComm |
 | Observation encoder | Complete - 530-d vector across 11 feature blocks |
 | Action space | Complete - 134 discrete actions, legal-action masking |
-| Reward shaping | Complete - dense per-step, terminal, elite/spawner, and boss-specific signals |
+| Reward shaping | Complete - dense per-step, terminal, elite win bonus, HP-scaled floor advance, spawner priority, and boss-specific signals |
 | Behavior cloning | Complete - heuristic demos, supervised cross-entropy, resumable checkpointing |
 | PPO fine-tuning | Complete - clipped policy, GAE, entropy/BC auto-tuning, BC anchor loss, target-KL early stop |
 | Parallel rollout collection | Complete - multi-instance workers with checkpoint metadata and stale-rollout rejection |
@@ -149,7 +149,7 @@ For parallel training the topology fans out:
 | CPU-only inference | Network is small (~235K params); GPU saturated by other costs (game speed, IPC). |
 | Per-game `.npz` rollouts | Each rollout is self-contained, atomic, deletable, and carries checkpoint metadata. |
 | Stale-rollout rejection | Workers can lag the trainer; old rollouts harm PPO objective if importance ratios drift too far. |
-| Heuristic + RL hybrid | RL owns "decisions that matter"; heuristics keep the live process from stalling on edge cases. |
+| Heuristic + RL hybrid | RL owns all strategic decisions (combat, card rewards, rest sites, map pathing, boss relics, events); heuristics handle shops and mechanical screens. |
 | Action masking (not penalty) | Illegal actions get probability zero in sampling — no wasted gradient steps on impossible plays. |
 
 ---
@@ -234,39 +234,44 @@ Reward shaping is dense to accelerate early learning. All reward sources fire ea
 |---|---:|---|
 | Gold gain | +0.01 / gold | |
 | New relic | +1.0 | |
-| Card removed from deck | +0.2 / card | (card removal events) |
-| Floor advanced | +0.5 | |
-| HP loss | −0.05 / HP | Constant penalty to discourage damage taken |
-| Generic enemy damage dealt | +0.02 / HP | Applied to total enemy HP delta |
-| Generic monster killed | +0.5 / kill | |
-| **Spawner damage bonus** | **+0.08 / HP** | On top of generic — total **5× generic** for spawners |
-| **Spawner kill bonus** | **+5.0** | On top of generic — total **11× generic kill** for spawners |
-| Act advanced (act 2+) | +10.0 | Encourages full-act progression |
-| Victory | +50.0 | Terminal |
-| Defeat | −15.0 + 0.3 × floor | Floor-prorated to avoid instant runs being equally bad |
+| Max HP gain | +0.10 / HP | Rewards Feed events, relics that raise max HP |
+| Card removed from deck | +0.2 / card | Card removal events |
+| Floor advanced | +0.50 + 0.25 × (HP / max HP) | Hybrid: base progress + HP-scaled bonus |
+| HP loss | −0.08 / HP | Constant penalty to discourage damage taken |
+| Generic enemy damage dealt | +0.015 / HP | Applied to total enemy HP delta |
+| Generic monster killed | +0.75 / kill | |
+| **Priority monster damage** | **+0.03–5.0 / HP** | Spawners, boss minions (Donu, TorchHead, BronzeOrb) |
+| **Priority monster kill** | **+1.0–5.0** | Weighted by threat level |
+| **Elite win bonus** | **+3.0** | Awarded on floor advance after elite victory |
+| Boss kill reward | +8.0 + up to +8.0 × HP ratio | Scaled by HP preserved through boss fight |
+| Act advanced (act 2+) | +12.0 | Encourages full-act progression |
+| Victory | +60.0 | Terminal |
+| Defeat | −25.0 + 0.25 × floor | Floor-prorated to avoid instant runs being equally bad |
 
 ### 5.2 Rationale
 
-- HP loss penalty is calibrated so a 10-damage hit costs `−0.5`, equal to a generic monster kill. This balances offense and defense early in training.
-- Spawner shaping is the critical incentive against "minion farming." Without it, killing easy minions can feel as rewarding as killing the spawner per unit time.
+- HP loss penalty is calibrated so a 10-damage hit costs `−0.8`, roughly equal to a generic monster kill (+0.75). This balances offense and defense early in training.
+- Priority monster shaping is the critical incentive against "minion farming." Without it, killing easy minions can feel as rewarding as killing the spawner per unit time.
+- The elite win bonus (+3.0) makes elite fights clearly positive-EV despite their HP cost (~32 HP average). Training data showed that games with 2+ elites doubled the Act 1 boss win rate, but the reward function made elites reward-neutral. The bonus corrects this.
+- The HP-scaled floor advance (0.50 base + 0.25 × HP ratio) gives a dense per-floor gradient: arriving at the boss at 75/80 HP is worth 0.73, arriving at 30/80 is worth 0.59. This teaches HP conservation without punishing survival at low health.
 - The act-advance bonus is a structural shaping term: it discourages stalling in act 1 and rewards real progression.
 
 ### 5.3 Shaped vs. terminal balance
 
-For a typical successful 16-floor run with 1 victory, the shaped reward sum is roughly:
+For a typical successful 16-floor run with 1 boss kill:
 
 ```
-Shaped:   ~30-50  (gold, damage dealt, kills, floor progression)
-Terminal: +50     (victory)
-Total:    ~80-100
+Shaped:   ~35-55  (gold, damage dealt, kills, floor progression, elite bonus)
+Terminal: boss kill +8 to +16, act advance +12
+Total:    ~55-80
 ```
 
 For a defeat at floor 5:
 
 ```
 Shaped:   ~5-10
-Terminal: -15 + 5*0.3 = -13.5
-Total:    ~-5 to -10
+Terminal: -25 + 5*0.25 = -23.75
+Total:    ~-15 to -20
 ```
 
 The shaped portion is meaningful but not so dominant that the terminal signal becomes noise.
@@ -574,8 +579,8 @@ Long-running modded *Slay the Spire* sessions are fragile. Concrete reliability 
 
 ### 12.4 Coverage gaps
 
-- **Shop logic is mostly heuristic.** Shop rooms are entered once per floor (a deliberate hack to prevent loops). Real budget-aware shopping should eventually be RL-driven.
-- **Grid screens are heuristic-handled.** Match-and-keep, transform, and special grids have specialized handlers but no learned policy.
+- **Shop logic is fully heuristic.** Shop rooms are entered once per floor (a deliberate hack to prevent loops). Real budget-aware shopping should eventually be RL-driven.
+- **Grid screens are heuristic-handled.** Match-and-keep, transform, and special grids have specialized handlers but no learned policy. These have low strategic value.
 - **Events with disabled options can be brittle.** Most edge cases are handled; new mod-introduced events may not be.
 
 ### 12.5 Platform
@@ -764,7 +769,7 @@ The original 0.4 writeup landed at `71964ad` and the PDF layout fix landed at `f
 | Public reporting | `6ed45f1`, `e62483a`, `c31e02b`, `45b6557`, `44a5bde`, `b62c31c`, `4fa198e`, `4c252a0` | Added the static site, dashboard, demo assets, experiment index, and May 18 result snapshot so training claims are inspectable outside raw logs. |
 | Evaluation hardening | `e92bb0b`, `d198ad8`, `1df9765`, `9010ee1`, `a69febf`, `5c16406` | Published long-run evals, made fixed-seed eval resumable/clean, separated eval artifacts into `Eval/`, and added GUI controls for bounded worker/eval modes. |
 | Long-run process reliability | `5433f95`, `ae4ab51`, `60cd5ba` | Added game targets, model archiving, restart-every cycling, relaunch-count fixes, and per-instance JVM heap limits to reduce memory growth and stale rollouts. |
-| Policy quality and capacity | `b9f244e`, `f8f93b7`, `5d9edb1` | Overhauled heuristic card/event/relic logic, added boss reward shaping and faster BC-anchor decay, then upgraded to the `(512, 256, 256)` GELU model via warm transfer. |
+| Policy quality and capacity | `b9f244e`, `f8f93b7`, `5d9edb1`, `ac34dc1` | Overhauled heuristic card/event/relic logic, added boss reward shaping and faster BC-anchor decay, upgraded to the `(512, 256, 256)` GELU model via warm transfer, then added elite win bonus (+3.0) and HP-scaled floor advance to improve Act 1 boss readiness. |
 
 ### 18.2 Current training diagnosis
 
@@ -778,7 +783,7 @@ The 256x256 network appeared to plateau: it reached roughly 15 average floor ear
 
 - `scripts/ppo_model.py` now supports configurable activations and `warm_load()`, including partial tensor transfer and identity initialization for newly inserted compatible layers.
 - `scripts/train_offline.py` now defaults to `--net-arch 512,256,256`, supports `--activation gelu`, `--warm-transfer`, auto device selection, and richer auto-tune behavior for learning rate, entropy coefficient, and BC coefficient.
-- `scripts/sts_gym_env.py` contains boss-specific reward shaping for Guardian, Hexaghost, Slime Boss, Bronze Automaton, Champ, and Donu/Deca-style priority targets, with boss kill rewards scaled by remaining HP.
+- `scripts/sts_gym_env.py` contains boss-specific reward shaping for Guardian, Hexaghost, Slime Boss, Bronze Automaton, Champ, and Donu/Deca-style priority targets, with boss kill rewards scaled by remaining HP. Also includes elite win bonus (+3.0) and HP-scaled floor advance (0.50 base + 0.25 × HP ratio).
 - `scripts/screen_handler.py` and `scripts/behavior_clone.py` have newer event, card-tier, boss-relic, grid, and rest-site handling so disabled choices, Coffee Dripper/Fusion Hammer constraints, Match and Keep, and boss relic screens do not poison training data or freeze workers.
 - `AscensionAI.pyw` now includes archive controls, eval-set orchestration, auto-tune and entropy display, bounded worker games, restart-every cycling, and per-instance JVM heap caps.
 - `docs/dashboard/`, `docs/experiments/`, and `docs/index.html` are no longer decorative; they are the public evidence layer for comparing BC, PPO, heuristic, and fixed-seed results.
@@ -802,3 +807,4 @@ The 256x256 network appeared to plateau: it reached roughly 15 average floor ear
 | 0.3 | 2026-05-06 | Added BC progress checkpointing, refined sections |
 | 0.4 | 2026-05-07 | Full restructure with tables, estimates, ASCII charts, expanded limitations and roadmap |
 | 0.5 | 2026-05-21 | Updated current status after 33 post-writeup commits, 12k PPO diagnosis, boss reward shaping, auto-tune maturation, dashboard/eval hardening, and 512/256/256 GELU warm-transfer upgrade |
+| 0.5.1 | 2026-05-22 | Updated reward weights table with current values, added elite win bonus and HP-scaled floor advance documentation, corrected heuristic vs RL decision boundary |
