@@ -112,6 +112,7 @@ _logger.info(f"STS_DIR: {STS_DIR}  exists={STS_DIR.exists()}")
 MODES = {
     "Parallel Workers": "worker",
     "Collect Rollouts (No Training)": "collect",
+    "Consume Rollouts (Trainer Only)": "consume",
     "Single-Instance Training": "train",
     "BC \u2192 PPO (End-to-End)": "bc_ppo",
     "Behavior Cloning": "bc",
@@ -127,6 +128,7 @@ MODES = {
 SPINNER_CONFIG = {
     "worker":  ("Workers:", 1, 8, None),
     "collect": ("Workers:", 1, 8, None),
+    "consume": (None, 0, 0, 0),
     "train":   (None, 0, 0, 0),
     "bc_ppo":  ("BC Games:", 10, 1000, 400),
     "bc":      ("BC Games:", 10, 1000, 400),
@@ -1185,7 +1187,7 @@ class AscensionApp:
         return self._archive_options.get(self.model_choice_var.get())
 
     _ARCHIVE_RELEVANT_MODES = {
-        "worker", "collect", "train", "bc_ppo", "eval", "eval_set",
+        "worker", "collect", "consume", "train", "bc_ppo", "eval", "eval_set",
     }
 
     def _prompt_archive_now(self):
@@ -1530,7 +1532,7 @@ class AscensionApp:
             self.use_bc_chk.pack_forget()
             self.use_bc_var.set(False)
 
-        if mode in ("worker", "train", "bc_ppo"):
+        if mode in ("worker", "train", "bc_ppo", "consume"):
             self.ent_row.pack(fill="x", pady=(6, 0))
         else:
             self.ent_row.pack_forget()
@@ -2261,6 +2263,21 @@ class AscensionApp:
                                      "worker_ids": worker_ids,
                                      "worker_targets": worker_targets},
                              daemon=True).start()
+        elif mode == "consume":
+            (ROOT / "rollouts_shared").mkdir(exist_ok=True)
+            rollout_count = len(list((ROOT / "rollouts_shared").glob("*.npz")))
+            _logger.info(f"rollouts_shared/ has {rollout_count} existing .npz files")
+            if rollout_count == 0:
+                self._start_validation_failed(
+                    "No rollout files in rollouts_shared/.\n"
+                    "Use Parallel Workers or Collect Rollouts first."
+                )
+                return
+            self.status_var.set(
+                f"Consuming {rollout_count} rollouts (trainer only, no game workers)..."
+            )
+            threading.Thread(target=self._launch_consume,
+                             daemon=True).start()
         elif mode == "train":
             self.status_var.set("Launching single-instance training...")
             threading.Thread(target=self._launch_single, args=("train",), daemon=True).start()
@@ -2948,6 +2965,89 @@ class AscensionApp:
         elapsed = time.time() - start
         self._append_log(tab_name, f"Timed out waiting for worker process ({elapsed:.0f}s).")
         return False
+
+    def _launch_consume(self):
+        """Launch the offline trainer only (no game workers) to consume accumulated rollouts."""
+        try:
+            self._with_trainer = True
+            self._trainer_cmd = None
+            self._n_workers = 0
+
+            self._append_log("All", "Starting offline trainer (consume-only mode)...")
+            self.root.after(0, lambda: self._add_log_tab("Trainer"))
+            time.sleep(0.1)
+
+            trainer_cmd = [
+                str(VENV_PYTHON), str(SCRIPTS / "train_offline.py"),
+                "--model", str(ROOT / "models" / "ppo_sts.pt"),
+                "--data", str(ROOT / "rollouts_shared"),
+                "--delete-consumed",
+                "--batch-games", "8",
+                "--lr", "3e-5",
+                "--bc-coef", "0.10",
+                "--max-rollout-lag", "4",
+                "--ent-coef", str(self._ent_value),
+                "--device", "gpu" if self.gpu_var.get() else "cpu",
+            ]
+            if self._ent_manual_override:
+                trainer_cmd.append("--override-ent-coef")
+            if self.auto_tune_var.get():
+                trainer_cmd.append("--auto-tune")
+            if self.verbose_var.get():
+                trainer_cmd.append("--verbose")
+            self._trainer_cmd = trainer_cmd
+            _logger.info(f"Consume trainer command: {trainer_cmd}")
+            self.trainer_proc = subprocess.Popen(
+                trainer_cmd, cwd=str(ROOT),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            _logger.info(f"Offline trainer started (consume mode): PID {self.trainer_proc.pid}")
+            self._append_log("Trainer", f"Offline trainer started (PID {self.trainer_proc.pid})")
+
+            tailer = LogTailer(ROOT / "logs" / "train_offline_debug.log",
+                               lambda line: self._append_log("Trainer", line))
+            tailer.start()
+            self.tailers.append(tailer)
+
+            rollout_dir = ROOT / "rollouts_shared"
+            while self.running:
+                time.sleep(5.0)
+                remaining = len(list(rollout_dir.glob("*.npz")))
+                if self.trainer_proc is not None:
+                    rc = self.trainer_proc.poll()
+                    if rc is not None:
+                        self._append_log("Trainer",
+                            f"Trainer exited (code {rc}), {remaining} rollouts remaining")
+                        if remaining > 0 and self.running:
+                            _logger.info("Trainer exited with rollouts remaining; restarting")
+                            self._append_log("Trainer", "Restarting trainer...")
+                            self.trainer_proc = subprocess.Popen(
+                                trainer_cmd, cwd=str(ROOT),
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                                creationflags=subprocess.CREATE_NO_WINDOW,
+                            )
+                            continue
+                self.root.after(0, lambda r=remaining: self.status_var.set(
+                    f"Consuming rollouts... {r} remaining"
+                ))
+                if remaining == 0:
+                    self._append_log("All", "All rollouts consumed.")
+                    self.root.after(0, lambda: self.status_var.set("All rollouts consumed"))
+                    self.running = False
+                    self.root.after(0, lambda: self.start_btn.configure(state="normal"))
+                    self.root.after(0, lambda: self.stop_btn.configure(state="disabled"))
+                    self.root.after(0, lambda: self.graceful_btn.configure(state="disabled"))
+                    break
+        except Exception as e:
+            _logger.error(f"_launch_consume error: {e}", exc_info=True)
+            self._append_log("All", f"ERROR: {e}")
+            self.running = False
+            self.root.after(0, lambda: self.start_btn.configure(state="normal"))
+            self.root.after(0, lambda: self.stop_btn.configure(state="disabled"))
+            self.root.after(0, lambda: self.graceful_btn.configure(state="disabled"))
 
     def _launch_parallel(self, n_workers: int, with_trainer: bool = True,
                          worker_ids: list[int] | None = None,
@@ -4134,10 +4234,10 @@ class AscensionApp:
         if mode != "play" and not VENV_PYTHON.exists():
             issues.append(f"Python venv not found:\n  {VENV_PYTHON}\n  Run: python -m venv .venv && pip install -r requirements.txt")
         _logger.debug(f"JAVA_EXE: {JAVA_EXE}  exists={JAVA_EXE.exists()}")
-        if mode != "bc_train" and not JAVA_EXE.exists():
+        if mode not in ("bc_train", "consume") and not JAVA_EXE.exists():
             issues.append(f"STS Java runtime not found:\n  {JAVA_EXE}\n  Is Slay the Spire installed via Steam?")
         _logger.debug(f"MTS_LAUNCHER: {MTS_LAUNCHER}  exists={MTS_LAUNCHER.exists()}")
-        if mode != "bc_train" and not MTS_LAUNCHER.exists():
+        if mode not in ("bc_train", "consume") and not MTS_LAUNCHER.exists():
             issues.append(
                 f"ModTheSpire jar not found:\n  {MTS_LAUNCHER}\n"
                 "Install Mod the Spire via Steam Workshop, or set "
