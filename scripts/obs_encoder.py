@@ -10,6 +10,7 @@ Designed for Ironclad; extend CARD_STATS for other characters.
 
 from __future__ import annotations
 
+import os as _os
 from typing import Any, Dict, List, Tuple
 
 import numpy as np
@@ -159,7 +160,7 @@ HAND_CARD_DIM = 16                            # was 10: +4 identity +1 exhausts 
 HAND_DIM = MAX_HAND * HAND_CARD_DIM           # 160
 MONSTER_DIM = MAX_MONSTERS * _MONSTER_SLOT_DIM  # 5 * 30 = 150
 PLAYER_POWER_DIM = 20
-MONSTER_POWER_DIM = MAX_MONSTERS * 8          # 40
+MONSTER_POWER_DIM = MAX_MONSTERS * 19         # 5 * 19 = 95
 CHOICE_DIM = 7
 RELIC_DIM = RELIC_FEATURE_DIM                 # 25
 POTION_SLOT_DIM = 8
@@ -215,7 +216,7 @@ OBS_SIZE = (
     + POTION_DIM
     + DECK_PROFILE_DIM
     + MAP_DIM
-)  # 530
+)  # 585
 
 
 # ---------------------------------------------------------------------------
@@ -368,7 +369,20 @@ PLAYER_POWER_IDS = [
 MONSTER_POWER_IDS = [
     "strength", "vulnerable", "weakened", "artifact",
     "ritual", "curlup", "thorns", "angry",
+    "sharphide", "modeshift", "enrage", "curiosity",
+    "intangible", "invincible", "timewarp", "beatofdeath",
+    "malleable", "lifelink", "regenerate",
 ]
+_N_MONSTER_POWERS = len(MONSTER_POWER_IDS)
+assert _N_MONSTER_POWERS == MONSTER_POWER_DIM // MAX_MONSTERS, \
+    f"MONSTER_POWER_DIM ({MONSTER_POWER_DIM}) must equal MAX_MONSTERS * {_N_MONSTER_POWERS}"
+
+
+_UNRECOGNISED_POWERS: set[str] = set()
+_UNRECOGNISED_LOG = _os.path.join(
+    _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+    "logs", "unrecognised_powers.log",
+)
 
 
 def _encode_powers(powers: list, power_ids: list[str]) -> np.ndarray:
@@ -386,6 +400,14 @@ def _encode_powers(powers: list, power_ids: list[str]) -> np.ndarray:
         if idx is not None:
             amt = float(getattr(p, "amount", 0) or 0)
             out[idx] = np.clip(amt / 10.0, -3.0, 3.0)
+        elif pid_clean and pid_clean not in _UNRECOGNISED_POWERS:
+            _UNRECOGNISED_POWERS.add(pid_clean)
+            try:
+                with open(_UNRECOGNISED_LOG, "a", encoding="utf-8") as _f:
+                    _amt = getattr(p, "amount", "?")
+                    _f.write(f"{pid_clean} (raw_id={pid}, amount={_amt})\n")
+            except Exception:
+                pass
     return out
 
 
@@ -670,12 +692,12 @@ def encode_game_state(gs: Any) -> np.ndarray:
     )
     offset += PLAYER_POWER_DIM
 
-    # === MONSTER POWERS (5 × 8 = 40) ===
+    # === MONSTER POWERS (5 × 19 = 95) ===
     for i in range(MAX_MONSTERS):
-        base = offset + i * 8
+        base = offset + i * _N_MONSTER_POWERS
         if i < len(alive):
             m_powers = getattr(alive[i], "powers", [])
-            obs[base:base + 8] = _encode_powers(m_powers, MONSTER_POWER_IDS)
+            obs[base:base + _N_MONSTER_POWERS] = _encode_powers(m_powers, MONSTER_POWER_IDS)
     offset += MONSTER_POWER_DIM
 
     # === CHOICE CONTEXT (7) ===
