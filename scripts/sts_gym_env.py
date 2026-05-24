@@ -382,12 +382,13 @@ ENEMY_DAMAGE_REWARD = 0.015
 MONSTER_KILL_REWARD = 0.75
 FLOOR_ADVANCE_BASE = 0.50
 FLOOR_ADVANCE_HP_BONUS = 0.25
-ELITE_WIN_BONUS = 3.0
+ELITE_WIN_BONUS = 4.0
 ACT_ADVANCE_REWARD = 12.0
 VICTORY_REWARD = 60.0
 DEFEAT_PENALTY = 25.0
 DEFEAT_FLOOR_OFFSET = 0.25
 MAX_HP_GAIN_REWARD = 0.10
+REST_UPGRADE_REWARD = 0.30
 
 # ---------------------------------------------------------------------------
 # Boss fight reward shaping
@@ -398,6 +399,7 @@ ACT3_BOSS_IDS = frozenset({"AwakenedOne", "Donu", "Deca", "TimeEater"})
 ALL_BOSS_IDS = ACT1_BOSS_IDS | ACT2_BOSS_IDS | ACT3_BOSS_IDS
 BOSS_KILL_REWARD = 8.0
 RETALIATION_PENALTY = 0.25
+GUARDIAN_OPEN_DMG_BONUS = 0.03
 BIG_HIT_THRESHOLD = 20
 BIG_HIT_EXTRA_PENALTY = 0.10
 
@@ -450,6 +452,7 @@ class RewardTracker:
         self._boss_last_hp = 0
         self._boss_max_hp = 0
         self._in_elite_fight = False
+        self._last_upgrades = 0
 
     def _enemy_stats(self, gs: Any) -> Tuple[Optional[int], int]:
         total_hp = 0
@@ -490,6 +493,10 @@ class RewardTracker:
         self._boss_last_hp = 0
         self._boss_max_hp = 0
         self._in_elite_fight = False
+        self._last_upgrades = sum(
+            int(getattr(c, "upgrades", 0) or 0)
+            for c in (getattr(gs, "deck", []) or [])
+        )
         if self.last_in_combat:
             self.last_enemy_hp, self.last_alive = self._enemy_stats(gs)
             self._last_priority_hp = self._priority_hp_map(gs)
@@ -526,6 +533,16 @@ class RewardTracker:
             if self._in_elite_fight:
                 reward += ELITE_WIN_BONUS
                 self._in_elite_fight = False
+
+        if not in_combat:
+            upgrades = sum(
+                int(getattr(c, "upgrades", 0) or 0)
+                for c in (getattr(gs, "deck", []) or [])
+            )
+            new_ups = upgrades - self._last_upgrades
+            if new_ups > 0:
+                reward += new_ups * REST_UPGRADE_REWARD
+            self._last_upgrades = upgrades
 
         if in_combat and not self.last_in_combat:
             room = str(getattr(gs, "room_type", "") or "")
@@ -564,12 +581,16 @@ class RewardTracker:
 
                 # -- Act 1 --
 
-                # Guardian: Sharp Hide in defensive mode deals 3 dmg per
-                # attack card played. Penalize HP lost while it's active.
+                # Guardian: two-phase cycle. Defensive mode has Sharp Hide
+                # (thorns). Penalize attacking into thorns; bonus for
+                # dealing damage when Sharp Hide is down (offensive mode).
                 if boss_id == "TheGuardian":
                     ret = _monster_has_retaliation(boss)
                     if ret > 0 and hp_lost > 0:
                         reward -= hp_lost * RETALIATION_PENALTY
+                    boss_dmg = max(0, self._boss_last_hp - boss_hp)
+                    if ret == 0 and boss_dmg > 0:
+                        reward += boss_dmg * GUARDIAN_OPEN_DMG_BONUS
 
                 # Hexaghost: Divider (turn 2, scales with player HP) and
                 # Inferno (every ~7 turns, 6-hit multi-attack) deal huge
