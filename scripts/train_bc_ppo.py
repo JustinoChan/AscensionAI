@@ -631,7 +631,12 @@ class BCPPOAgent:
         """Train cross-entropy loss on BC demonstrations."""
         log(f"Supervised training: {n} samples, {self.bc_epochs} epochs...")
 
-        obs_t = torch.as_tensor(np.array(self.demo_obs, dtype=np.float32))
+        obs_arr = np.array(self.demo_obs, dtype=np.float32)
+        if obs_arr.ndim == 2 and obs_arr.shape[1] < OBS_SIZE:
+            pad = np.zeros((obs_arr.shape[0], OBS_SIZE - obs_arr.shape[1]), dtype=np.float32)
+            obs_arr = np.concatenate([obs_arr, pad], axis=1)
+            log(f"Zero-padded BC observations from {obs_arr.shape[1] - pad.shape[1]} to {OBS_SIZE}")
+        obs_t = torch.as_tensor(obs_arr)
         act_t = torch.as_tensor(np.array(self.demo_actions, dtype=np.int64))
         mask_t = torch.as_tensor(np.array(self.demo_masks, dtype=np.bool_))
 

@@ -391,12 +391,12 @@ class PPOTrainer:
 
     def load(self, path: str, load_hparams: bool = False):
         ckpt = torch.load(path, map_location=self.device, weights_only=True)
+        self.shared.load_state_dict(ckpt["shared"])
+        self.policy_head.load_state_dict(ckpt["policy_head"])
+        self.value_head.load_state_dict(ckpt["value_head"])
         try:
-            self.shared.load_state_dict(ckpt["shared"])
-            self.policy_head.load_state_dict(ckpt["policy_head"])
-            self.value_head.load_state_dict(ckpt["value_head"])
             self.optimizer.load_state_dict(ckpt["optimizer"])
-        except RuntimeError:
+        except (RuntimeError, ValueError):
             pass
         self.total_updates = ckpt.get("total_updates", 0)
         self._loaded_bc_coef = None

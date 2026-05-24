@@ -973,7 +973,12 @@ def train_supervised(obs_list, action_list, mask_list, save_path: str,
         lr=lr, net_arch=(256, 256),
     )
 
-    obs_t = torch.as_tensor(np.array(obs_list, dtype=np.float32))
+    obs_arr = np.array(obs_list, dtype=np.float32)
+    if obs_arr.ndim == 2 and obs_arr.shape[1] < OBS_SIZE:
+        pad = np.zeros((obs_arr.shape[0], OBS_SIZE - obs_arr.shape[1]), dtype=np.float32)
+        obs_arr = np.concatenate([obs_arr, pad], axis=1)
+        log(f"Zero-padded BC observations from {obs_arr.shape[1] - pad.shape[1]} to {OBS_SIZE}")
+    obs_t = torch.as_tensor(obs_arr)
     act_t = torch.as_tensor(np.array(action_list, dtype=np.int64))
     mask_t = torch.as_tensor(np.array(mask_list, dtype=np.bool_))
 

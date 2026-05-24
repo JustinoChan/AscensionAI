@@ -227,6 +227,10 @@ def load_transitions(paths: List[str]) -> tuple:
                 lengths = [len(acts), len(rews), len(dones), len(masks), len(lps), len(vals)]
                 if any(x != n for x in lengths):
                     raise ValueError(f"array length mismatch: obs={n}, others={lengths}")
+                if obs.ndim == 2 and obs.shape[1] != OBS_SIZE:
+                    raise ValueError(
+                        f"obs dimension mismatch: file has {obs.shape[1]}, "
+                        f"expected {OBS_SIZE} — rollout from incompatible model version")
                 for i in range(n):
                     buf.add(obs[i], int(acts[i]), float(rews[i]), bool(dones[i]),
                             masks[i], float(lps[i]), float(vals[i]))
@@ -251,12 +255,18 @@ def retire_file(path: str, suffix: str) -> None:
         log(f"Failed to retire {path}: {e}")
 
 
-def delete_files(paths: List[str]) -> None:
+def delete_files(paths: List[str], archive_rejects: bool = False) -> None:
     for f in paths:
         try:
-            os.remove(f)
+            if archive_rejects:
+                archive_dir = os.path.join(os.path.dirname(f), ".rejected")
+                os.makedirs(archive_dir, exist_ok=True)
+                dest = os.path.join(archive_dir, os.path.basename(f))
+                os.replace(f, dest)
+            else:
+                os.remove(f)
         except OSError as e:
-            log(f"Failed to delete {f}: {e}")
+            log(f"Failed to delete/archive {f}: {e}")
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:
@@ -596,7 +606,7 @@ def main():
                 log(f"Rejecting {len(legacy_files)} legacy rollout(s) without metadata; "
                     f"use --allow-legacy-rollouts to train on old files")
                 if args.delete_consumed:
-                    delete_files(legacy_files)
+                    delete_files(legacy_files, archive_rejects=True)
                 else:
                     for f in legacy_files:
                         retire_file(f, ".legacy")
@@ -608,7 +618,7 @@ def main():
                 log(f"Rejecting {len(stale_files)} stale rollout(s): "
                     f"current_update={current_update} max_lag={args.max_rollout_lag}")
                 if args.delete_consumed:
-                    delete_files(stale_files)
+                    delete_files(stale_files, archive_rejects=True)
                 else:
                     for f in stale_files:
                         retire_file(f, ".stale")
@@ -641,7 +651,7 @@ def main():
             if n < 10:
                 log(f"Too few transitions ({n}), skipping update")
                 if args.delete_consumed:
-                    delete_files(loaded)
+                    delete_files(loaded, archive_rejects=True)
                 else:
                     for f in loaded:
                         retire_file(f, ".short")
