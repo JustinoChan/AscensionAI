@@ -256,12 +256,12 @@
   <main>
     <section class="section">
       <h2>Project Snapshot</h2>
-      <p class="lead">May 22, 2026: 13,600+ training games, 1,678+ PPO updates. Network upgraded to (512, 256, 256) GELU via warm transfer. Elite win bonus (+3.0) and HP-scaled floor advance added to improve Act 1 boss readiness.</p>
+      <p class="lead">May 23, 2026: 16,900+ training games, 1,856+ PPO updates. Observation encoder expanded from 530-d to 585-d with 19 monster power slots covering all combat-relevant STS1 buffs. Reward shaping updated with upgrade incentives, Guardian phase-aware bonus, and elite win bonus raised to +4.0.</p>
       <div class="metric-grid">
         <div class="metric"><span>Action space</span><strong>134</strong></div>
-        <div class="metric"><span>Observation vector</span><strong>530</strong></div>
-        <div class="metric"><span>BC validation accuracy</span><strong>84.948%</strong></div>
-        <div class="metric"><span>PPO rollout games</span><strong>13,600+</strong></div>
+        <div class="metric"><span>Observation vector</span><strong>585</strong></div>
+        <div class="metric"><span>Monster power slots</span><strong>19</strong></div>
+        <div class="metric"><span>PPO rollout games</span><strong>16,900+</strong></div>
       </div>
     </section>
 
@@ -290,7 +290,7 @@
         </article>
         <article class="card">
           <h3>Technical Writeup</h3>
-          <p>v0.5 — 12k PPO diagnosis, boss reward shaping, auto-tune maturation, 512/256/256 GELU warm-transfer, elite win bonus, and HP-scaled floor advance.</p>
+          <p>v0.6 — 585-d observation with 19 monster powers, upgrade reward, Guardian phase shaping, elite bonus +4.0, warm-transfer fix.</p>
           <a href="AscensionAI_Technical_Writeup.md">Read writeup</a> · <a href="AscensionAI_Technical_Writeup.pdf">PDF</a>
         </article>
         <article class="card">
@@ -319,7 +319,7 @@
 
     <section class="section">
       <h2>Current Results</h2>
-      <p class="lead">13,600+ PPO rollout games on the upgraded (512, 256, 256) GELU network. Elite win bonus and HP-scaled floor advance target the Act 1 boss bottleneck where 80% of runs die.</p>
+      <p class="lead">16,900+ PPO rollout games on the (512, 256, 256) GELU network. Observation expanded to 585-d with 19 monster power slots. Reward shaping now includes upgrade incentives, Guardian offensive-mode bonus, and elite win bonus +4.0.</p>
       <div class="grid">
         <article class="card">
           <h3>Heuristic baseline</h3>

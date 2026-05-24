@@ -24,7 +24,7 @@ The project is built as an ML systems portfolio piece: it shows how to wrap a li
 ## Engineering Highlights
 
 - **134-action masked discrete action space** covering card plays, potion use, choices, map/event decisions, proceed/leave, and no-op recovery.
-- **530-dimensional observation encoder** with player state, hand cards, monster identity/intent/powers, relics, potions, deck profile, and map lookahead.
+- **585-dimensional observation encoder** with player state, hand cards, monster identity/intent/powers (19 per monster), relics, potions, deck profile, and map lookahead.
 - **Behavior cloning warm start** from a full-game heuristic, with resumable demo collection and supervised validation metrics.
 - **PPO fine-tuning** with GAE, clipped objective, entropy control, target-KL early stopping, and optional BC anchor loss.
 - **Parallel rollout collection** through multiple live Slay the Spire processes writing checkpoint-tagged `.npz` trajectories.
@@ -35,24 +35,23 @@ The project is built as an ML systems portfolio piece: it shows how to wrap a li
 
 ## Current Snapshot
 
-Updated May 22, 2026. Raw logs, rollout files, and model checkpoints stay out of git. Public experiment reports are in the [experiment registry](https://justinochan.github.io/AscensionAI/experiments/index.json).
+Updated May 23, 2026. Raw logs, rollout files, and model checkpoints stay out of git. Public experiment reports are in the [experiment registry](https://justinochan.github.io/AscensionAI/experiments/index.json).
 
 | Result | Value |
 |---|---:|
 | BC supervised samples | 86,297 |
 | BC final validation accuracy | 84.948% |
 | Network architecture | (512, 256, 256) GELU, ~504K params |
-| Parallel PPO rollout games | 13,600+ |
-| PPO update batches | 1,678+ |
-| Stale rollouts in latest trainer batch | 0 |
-| Training avg floor (last 500) | 14.8 |
-| Training elite win rate | 76% |
-| Training Act 1 boss win rate | 19% |
-| 200-game PPO eval avg floor | 14.83 |
-| 200-game PPO eval boss conversion | 21.7% |
+| Observation vector | 585 dims (expanded from 530) |
+| Monster power slots | 19 per monster (11 new STS1-verified powers) |
+| Parallel PPO rollout games | 16,900+ |
+| PPO update batches | 1,856+ |
+| Training avg floor (last 500) | 15.1 |
+| Training elite win rate | 78% |
+| Training Act 1 boss win rate | 21% |
 | 150-game heuristic avg floor | 15.78 |
 | 150-game heuristic boss conversion | 39.0% |
-| Best single run (training) | Floor 46 (Act 3) |
+| Best single run (training) | Floor 50 (Act 3) |
 
 ![Training plot snapshot](docs/assets/training_plot.png)
 
@@ -71,15 +70,15 @@ Slay the Spire instances
 
 The strongest part of the current project is the complete training and evaluation system. The network was upgraded from (256, 256) Tanh to (512, 256, 256) GELU via warm transfer, doubling representational capacity without losing learned behavior. The Act 1 boss remains the primary bottleneck: the agent reaches floor 16 in 66% of games but only beats the boss 19% of the time. The best single training run reached floor 46 (Act 3, beat 2 bosses). No full victories yet.
 
-Current training read: data analysis revealed that elite fights were reward-neutral (+0.09 net vs normal fights) despite games with 2+ elites having double the boss win rate. An elite win bonus (+3.0) and HP-scaled floor advance (0.50 + 0.25 × HP ratio) were added to correct this. Training is ongoing on the new reward structure.
+Recent changes: the observation encoder was expanded from 530 to 585 dimensions by adding 11 STS1-verified monster powers (Sharp Hide, Mode Shift, Enrage, Curiosity, Intangible, Invincible, Time Warp, Beat of Death, Malleable, Life Link, Regenerate) — the agent was previously blind to these combat-critical buffs. Reward shaping was updated with an upgrade reward (+0.30) to counter over-resting, elite win bonus raised to +4.0, and a Guardian offensive-mode damage bonus (+0.03) to teach the two-phase cycle. The model was warm-transferred from the 530-dim checkpoint with zero-initialized new weights to preserve learned behavior.
 
 ## Planned Changes
 
 | Priority | Change | Rationale |
 |---|---|---|
-| **Active** | Monitor elite bonus effect on pathing and boss conversion | Elite win bonus should shift the agent from 0-1 elites (83% of games) toward 2+ elites, which doubles boss win rate |
-| **Next** | Bounded eval after ~1,000 games on new rewards | Compare elite count distribution, boss conversion, and early-floor deaths vs baseline |
-| **If needed** | Tune HP-scaled floor advance ratio | If elite count rises but deaths get reckless, adjust the 0.50/0.25 split |
+| **Active** | Train on expanded 585-d observation with 19 monster powers | Agent can now see Sharp Hide, Intangible, Beat of Death, etc. — expect improvement after 3k–5k games |
+| **Active** | Monitor upgrade reward and Guardian shaping effects | REST_UPGRADE_REWARD (0.30) should reduce over-resting; Guardian bonus should improve Act 1 boss WR |
+| **Next** | Bounded eval after ~2,000 games on new obs/rewards | Compare boss conversion, elite count, rest-vs-smith ratio vs baseline |
 | **Medium-term** | Migrate shop decisions to RL | Shop is the last strategic screen still fully heuristic |
 | **Medium-term** | Richer map path features | If elite count doesn't shift despite reward fix, the 39-d map observation may need more path-planning features |
 | **Long-term** | Additional characters (Silent, Defect, Watcher) | Each needs new card/relic tables, BC heuristics, and character-specific observation blocks |
@@ -94,7 +93,7 @@ AscensionAI is a reinforcement learning project for training an AI agent to play
 ```
 STS Game  <-->  Communication Mod  <-->  Python Agent (stdin/stdout)
                                               |
-                                     obs_encoder (530-d vector)
+                                     obs_encoder (585-d vector)
                                      sts_gym_env (134 discrete actions)
                                      PPOTrainer (Actor-Critic MLP)
 ```
@@ -393,7 +392,7 @@ AscensionAI/
 │   ├── rollout_worker.py     # Parallel rollout collector (per STS instance)
 │   ├── train_offline.py      # Offline PPO trainer for parallel workers
 │   ├── ppo_model.py          # PPOTrainer & GameBuffer (shared by all scripts)
-│   ├── obs_encoder.py        # Game state → 530-d vector (with monster knowledge base)
+│   ├── obs_encoder.py        # Game state → 585-d vector (with monster knowledge base)
 │   ├── sts_gym_env.py        # Action space (134 actions), masking, rewards
 │   ├── screen_handler.py     # Shared non-combat screen handler (heuristic + RL delegation)
 │   ├── game_data.py          # Card, relic, and potion databases for the encoder
@@ -423,11 +422,11 @@ AscensionAI/
 
 ## How It Works
 
-1. **Observation encoding** (`obs_encoder.py`): Converts the full game state into a 530-float vector covering player stats, hand cards, monster identity/behavior/intents/powers, screen context, relic/potion inventories, deck profile, and map path lookahead. Includes a database of all 66 STS monsters with behavioral flags (enrages on skills, splits, scales strength, multi-hit, retaliates, escapes, spawns minions) and a unique identity embedding per monster. Map encoding uses BFS lookahead to provide elite/rest/combat density for each path choice.
+1. **Observation encoding** (`obs_encoder.py`): Converts the full game state into a 585-float vector covering player stats, hand cards, monster identity/behavior/intents/powers (19 power slots per monster), screen context, relic/potion inventories, deck profile, and map path lookahead. Includes a database of all 66 STS monsters with behavioral flags (enrages on skills, splits, scales strength, multi-hit, retaliates, escapes, spawns minions) and a unique identity embedding per monster. Map encoding uses BFS lookahead to provide elite/rest/combat density for each path choice.
 
 2. **Action space** (`sts_gym_env.py`): 134 discrete actions covering targeted/untargeted card plays (50+10), end turn, targeted/untargeted potions (25+5), choice selection (40), proceed, leave, and no-op. Illegal actions are masked out per game state.
 
-3. **Reward shaping** (`sts_gym_env.py`): Dense per-step rewards for gold, relics, max HP, HP-scaled floor progression, combat damage, card management, elite win bonus (+3.0), boss kill rewards (scaled by HP preserved), and act advancement — plus stronger survival incentives (+60 victory, -25 defeat, and higher HP-loss penalty). Urgent targets such as daggers, Gremlin Wizard, Red/Blue Slaver, Gremlin Nob, Book of Stabbing, Exploder, and minion-spawner bosses receive extra damage/kill rewards to teach healthier target priority. Boss-specific shaping penalizes Guardian Sharp Hide attacks, Hexaghost big hits, and Champ enraged damage.
+3. **Reward shaping** (`sts_gym_env.py`): Dense per-step rewards for gold, relics, max HP, HP-scaled floor progression, combat damage, card management, elite win bonus (+4.0), boss kill rewards (scaled by HP preserved), rest-site upgrade reward (+0.30), and act advancement — plus stronger survival incentives (+60 victory, -25 defeat, and higher HP-loss penalty). Urgent targets such as daggers, Gremlin Wizard, Red/Blue Slaver, Gremlin Nob, Book of Stabbing, Exploder, and minion-spawner bosses receive extra damage/kill rewards to teach healthier target priority. Boss-specific shaping penalizes Guardian Sharp Hide attacks and rewards offensive-mode damage, penalizes Hexaghost big hits and Champ enraged damage.
 
    **Combat analytics**: Elite and boss fight outcomes are tracked per-game in `training_stats.csv` and per-fight in `fight_stats.csv`, including which monsters were fought, HP before/after, win/loss, and whether the fight ended through a terminal death state. The Control Panel progress panel shows aggregate elite and boss win rates from the per-fight log.
 

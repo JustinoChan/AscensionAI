@@ -1,7 +1,7 @@
 # AscensionAI Technical Writeup
 
-**Version:** 0.5.0
-**Document Date:** 2026-05-21
+**Version:** 0.6.0
+**Document Date:** 2026-05-23
 **Author:** Justin Chan
 **Repository:** https://github.com/JustinoChan/AscensionAI
 
@@ -9,7 +9,7 @@
 
 ## Abstract
 
-AscensionAI is a reinforcement learning system that trains an autonomous agent to play *Slay the Spire* (Ironclad) end-to-end against the live, modded game process. The system uses a structured 530-dimensional observation encoder, a 134-action discrete action space with legal-action masking, dense reward shaping, behavior cloning warm-start, and Proximal Policy Optimization (PPO) fine-tuning. Training is parallelized across multiple live game instances feeding a central offline trainer over a checkpoint-tagged rollout protocol, with fixed-seed evaluation and dashboard artifacts used to separate real policy progress from run-to-run variance. As of 2026-05-21, the project has moved beyond the original 256x256 Tanh MLP plateau diagnosis and now supports a larger `(512, 256, 256)` GELU network through warm-transfer loading from older checkpoints. The system currently runs on Windows and integrates with ModTheSpire, BaseMod, CommunicationMod, and a bundled SpireComm Python interface. This document describes the architecture, algorithmic choices, implementation, observed throughput, current limitations, and a phased roadmap.
+AscensionAI is a reinforcement learning system that trains an autonomous agent to play *Slay the Spire* (Ironclad) end-to-end against the live, modded game process. The system uses a structured 585-dimensional observation encoder (expanded from 530 with 19 monster power slots), a 134-action discrete action space with legal-action masking, dense reward shaping, behavior cloning warm-start, and Proximal Policy Optimization (PPO) fine-tuning. Training is parallelized across multiple live game instances feeding a central offline trainer over a checkpoint-tagged rollout protocol, with fixed-seed evaluation and dashboard artifacts used to separate real policy progress from run-to-run variance. As of 2026-05-23, the observation encoder covers all combat-relevant STS1 monster powers and the reward structure includes upgrade incentives, Guardian phase-aware shaping, and tuned elite bonuses. The system currently runs on Windows and integrates with ModTheSpire, BaseMod, CommunicationMod, and a bundled SpireComm Python interface. This document describes the architecture, algorithmic choices, implementation, observed throughput, current limitations, and a phased roadmap.
 
 ---
 
@@ -18,7 +18,7 @@ AscensionAI is a reinforcement learning system that trains an autonomous agent t
 | Aspect | Status |
 |---|---|
 | Environment integration | Complete - live STS via CommunicationMod / SpireComm |
-| Observation encoder | Complete - 530-d vector across 11 feature blocks |
+| Observation encoder | Complete - 585-d vector across 11 feature blocks (19 monster power slots) |
 | Action space | Complete - 134 discrete actions, legal-action masking |
 | Reward shaping | Complete - dense per-step, terminal, elite win bonus, HP-scaled floor advance, spawner priority, and boss-specific signals |
 | Behavior cloning | Complete - heuristic demos, supervised cross-entropy, resumable checkpointing |
@@ -32,14 +32,14 @@ AscensionAI is a reinforcement learning system that trains an autonomous agent t
 
 **Headline metrics (current state):**
 
-- Observation dimensionality: 530
+- Observation dimensionality: 585 (expanded from 530; 19 monster power slots per monster)
 - Action space size: 134
-- Current offline PPO architecture: 530 -> 512 -> 256 -> 256 -> {134 logits + 1 value}, GELU, ~504K parameters
-- Legacy / single-trainer default architecture: 530 -> 256 -> 256 -> {134 logits + 1 value}, Tanh, ~236K parameters
+- Current offline PPO architecture: 585 -> 512 -> 256 -> 256 -> {134 logits + 1 value}, GELU, ~504K parameters
 - Monster knowledge base: 66 monsters x 7 behavioral flags x 8-d identity embedding
-- Latest 200-game PPO eval before boss-shaping exploration valley: 15.44 average floor, 4.03 average reward, best floor 42, 79.9% elite win rate, 31.1% boss conversion
-- Latest 200-game PPO eval after boss reward shaping and BC-anchor loosening: 14.83 average floor, -0.95 average reward, 77.3% elite win rate, 21.7% boss conversion
-- Current diagnosis: floor-16 Act 1 boss remains the bottleneck; the 256x256 network appeared capacity-limited, motivating the 512/256/256 GELU warm-transfer upgrade
+- Monster power encoding: 19 powers per monster (strength, vulnerable, weakened, artifact, ritual, curlup, thorns, angry, sharphide, modeshift, enrage, curiosity, intangible, invincible, timewarp, beatofdeath, malleable, lifelink, regenerate)
+- Training scale: 16,900+ PPO rollout games, 1,856+ update batches
+- Training avg floor (last 500): 15.1, elite WR 78%, boss WR 21%
+- Best single training run: floor 50 (Act 3)
 - Per-step inference: <5 ms on CPU (no GPU required for play/eval)
 
 ---
@@ -107,7 +107,7 @@ The project is organized around a four-tier pipeline: live game, communication l
                                  v
 +-----------------------------------------------------------------+
 |                       AGENT LAYER                               |
-|   obs_encoder.py        -> 530-d observation vector             |
+|   obs_encoder.py        -> 585-d observation vector             |
 |   sts_gym_env.py        -> 134-action mask + reward tracker     |
 |   screen_handler.py     -> auto-handle mechanical screens       |
 |   ppo_model.py          -> sample / predict action              |
@@ -156,7 +156,7 @@ For parallel training the topology fans out:
 
 ## 3. Observation Space
 
-Total observation length: **530 floats** (= ~2.1 KB per state).
+Total observation length: **585 floats** (= ~2.3 KB per state). Expanded from 530 on 2026-05-23 by adding 11 STS1-verified monster powers.
 
 ### 3.1 Observation block breakdown
 
@@ -167,13 +167,41 @@ Total observation length: **530 floats** (= ~2.1 KB per state).
 | Hand cards (10 slots × 16) | 160 | Per-card: identity, type, cost, upgrade, exhausts, damage/block, playable |
 | Monsters (5 slots × 30) | 150 | Per-monster: HP/block/intent + 8-d identity embedding + 3 move-history IDs + 7 behavioral flags |
 | Player powers | 20 | Strength, Dexterity, Vulnerable, Weak, Frail, Ritual, etc. |
-| Monster powers (5 × 8) | 40 | Per-monster top powers (Strength, Vulnerable, ...) |
+| Monster powers (5 × 19) | 95 | Per-monster: 19 power slots covering all combat-relevant STS1 buffs/debuffs |
 | Choice list features | 7 | Number/type-distribution of currently offered choices |
 | Relics | 25 | Relic feature bag (presence + key-effect flags) |
 | Potions (5 × 8) | 40 | Per-slot: id, target type, cost, presence, value flags |
 | Deck profile | 20 | Card-type distribution, average cost, curse/status counts, upgrade ratio |
 | Map lookahead | 39 | 4 next choices × (one-hot type + 3-floor BFS density) + 3 globals |
-| **Total** | **530** | |
+| **Total** | **585** | |
+
+### 3.1.1 Monster power slots (19 per monster)
+
+The 19 encoded monster powers cover all combat-relevant STS1 buffs and debuffs:
+
+| Index | Power | Key monsters |
+|---:|---|---|
+| 0 | Strength | Many (Cultist, Nob, etc.) |
+| 1 | Vulnerable | Applied by player |
+| 2 | Weakened | Applied by player |
+| 3 | Artifact | Bosses, elites |
+| 4 | Ritual | Cultist |
+| 5 | Curl Up | Louse variants |
+| 6 | Thorns | Spiker, player-applied |
+| 7 | Angry | Book of Stabbing |
+| 8 | Sharp Hide | Guardian (defensive mode) |
+| 9 | Mode Shift | Guardian (phase counter) |
+| 10 | Enrage | Gremlin Nob |
+| 11 | Curiosity | Awakened One |
+| 12 | Intangible | Nemesis |
+| 13 | Invincible | Corrupt Heart |
+| 14 | Time Warp | Time Eater |
+| 15 | Beat of Death | Corrupt Heart |
+| 16 | Malleable | Writhing Mass |
+| 17 | Life Link | Darklings |
+| 18 | Regenerate | Awakened One, burning elites |
+
+An unrecognised-powers logger writes unknown power IDs to `logs/unrecognised_powers.log` for coverage auditing.
 
 ### 3.2 Monster knowledge base
 
@@ -242,7 +270,8 @@ Reward shaping is dense to accelerate early learning. All reward sources fire ea
 | Generic monster killed | +0.75 / kill | |
 | **Priority monster damage** | **+0.03–5.0 / HP** | Spawners, boss minions (Donu, TorchHead, BronzeOrb) |
 | **Priority monster kill** | **+1.0–5.0** | Weighted by threat level |
-| **Elite win bonus** | **+3.0** | Awarded on floor advance after elite victory |
+| Rest-site upgrade | +0.30 / upgrade | Counters over-resting at high HP by rewarding smithing |
+| **Elite win bonus** | **+4.0** | Awarded on floor advance after elite victory |
 | Boss kill reward | +8.0 + up to +8.0 × HP ratio | Scaled by HP preserved through boss fight |
 | Act advanced (act 2+) | +12.0 | Encourages full-act progression |
 | Victory | +60.0 | Terminal |
@@ -252,7 +281,8 @@ Reward shaping is dense to accelerate early learning. All reward sources fire ea
 
 - HP loss penalty is calibrated so a 10-damage hit costs `−0.8`, roughly equal to a generic monster kill (+0.75). This balances offense and defense early in training.
 - Priority monster shaping is the critical incentive against "minion farming." Without it, killing easy minions can feel as rewarding as killing the spawner per unit time.
-- The elite win bonus (+3.0) makes elite fights clearly positive-EV despite their HP cost (~32 HP average). Training data showed that games with 2+ elites doubled the Act 1 boss win rate, but the reward function made elites reward-neutral. The bonus corrects this.
+- The elite win bonus (+4.0) makes elite fights clearly positive-EV despite their HP cost (~31 HP average). Training data showed that games with 2+ elites doubled the Act 1 boss win rate, but the reward function made elites reward-neutral. The bonus corrects this.
+- The rest-site upgrade reward (+0.30) prevents over-resting at high HP. Without it, the HP loss penalty (0.08/HP) makes topping off immediately rewarding even at 73/80 HP, while upgrade benefits are delayed. The upgrade reward makes smithing competitive with healing.
 - The HP-scaled floor advance (0.50 base + 0.25 × HP ratio) gives a dense per-floor gradient: arriving at the boss at 75/80 HP is worth 0.73, arriving at 30/80 is worth 0.59. This teaches HP conservation without punishing survival at low health.
 - The act-advance bonus is a structural shaping term: it discourages stalling in act 1 and rewards real progression.
 
@@ -393,7 +423,7 @@ Each `.npz` file represents one completed game:
 
 | Field | Type | Description |
 |---|---|---|
-| `obs` | float32 [T, 530] | Observation history |
+| `obs` | float32 [T, 585] | Observation history |
 | `actions` | int64 [T] | Sampled action ids |
 | `rewards` | float32 [T] | Per-step shaped + terminal |
 | `dones` | bool [T] | Episode termination flags |
@@ -512,7 +542,7 @@ These are *expected* numbers based on similar STS RL work and are not yet valida
 
 | File | Responsibility |
 |---|---|
-| `obs_encoder.py` | 530-d observation construction, monster knowledge base, map lookahead. |
+| `obs_encoder.py` | 585-d observation construction, monster knowledge base (19 power slots), map lookahead. |
 | `sts_gym_env.py` | Action space, action masking, flat-id ↔ SpireComm action conversion, RewardTracker. |
 | `ppo_model.py` | GameBuffer (GAE), PPOTrainer (clipped policy, value loss, entropy, BC anchor, target-KL early stop, atomic checkpoint save/load). |
 | `behavior_clone.py` | Heuristic policy + supervised BC training driver. Includes resumable progress checkpointing. |
@@ -783,7 +813,7 @@ The 256x256 network appeared to plateau: it reached roughly 15 average floor ear
 
 - `scripts/ppo_model.py` now supports configurable activations and `warm_load()`, including partial tensor transfer and identity initialization for newly inserted compatible layers.
 - `scripts/train_offline.py` now defaults to `--net-arch 512,256,256`, supports `--activation gelu`, `--warm-transfer`, auto device selection, and richer auto-tune behavior for learning rate, entropy coefficient, and BC coefficient.
-- `scripts/sts_gym_env.py` contains boss-specific reward shaping for Guardian, Hexaghost, Slime Boss, Bronze Automaton, Champ, and Donu/Deca-style priority targets, with boss kill rewards scaled by remaining HP. Also includes elite win bonus (+3.0) and HP-scaled floor advance (0.50 base + 0.25 × HP ratio).
+- `scripts/sts_gym_env.py` contains boss-specific reward shaping for Guardian, Hexaghost, Slime Boss, Bronze Automaton, Champ, and Donu/Deca-style priority targets, with boss kill rewards scaled by remaining HP. Includes elite win bonus (+4.0), HP-scaled floor advance (0.50 base + 0.25 × HP ratio), rest-site upgrade reward (+0.30), and Guardian offensive-mode damage bonus (+0.03).
 - `scripts/screen_handler.py` and `scripts/behavior_clone.py` have newer event, card-tier, boss-relic, grid, and rest-site handling so disabled choices, Coffee Dripper/Fusion Hammer constraints, Match and Keep, and boss relic screens do not poison training data or freeze workers.
 - `AscensionAI.pyw` now includes archive controls, eval-set orchestration, auto-tune and entropy display, bounded worker games, restart-every cycling, and per-instance JVM heap caps.
 - `docs/dashboard/`, `docs/experiments/`, and `docs/index.html` are no longer decorative; they are the public evidence layer for comparing BC, PPO, heuristic, and fixed-seed results.
@@ -808,3 +838,4 @@ The 256x256 network appeared to plateau: it reached roughly 15 average floor ear
 | 0.4 | 2026-05-07 | Full restructure with tables, estimates, ASCII charts, expanded limitations and roadmap |
 | 0.5 | 2026-05-21 | Updated current status after 33 post-writeup commits, 12k PPO diagnosis, boss reward shaping, auto-tune maturation, dashboard/eval hardening, and 512/256/256 GELU warm-transfer upgrade |
 | 0.5.1 | 2026-05-22 | Updated reward weights table with current values, added elite win bonus and HP-scaled floor advance documentation, corrected heuristic vs RL decision boundary |
+| 0.6.0 | 2026-05-23 | Expanded observation encoder from 530-d to 585-d with 19 monster power slots (11 new STS1-verified powers). Added REST_UPGRADE_REWARD (+0.30), bumped ELITE_WIN_BONUS to +4.0, added GUARDIAN_OPEN_DMG_BONUS (+0.03). Fixed warm_load() to zero-initialize extra capacity. Added --warm-resume/--net-arch/--activation to train_ppo.py. 16,900+ training games, 1,856+ PPO updates. |
