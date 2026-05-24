@@ -115,6 +115,11 @@ class PPOTrainer:
             self.bc_obs_t = self.bc_actions_t = self.bc_masks_t = None
             return
         obs = np.array(observations, dtype=np.float32)
+        expected_dim = self.shared[0].in_features
+        if obs.ndim == 2 and obs.shape[1] < expected_dim:
+            pad = np.zeros((obs.shape[0], expected_dim - obs.shape[1]),
+                           dtype=np.float32)
+            obs = np.concatenate([obs, pad], axis=1)
         actions = np.array(actions, dtype=np.int64)
         masks = np.array(masks, dtype=np.bool_)
         in_range = (actions >= 0) & (actions < self.n_actions)
