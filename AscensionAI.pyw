@@ -2985,7 +2985,7 @@ class AscensionApp:
                 "--batch-games", "8",
                 "--lr", "3e-5",
                 "--bc-coef", "0.10",
-                "--max-rollout-lag", "4",
+                "--max-rollout-lag", "9999",
                 "--ent-coef", str(self._ent_value),
                 "--device", "gpu" if self.gpu_var.get() else "cpu",
             ]
