@@ -454,6 +454,8 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--save", type=str, default="models/ppo_sts.pt")
     parser.add_argument("--resume", type=str, default=None)
+    parser.add_argument("--warm-resume", action="store_true",
+                        help="Use warm weight transfer when resuming (for OBS_SIZE changes)")
     parser.add_argument("--save-every", type=int, default=5,
                         help="Save model every N games")
     parser.add_argument("--games-per-update", type=int, default=4,
@@ -464,6 +466,10 @@ def main():
                         help="Entropy bonus coefficient (higher = more exploration)")
     parser.add_argument("--target-kl", type=float, default=0.03,
                         help="Stop PPO epochs early when approx KL exceeds this value")
+    parser.add_argument("--net-arch", type=str, default="512,256,256",
+                        help="Hidden layer sizes, comma-separated (default: 512,256,256)")
+    parser.add_argument("--activation", type=str, default="gelu",
+                        help="Activation function: tanh, gelu, relu (default: gelu)")
     parser.add_argument("--verbose", action="store_true",
                         help="Write detailed per-state/per-action debug logs")
     args = parser.parse_args()
@@ -472,10 +478,13 @@ def main():
     save_path = os.path.join(_root, args.save)
     os.makedirs(os.path.dirname(save_path) or ".", exist_ok=True)
 
+    net_arch = tuple(int(x) for x in args.net_arch.split(","))
+
     log("Creating PPO trainer...")
     log(f"Config: save={args.save} resume={args.resume} "
         f"games_per_update={args.games_per_update} lr={args.lr} ent_coef={args.ent_coef} "
-        f"target_kl={args.target_kl} verbose={VERBOSE}")
+        f"target_kl={args.target_kl} net_arch={net_arch} activation={args.activation} "
+        f"warm_resume={args.warm_resume} verbose={VERBOSE}")
     trainer = PPOTrainer(
         obs_size=OBS_SIZE,
         n_actions=NUM_ACTIONS,
@@ -488,13 +497,20 @@ def main():
         vf_coef=0.5,
         n_epochs=4,
         batch_size=64,
-        net_arch=(256, 256),
+        net_arch=net_arch,
         target_kl=args.target_kl,
+        activation=args.activation,
     )
 
     if args.resume:
         resume_path = os.path.join(_root, args.resume)
-        trainer.load(resume_path)
+        if args.warm_resume:
+            transferred = trainer.warm_load(resume_path)
+            log(f"Warm transfer from {resume_path}: {len(transferred)} weight groups")
+            for desc in transferred:
+                log(f"  {desc}")
+        else:
+            trainer.load(resume_path)
         trainer.set_lr(args.lr)
         log(f"Loaded checkpoint {resume_path}; optimizer lr reset to {args.lr}")
 

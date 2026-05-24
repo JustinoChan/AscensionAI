@@ -429,13 +429,15 @@ class PPOTrainer:
                 new_shared[key] = old_t
                 transferred.append(f"shared.{key} exact")
             elif old_t.dim() == 2 and new_t.dim() == 2:
-                # Weight matrix: copy old into top-left corner
+                # Weight matrix: zero-fill then copy old into top-left corner
+                new_shared[key] = torch.zeros_like(new_t)
                 r = min(old_t.shape[0], new_t.shape[0])
                 c = min(old_t.shape[1], new_t.shape[1])
                 new_shared[key][:r, :c] = old_t[:r, :c]
                 transferred.append(f"shared.{key} {old_t.shape}->{new_t.shape}")
             elif old_t.dim() == 1 and new_t.dim() == 1:
-                # Bias vector: copy shared prefix
+                # Bias vector: zero-fill then copy shared prefix
+                new_shared[key] = torch.zeros_like(new_t)
                 r = min(old_t.shape[0], new_t.shape[0])
                 new_shared[key][:r] = old_t[:r]
                 transferred.append(f"shared.{key} {old_t.shape}->{new_t.shape}")
