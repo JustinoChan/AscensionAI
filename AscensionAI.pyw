@@ -3013,7 +3013,12 @@ class AscensionApp:
 
             rollout_dir = ROOT / "rollouts_shared"
             while self.running:
-                time.sleep(5.0)
+                for _ in range(50):
+                    if not self.running:
+                        break
+                    time.sleep(0.1)
+                if not self.running:
+                    break
                 remaining = len(list(rollout_dir.glob("*.npz")))
                 if self.trainer_proc is not None:
                     rc = self.trainer_proc.poll()
