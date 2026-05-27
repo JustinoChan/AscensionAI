@@ -44,7 +44,7 @@ Updated May 27, 2026. Raw logs, rollout files, and model checkpoints stay out of
 | Network architecture | (512, 256, 256) GELU, ~504K params |
 | Observation vector | 585 dims (expanded from 530) |
 | Monster power slots | 19 per monster (11 new STS1-verified powers) |
-| Parallel PPO rollout games | 21,900+ |
+| Parallel PPO rollout games | 19,400+ |
 | PPO update batches | 2,410+ |
 | 200-game eval avg floor | 14.7 |
 | 200-game eval boss win rate | 38.1% |
@@ -72,7 +72,7 @@ Slay the Spire instances
 
 The strongest part of the current project is the complete training and evaluation system. The network was upgraded from (256, 256) Tanh to (512, 256, 256) GELU via warm transfer, doubling representational capacity without losing learned behavior. The Act 1 boss remains the primary bottleneck: the agent beats the boss 38% of the time in eval but only 20% of games reach Act 2. The best single training run reached floor 50 (Act 3). No full victories yet.
 
-Recent changes: added HP-urgency-scaled rest-site heal reward to fix the agent choosing upgrades over healing at critical HP (e.g. 23 HP before Act 1 boss). Heal reward scales with `(1 - hp_before/max_hp)` so healing at 25% HP gives ~0.45 reward (beats the 0.30 upgrade reward) while healing at 75% HP gives ~0.15 (upgrade wins). The 200-game eval at 21,900+ training games shows boss win rate jumped from 21.7% to 38.1%, with 8 runs reaching floor 30+ including two Act 3 runs (floors 42 and 46). Earlier changes included 585-d observation expansion with 19 monster power slots, upgrade reward (+0.30), and boss-specific reward shaping.
+Recent changes: added HP-urgency-scaled rest-site heal reward to fix the agent choosing upgrades over healing at critical HP (e.g. 23 HP before Act 1 boss). Heal reward scales with `(1 - hp_before/max_hp)` so healing at 25% HP gives ~0.45 reward (beats the 0.30 upgrade reward) while healing at 75% HP gives ~0.15 (upgrade wins). The 200-game eval at 19,400+ training games shows boss win rate jumped from 21.7% to 38.1%, with 8 runs reaching floor 30+ including two Act 3 runs (floors 42 and 46). Earlier changes included 585-d observation expansion with 19 monster power slots, upgrade reward (+0.30), and boss-specific reward shaping.
 
 ## Planned Changes
 
