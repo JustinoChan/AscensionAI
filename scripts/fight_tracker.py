@@ -93,14 +93,30 @@ class FightTracker:
         self.elites_won = 0
         self.bosses_fought = 0
         self.bosses_won = 0
+        self._per_act: dict[int, dict[str, int]] = {}
+
+    def _act_bucket(self, act: int) -> dict[str, int]:
+        if act not in self._per_act:
+            self._per_act[act] = {
+                "elites_fought": 0, "elites_won": 0,
+                "bosses_fought": 0, "bosses_won": 0,
+            }
+        return self._per_act[act]
 
     def summary(self) -> dict[str, int]:
-        return {
+        out: dict[str, int] = {
             "elites_fought": self.elites_fought,
             "elites_won": self.elites_won,
             "bosses_fought": self.bosses_fought,
             "bosses_won": self.bosses_won,
         }
+        for a in (1, 2, 3):
+            bucket = self._per_act.get(a, {})
+            out[f"elites_fought_act{a}"] = bucket.get("elites_fought", 0)
+            out[f"elites_won_act{a}"] = bucket.get("elites_won", 0)
+            out[f"bosses_fought_act{a}"] = bucket.get("bosses_fought", 0)
+            out[f"bosses_won_act{a}"] = bucket.get("bosses_won", 0)
+        return out
 
     def observe(
         self,
@@ -150,12 +166,17 @@ class FightTracker:
         screen = _screen_name(gs)
         won = bool(victory) or (not terminal and hp_after > 0)
 
+        bucket = self._act_bucket(self.act)
         if self.active_type == "elite":
             self.elites_fought += 1
             self.elites_won += int(won)
+            bucket["elites_fought"] += 1
+            bucket["elites_won"] += int(won)
         elif self.active_type == "boss":
             self.bosses_fought += 1
             self.bosses_won += int(won)
+            bucket["bosses_fought"] += 1
+            bucket["bosses_won"] += int(won)
 
         row = {
             "timestamp": datetime.now().isoformat(),

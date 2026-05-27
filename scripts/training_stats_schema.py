@@ -20,6 +20,9 @@ TRAINING_STATS_COLUMNS = [
     "entropy", "normalized_entropy",
     "worker",
     "elites_fought", "elites_won", "bosses_fought", "bosses_won",
+    "elites_fought_act1", "elites_won_act1", "bosses_fought_act1", "bosses_won_act1",
+    "elites_fought_act2", "elites_won_act2", "bosses_fought_act2", "bosses_won_act2",
+    "elites_fought_act3", "elites_won_act3", "bosses_fought_act3", "bosses_won_act3",
     "approx_kl", "clip_fraction", "explained_variance",
     "mean_advantage", "std_advantage", "invalid_action_count",
     "mean_chosen_action_prob",
@@ -57,10 +60,9 @@ def _write_header(path: str, columns: Iterable[str] = TRAINING_STATS_COLUMNS) ->
 def ensure_training_stats_csv(path: str, log_fn: Callable[[str], None] | None = None) -> None:
     """Create or migrate training_stats.csv to the shared schema.
 
-    Migration is intentionally conservative: if an existing CSV is missing new
-    columns, archive it instead of rewriting mixed-schema rows in place. This
-    avoids broken plots where the header says one thing but appended rows use a
-    different field order.
+    If the only change is new columns (additive), rewrite the file in-place
+    with the updated header and blank values for old rows so history is
+    preserved.  If columns were removed or renamed, archive and start fresh.
     """
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
 
@@ -73,6 +75,26 @@ def ensure_training_stats_csv(path: str, log_fn: Callable[[str], None] | None = 
     extra = [c for c in header if c and c not in TRAINING_STATS_COLUMNS]
     if not missing and not extra:
         return
+
+    if missing and not extra:
+        try:
+            with open(path, "r", encoding="utf-8", newline="") as f:
+                reader = csv.DictReader(f)
+                old_rows = list(reader)
+            with open(path, "w", encoding="utf-8", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=TRAINING_STATS_COLUMNS)
+                writer.writeheader()
+                for row in old_rows:
+                    out = {c: row.get(c, "") for c in TRAINING_STATS_COLUMNS}
+                    writer.writerow(out)
+            _log(
+                log_fn,
+                f"training_stats.csv: added {len(missing)} new columns in-place "
+                f"({len(old_rows)} rows preserved). New columns: {missing}",
+            )
+            return
+        except Exception as e:
+            _log(log_fn, f"In-place column migration failed, falling back to archive: {e}")
 
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     archive = path.replace(".csv", f"_pre_schema_{ts}.csv")

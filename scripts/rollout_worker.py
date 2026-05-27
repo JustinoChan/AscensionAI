@@ -632,10 +632,7 @@ class WorkerAgent:
                 "final_act": int(getattr(final_gs, "act", 0) or 0) if final_gs else "",
                 "victory": int(bool(victory)),
                 "terminated": 1,
-                "elites_fought": fight_stats["elites_fought"],
-                "elites_won": fight_stats["elites_won"],
-                "bosses_fought": fight_stats["bosses_fought"],
-                "bosses_won": fight_stats["bosses_won"],
+                **fight_stats,
             })
 
             if fight_stats["elites_fought"] or fight_stats["bosses_fought"]:

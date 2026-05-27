@@ -82,6 +82,9 @@ _EVAL_COLUMNS = [
     "timestamp", "run", "policy", "model", "seed", "game", "steps", "total_reward",
     "final_hp", "final_max_hp", "final_floor", "final_act", "victory",
     "elites_fought", "elites_won", "bosses_fought", "bosses_won",
+    "elites_fought_act1", "elites_won_act1", "bosses_fought_act1", "bosses_won_act1",
+    "elites_fought_act2", "elites_won_act2", "bosses_fought_act2", "bosses_won_act2",
+    "elites_fought_act3", "elites_won_act3", "bosses_fought_act3", "bosses_won_act3",
 ]
 
 
@@ -240,6 +243,7 @@ class EvalAgent:
         self.elites_won = 0
         self.bosses_fought = 0
         self.bosses_won = 0
+        self._per_act_totals: dict[str, int] = {}
         self.fight_tracker = FightTracker(source="eval", worker="eval", log=log)
         self._current_seed = ""
         self._preload_completed_summary(completed_rows)
@@ -256,6 +260,10 @@ class EvalAgent:
             self.elites_won += _row_int(row, "elites_won")
             self.bosses_fought += _row_int(row, "bosses_fought")
             self.bosses_won += _row_int(row, "bosses_won")
+            for a in (1, 2, 3):
+                for k in (f"elites_fought_act{a}", f"elites_won_act{a}",
+                          f"bosses_fought_act{a}", f"bosses_won_act{a}"):
+                    self._per_act_totals[k] = self._per_act_totals.get(k, 0) + _row_int(row, k)
         log(f"Resuming eval run {self.run_tag}: {self.games_played} contiguous games already recorded")
 
     def on_state_change(self, gs) -> Action:
@@ -299,13 +307,20 @@ class EvalAgent:
                 os._exit(0)
             if self.games_played >= self.target_games:
                 log("target games reached — requesting exit")
+                pa = self._per_act_totals
                 summary = (
                     f"EVAL COMPLETE: {self.games_played} games, "
                     f"wins={self.wins} ({self.wins / max(1, self.games_played):.1%}), "
                     f"avg_floor={self.sum_floor / max(1, self.games_played):.2f}, "
                     f"avg_reward={self.sum_reward / max(1, self.games_played):.2f}, "
-                    f"elites={self.elites_won}/{self.elites_fought}, "
-                    f"bosses={self.bosses_won}/{self.bosses_fought}"
+                    f"elites={self.elites_won}/{self.elites_fought} "
+                    f"(A1:{pa.get('elites_won_act1',0)}/{pa.get('elites_fought_act1',0)} "
+                    f"A2:{pa.get('elites_won_act2',0)}/{pa.get('elites_fought_act2',0)} "
+                    f"A3:{pa.get('elites_won_act3',0)}/{pa.get('elites_fought_act3',0)}), "
+                    f"bosses={self.bosses_won}/{self.bosses_fought} "
+                    f"(A1:{pa.get('bosses_won_act1',0)}/{pa.get('bosses_fought_act1',0)} "
+                    f"A2:{pa.get('bosses_won_act2',0)}/{pa.get('bosses_fought_act2',0)} "
+                    f"A3:{pa.get('bosses_won_act3',0)}/{pa.get('bosses_fought_act3',0)})"
                 )
                 log(summary)
                 print(summary, file=sys.stderr)
@@ -378,6 +393,9 @@ class EvalAgent:
         self.elites_won += fight_stats["elites_won"]
         self.bosses_fought += fight_stats["bosses_fought"]
         self.bosses_won += fight_stats["bosses_won"]
+        for k, v in fight_stats.items():
+            if k.endswith(("_act1", "_act2", "_act3")):
+                self._per_act_totals[k] = self._per_act_totals.get(k, 0) + v
         self.sum_floor += floor
         self.sum_reward += self.episode_reward
         if victory:
@@ -397,10 +415,7 @@ class EvalAgent:
             "final_floor": floor,
             "final_act": int(getattr(final_gs, "act", 0) or 0),
             "victory": int(bool(victory)),
-            "elites_fought": fight_stats["elites_fought"],
-            "elites_won": fight_stats["elites_won"],
-            "bosses_fought": fight_stats["bosses_fought"],
-            "bosses_won": fight_stats["bosses_won"],
+            **fight_stats,
         })
         log(
             f"Game #{self.games_played}: floor={floor} "
