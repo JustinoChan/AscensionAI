@@ -389,6 +389,7 @@ DEFEAT_PENALTY = 25.0
 DEFEAT_FLOOR_OFFSET = 0.25
 MAX_HP_GAIN_REWARD = 0.10
 REST_UPGRADE_REWARD = 0.30
+REST_HEAL_PER_HP = 0.025
 
 # ---------------------------------------------------------------------------
 # Boss fight reward shaping
@@ -543,6 +544,12 @@ class RewardTracker:
             if new_ups > 0:
                 reward += new_ups * REST_UPGRADE_REWARD
             self._last_upgrades = upgrades
+
+            hp_recovered = max(0, hp - self.last_hp)
+            if hp_recovered > 0:
+                max_hp = max(1, int(getattr(gs, "max_hp", 1) or 1))
+                urgency = 1.0 - (self.last_hp / max_hp)
+                reward += hp_recovered * REST_HEAL_PER_HP * urgency
 
         if in_combat and not self.last_in_combat:
             room = str(getattr(gs, "room_type", "") or "")

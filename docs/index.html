@@ -256,12 +256,12 @@
   <main>
     <section class="section">
       <h2>Project Snapshot</h2>
-      <p class="lead">May 23, 2026: 16,900+ training games, 1,856+ PPO updates. Observation encoder expanded from 530-d to 585-d with 19 monster power slots covering all combat-relevant STS1 buffs. Reward shaping updated with upgrade incentives, Guardian phase-aware bonus, and elite win bonus raised to +4.0.</p>
+      <p class="lead">May 27, 2026: 21,900+ training games, 2,410+ PPO updates. 200-game eval shows 38.1% boss win rate (up from 21.7%), 20% Act 2 reach rate, and 8 runs past floor 30 including two Act 3 runs. HP-urgency heal reward added to fix pre-boss upgrade-over-heal decisions.</p>
       <div class="metric-grid">
         <div class="metric"><span>Action space</span><strong>134</strong></div>
         <div class="metric"><span>Observation vector</span><strong>585</strong></div>
-        <div class="metric"><span>Monster power slots</span><strong>19</strong></div>
-        <div class="metric"><span>PPO rollout games</span><strong>16,900+</strong></div>
+        <div class="metric"><span>Eval boss win rate</span><strong>38.1%</strong></div>
+        <div class="metric"><span>PPO rollout games</span><strong>21,900+</strong></div>
       </div>
     </section>
 
@@ -290,7 +290,7 @@
         </article>
         <article class="card">
           <h3>Technical Writeup</h3>
-          <p>v0.6 — 585-d observation with 19 monster powers, upgrade reward, Guardian phase shaping, elite bonus +4.0, warm-transfer fix.</p>
+          <p>v0.7 — HP-urgency heal reward, 21,900+ games, 38.1% boss WR eval, 585-d obs, 19 monster powers, boss-specific shaping.</p>
           <a href="AscensionAI_Technical_Writeup.md">Read writeup</a> · <a href="AscensionAI_Technical_Writeup.pdf">PDF</a>
         </article>
         <article class="card">
@@ -319,22 +319,22 @@
 
     <section class="section">
       <h2>Current Results</h2>
-      <p class="lead">16,900+ PPO rollout games on the (512, 256, 256) GELU network. Observation expanded to 585-d with 19 monster power slots. Reward shaping now includes upgrade incentives, Guardian offensive-mode bonus, and elite win bonus +4.0.</p>
+      <p class="lead">21,900+ PPO rollout games on the (512, 256, 256) GELU network. Latest 200-game eval: 38.1% boss WR, 20% Act 2 reach rate, best run floor 46. HP-urgency heal reward added alongside upgrade incentives, Guardian offensive-mode bonus, and elite bonus +4.0.</p>
       <div class="grid">
+        <article class="card">
+          <h3>PPO 22k checkpoint (latest)</h3>
+          <p>200 eval games: 14.7 avg floor, 38.1% boss WR, 69.6% elite WR, 20% Act 2 reach. 8 runs past floor 30, best floor 46. Boss WR nearly doubled from prior eval.</p>
+          <a href="experiments/007_ppo_12k_boss_shaping.md">View report</a>
+        </article>
+        <article class="card">
+          <h3>PPO 12k checkpoint (prior)</h3>
+          <p>200 eval games: 14.83 avg floor, 21.7% boss WR. Boss reward shaping for all bosses, BC anchor auto-tuned. Before heal reward fix.</p>
+          <a href="experiments/007_ppo_12k_boss_shaping.md">View report</a>
+        </article>
         <article class="card">
           <h3>Heuristic baseline</h3>
           <p>150 eval games: 15.78 average floor, 39% boss conversion, 26.0% Act 2 reach rate.</p>
           <a href="experiments/003_fixed_seed_eval.md">View evaluation</a>
-        </article>
-        <article class="card">
-          <h3>PPO 12k checkpoint</h3>
-          <p>200 eval games: 14.83 average floor, 21.7% boss conversion. Boss reward shaping for all bosses, BC anchor auto-tuned. In exploration valley after BC decay acceleration.</p>
-          <a href="experiments/007_ppo_12k_boss_shaping.md">View report</a>
-        </article>
-        <article class="card">
-          <h3>PPO 5k checkpoint (peak)</h3>
-          <p>200 eval games: 15.44 average floor, 31.1% boss conversion. Best eval result before boss shaping and BC decay changes.</p>
-          <a href="experiments/005_ppo_4136_eval.md">View PPO report</a>
         </article>
       </div>
     </section>

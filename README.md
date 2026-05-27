@@ -35,7 +35,7 @@ The project is built as an ML systems portfolio piece: it shows how to wrap a li
 
 ## Current Snapshot
 
-Updated May 23, 2026. Raw logs, rollout files, and model checkpoints stay out of git. Public experiment reports are in the [experiment registry](https://justinochan.github.io/AscensionAI/experiments/index.json).
+Updated May 27, 2026. Raw logs, rollout files, and model checkpoints stay out of git. Public experiment reports are in the [experiment registry](https://justinochan.github.io/AscensionAI/experiments/index.json).
 
 | Result | Value |
 |---|---:|
@@ -44,11 +44,13 @@ Updated May 23, 2026. Raw logs, rollout files, and model checkpoints stay out of
 | Network architecture | (512, 256, 256) GELU, ~504K params |
 | Observation vector | 585 dims (expanded from 530) |
 | Monster power slots | 19 per monster (11 new STS1-verified powers) |
-| Parallel PPO rollout games | 16,900+ |
-| PPO update batches | 1,856+ |
-| Training avg floor (last 500) | 15.1 |
-| Training elite win rate | 78% |
-| Training Act 1 boss win rate | 21% |
+| Parallel PPO rollout games | 21,900+ |
+| PPO update batches | 2,410+ |
+| 200-game eval avg floor | 14.7 |
+| 200-game eval boss win rate | 38.1% |
+| 200-game eval elite win rate | 69.6% |
+| 200-game eval Act 2+ reach rate | 20% |
+| 200-game eval best run | Floor 46 (Act 3, beat 2 bosses) |
 | 150-game heuristic avg floor | 15.78 |
 | 150-game heuristic boss conversion | 39.0% |
 | Best single run (training) | Floor 50 (Act 3) |
@@ -68,17 +70,17 @@ Slay the Spire instances
     -> eval_model.py fixed-seed comparisons
 ```
 
-The strongest part of the current project is the complete training and evaluation system. The network was upgraded from (256, 256) Tanh to (512, 256, 256) GELU via warm transfer, doubling representational capacity without losing learned behavior. The Act 1 boss remains the primary bottleneck: the agent reaches floor 16 in 66% of games but only beats the boss 19% of the time. The best single training run reached floor 46 (Act 3, beat 2 bosses). No full victories yet.
+The strongest part of the current project is the complete training and evaluation system. The network was upgraded from (256, 256) Tanh to (512, 256, 256) GELU via warm transfer, doubling representational capacity without losing learned behavior. The Act 1 boss remains the primary bottleneck: the agent beats the boss 38% of the time in eval but only 20% of games reach Act 2. The best single training run reached floor 50 (Act 3). No full victories yet.
 
-Recent changes: the observation encoder was expanded from 530 to 585 dimensions by adding 11 STS1-verified monster powers (Sharp Hide, Mode Shift, Enrage, Curiosity, Intangible, Invincible, Time Warp, Beat of Death, Malleable, Life Link, Regenerate) — the agent was previously blind to these combat-critical buffs. Reward shaping was updated with an upgrade reward (+0.30) to counter over-resting, elite win bonus raised to +4.0, and a Guardian offensive-mode damage bonus (+0.03) to teach the two-phase cycle. The model was warm-transferred from the 530-dim checkpoint with zero-initialized new weights to preserve learned behavior.
+Recent changes: added HP-urgency-scaled rest-site heal reward to fix the agent choosing upgrades over healing at critical HP (e.g. 23 HP before Act 1 boss). Heal reward scales with `(1 - hp_before/max_hp)` so healing at 25% HP gives ~0.45 reward (beats the 0.30 upgrade reward) while healing at 75% HP gives ~0.15 (upgrade wins). The 200-game eval at 21,900+ training games shows boss win rate jumped from 21.7% to 38.1%, with 8 runs reaching floor 30+ including two Act 3 runs (floors 42 and 46). Earlier changes included 585-d observation expansion with 19 monster power slots, upgrade reward (+0.30), and boss-specific reward shaping.
 
 ## Planned Changes
 
 | Priority | Change | Rationale |
 |---|---|---|
-| **Active** | Train on expanded 585-d observation with 19 monster powers | Agent can now see Sharp Hide, Intangible, Beat of Death, etc. — expect improvement after 3k–5k games |
-| **Active** | Monitor upgrade reward and Guardian shaping effects | REST_UPGRADE_REWARD (0.30) should reduce over-resting; Guardian bonus should improve Act 1 boss WR |
-| **Next** | Bounded eval after ~2,000 games on new obs/rewards | Compare boss conversion, elite count, rest-vs-smith ratio vs baseline |
+| **Active** | Train on heal reward + expanded observation — target first win | Boss WR jumped 21.7% → 38.1% after heal reward; agent needs to survive Act 2 consistently |
+| **Active** | Monitor heal-vs-upgrade decision quality | HP-urgency heal reward should reduce pre-boss deaths from upgrading at low HP |
+| **Next** | Bounded eval after ~25,000 training games | Track Act 2 survival and whether deep runs (floor 30+) become consistent |
 | **Medium-term** | Migrate shop decisions to RL | Shop is the last strategic screen still fully heuristic |
 | **Medium-term** | Richer map path features | If elite count doesn't shift despite reward fix, the 39-d map observation may need more path-planning features |
 | **Long-term** | Additional characters (Silent, Defect, Watcher) | Each needs new card/relic tables, BC heuristics, and character-specific observation blocks |
@@ -426,7 +428,7 @@ AscensionAI/
 
 2. **Action space** (`sts_gym_env.py`): 134 discrete actions covering targeted/untargeted card plays (50+10), end turn, targeted/untargeted potions (25+5), choice selection (40), proceed, leave, and no-op. Illegal actions are masked out per game state.
 
-3. **Reward shaping** (`sts_gym_env.py`): Dense per-step rewards for gold, relics, max HP, HP-scaled floor progression, combat damage, card management, elite win bonus (+4.0), boss kill rewards (scaled by HP preserved), rest-site upgrade reward (+0.30), and act advancement — plus stronger survival incentives (+60 victory, -25 defeat, and higher HP-loss penalty). Urgent targets such as daggers, Gremlin Wizard, Red/Blue Slaver, Gremlin Nob, Book of Stabbing, Exploder, and minion-spawner bosses receive extra damage/kill rewards to teach healthier target priority. Boss-specific shaping penalizes Guardian Sharp Hide attacks and rewards offensive-mode damage, penalizes Hexaghost big hits and Champ enraged damage.
+3. **Reward shaping** (`sts_gym_env.py`): Dense per-step rewards for gold, relics, max HP, HP-scaled floor progression, combat damage, card management, elite win bonus (+4.0), boss kill rewards (scaled by HP preserved), rest-site upgrade reward (+0.30), HP-urgency-scaled heal reward (+0.025/hp scaled by missing HP%), and act advancement — plus stronger survival incentives (+60 victory, -25 defeat, and higher HP-loss penalty). Urgent targets such as daggers, Gremlin Wizard, Red/Blue Slaver, Gremlin Nob, Book of Stabbing, Exploder, and minion-spawner bosses receive extra damage/kill rewards to teach healthier target priority. Boss-specific shaping penalizes Guardian Sharp Hide attacks and rewards offensive-mode damage, penalizes Hexaghost big hits and Champ enraged damage.
 
    **Combat analytics**: Elite and boss fight outcomes are tracked per-game in `training_stats.csv` and per-fight in `fight_stats.csv`, including which monsters were fought, HP before/after, win/loss, and whether the fight ended through a terminal death state. The Control Panel progress panel shows aggregate elite and boss win rates from the per-fight log.
 
