@@ -57,9 +57,14 @@ PIDS_FILE="$PROJECT_DIR/logs/.training_pids"
 STOP_FILE="$PROJECT_DIR/logs/.stop_training"
 
 # ─── Preflight checks ───────────────────────────────────────────────────────
-if [ ! -f "$GAME_DIR/desktop-1.0.jar" ] && [ ! -f "$GAME_DIR/SlayTheSpire.jar" ]; then
-    echo "ERROR: STS game files not found in $GAME_DIR"
-    echo "Copy your game directory first. See vm/setup.sh instructions."
+if [ ! -f "$GAME_DIR/desktop-1.0.jar" ]; then
+    echo "ERROR: desktop-1.0.jar not found in $GAME_DIR"
+    echo "Copy your game files first. See vm/quickstart.sh"
+    exit 1
+fi
+
+if [ ! -f "$GAME_DIR/ModTheSpire.jar" ]; then
+    echo "ERROR: ModTheSpire.jar not found in $GAME_DIR"
     exit 1
 fi
 
@@ -72,6 +77,14 @@ fi
 source "$VENV"
 rm -f "$STOP_FILE"
 mkdir -p "$PROJECT_DIR/$ROLLOUT_DIR" "$PROJECT_DIR/logs"
+
+# Set up mods directory — ModTheSpire looks for mods/ relative to game dir
+mkdir -p "$GAME_DIR/mods"
+for jar in BaseMod.jar CommunicationMod.jar SuperFastMode.jar; do
+    if [ -f "$GAME_DIR/$jar" ] && [ ! -f "$GAME_DIR/mods/$jar" ]; then
+        ln -sf "$GAME_DIR/$jar" "$GAME_DIR/mods/$jar"
+    fi
+done
 
 DURATION_SECS=$((HOURS * 3600))
 END_TIME=$(($(date +%s) + DURATION_SECS))
@@ -90,12 +103,19 @@ echo ""
 
 generate_config() {
     local id=$1
-    local instance_dir="$PROJECT_DIR/instances/worker_$id"
-    mkdir -p "$instance_dir/mods/CommunicationMod"
+    local config_dir="$PROJECT_DIR/instances/worker_$id/config/ModTheSpire"
+    mkdir -p "$config_dir/CommunicationMod"
+    mkdir -p "$config_dir/SuperFastMode"
 
-    cat > "$instance_dir/mods/CommunicationMod/config.properties" << EOF
-command=python3 $SCRIPTS_DIR/rollout_worker.py --model $PROJECT_DIR/$MODEL --out $PROJECT_DIR/$ROLLOUT_DIR --id $id --restart-every $RESTART_EVERY
+    cat > "$config_dir/CommunicationMod/config.properties" << EOF
+command=python3 $SCRIPTS_DIR/rollout_worker.py --model $PROJECT_DIR/$MODEL --out $PROJECT_DIR/$ROLLOUT_DIR --id $id --restart-every $RESTART_EVERY --verbose
 runAtGameStart=true
+EOF
+
+    cat > "$config_dir/SuperFastMode/SuperFastModeConfig.properties" << EOF
+isDeltaMultiplied=true
+deltaMultiplier=4.999997
+isInstantLerp=true
 EOF
 }
 
@@ -103,23 +123,22 @@ EOF
 launch_worker() {
     local id=$1
     generate_config "$id"
-    local instance_dir="$PROJECT_DIR/instances/worker_$id"
+    local config_dir="$PROJECT_DIR/instances/worker_$id/config"
     local log_file="$PROJECT_DIR/logs/worker_${id}.log"
 
     while [ $(date +%s) -lt $END_TIME ] && [ ! -f "$STOP_FILE" ]; do
         echo "[$(date '+%H:%M:%S')] Worker $id: starting STS instance"
 
-        # Launch STS headlessly with xvfb
+        cd "$GAME_DIR"
+        XDG_CONFIG_HOME="$config_dir" \
         xvfb-run -a \
             java -Xmx512m -Xms256m \
-            -cp "$GAME_DIR/desktop-1.0.jar:$GAME_DIR/*" \
             --add-opens java.base/java.lang=ALL-UNNAMED \
-            com.megacrit.cardcrawl.desktop.DesktopLauncher \
-            --mods CommunicationMod \
-            --mods-dir "$instance_dir/mods" \
+            -jar ModTheSpire.jar \
+            --skip-launcher \
+            --mods BaseMod,CommunicationMod,SuperFastMode \
             >> "$log_file" 2>&1 || true
 
-        # Worker exited (restart-every or crash) — brief pause then restart
         if [ $(date +%s) -lt $END_TIME ] && [ ! -f "$STOP_FILE" ]; then
             echo "[$(date '+%H:%M:%S')] Worker $id: restarting after game cycle"
             sleep 3

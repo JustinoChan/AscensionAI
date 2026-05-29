@@ -21,7 +21,7 @@ param(
 # Option 1: Use gcloud (recommended for GCP)
 $VM_INSTANCE = "ascension-vm"          # Your GCP VM instance name
 $VM_ZONE     = "us-west1-a"            # Your GCP zone
-$VM_PROJECT_PATH = "~/ascension"
+$VM_PROJECT_PATH = "/home/justinochan16/ascension"
 
 # Option 2: Use direct SSH (uncomment and set if preferred)
 # $VM_SSH = "username@34.xx.xx.xx"

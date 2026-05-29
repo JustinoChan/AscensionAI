@@ -52,6 +52,14 @@ VENV="$PROJECT_DIR/.venv/bin/activate"
 
 source "$VENV"
 
+# Set up mods directory
+mkdir -p "$GAME_DIR/mods"
+for jar in BaseMod.jar CommunicationMod.jar SuperFastMode.jar; do
+    if [ -f "$GAME_DIR/$jar" ] && [ ! -f "$GAME_DIR/mods/$jar" ]; then
+        ln -sf "$GAME_DIR/$jar" "$GAME_DIR/mods/$jar"
+    fi
+done
+
 echo "=== AscensionAI Evaluation ==="
 echo "Games:     $GAMES"
 echo "Instances: $INSTANCES"
@@ -64,26 +72,35 @@ echo ""
 # For single instance, just run directly
 if [ "$INSTANCES" -eq 1 ]; then
     INSTANCE_DIR="$PROJECT_DIR/instances/eval_1"
-    mkdir -p "$INSTANCE_DIR/mods/CommunicationMod"
+    CONFIG_DIR="$INSTANCE_DIR/config/ModTheSpire"
+    mkdir -p "$CONFIG_DIR/CommunicationMod"
+    mkdir -p "$CONFIG_DIR/SuperFastMode"
 
     EVAL_CMD="python3 $SCRIPTS_DIR/eval_model.py --model $PROJECT_DIR/$MODEL --games $GAMES --policy $POLICY --seed-file $PROJECT_DIR/$SEED_FILE --run-tag $RUN_TAG --restart-every $RESTART_EVERY --resume-run"
 
-    cat > "$INSTANCE_DIR/mods/CommunicationMod/config.properties" << EOF
+    cat > "$CONFIG_DIR/CommunicationMod/config.properties" << EOF
 command=$EVAL_CMD
 runAtGameStart=true
 EOF
 
+    cat > "$CONFIG_DIR/SuperFastMode/SuperFastModeConfig.properties" << EOF
+isDeltaMultiplied=true
+deltaMultiplier=4.999997
+isInstantLerp=true
+EOF
+
     echo "Starting eval (single instance, $GAMES games)..."
-    echo "Monitor: tail -f $PROJECT_DIR/Eval/eval_debug.log"
+    echo "Monitor: tail -f $PROJECT_DIR/logs/eval_debug.log"
 
     while true; do
+        cd "$GAME_DIR"
+        XDG_CONFIG_HOME="$INSTANCE_DIR/config" \
         xvfb-run -a \
             java -Xmx512m -Xms256m \
-            -cp "$GAME_DIR/desktop-1.0.jar:$GAME_DIR/*" \
             --add-opens java.base/java.lang=ALL-UNNAMED \
-            com.megacrit.cardcrawl.desktop.DesktopLauncher \
-            --mods CommunicationMod \
-            --mods-dir "$INSTANCE_DIR/mods" \
+            -jar ModTheSpire.jar \
+            --skip-launcher \
+            --mods BaseMod,CommunicationMod,SuperFastMode \
             >> "$PROJECT_DIR/logs/eval_1.log" 2>&1 || true
 
         # Check if eval is done by looking at the CSV
@@ -116,24 +133,33 @@ else
     for i in $(seq 1 $INSTANCES); do
         INSTANCE_TAG="${RUN_TAG}_part${i}"
         INSTANCE_DIR="$PROJECT_DIR/instances/eval_$i"
-        mkdir -p "$INSTANCE_DIR/mods/CommunicationMod"
+        CONFIG_DIR="$INSTANCE_DIR/config/ModTheSpire"
+        mkdir -p "$CONFIG_DIR/CommunicationMod"
+        mkdir -p "$CONFIG_DIR/SuperFastMode"
 
         EVAL_CMD="python3 $SCRIPTS_DIR/eval_model.py --model $PROJECT_DIR/$MODEL --games $GAMES_PER_INSTANCE --policy $POLICY --seed-file $PROJECT_DIR/$SEED_FILE --run-tag $INSTANCE_TAG --restart-every $RESTART_EVERY --resume-run"
 
-        cat > "$INSTANCE_DIR/mods/CommunicationMod/config.properties" << EOF
+        cat > "$CONFIG_DIR/CommunicationMod/config.properties" << EOF
 command=$EVAL_CMD
 runAtGameStart=true
 EOF
 
+        cat > "$CONFIG_DIR/SuperFastMode/SuperFastModeConfig.properties" << EOF
+isDeltaMultiplied=true
+deltaMultiplier=4.999997
+isInstantLerp=true
+EOF
+
         (
             while true; do
+                cd "$GAME_DIR"
+                XDG_CONFIG_HOME="$INSTANCE_DIR/config" \
                 xvfb-run -a \
                     java -Xmx512m -Xms256m \
-                    -cp "$GAME_DIR/desktop-1.0.jar:$GAME_DIR/*" \
                     --add-opens java.base/java.lang=ALL-UNNAMED \
-                    com.megacrit.cardcrawl.desktop.DesktopLauncher \
-                    --mods CommunicationMod \
-                    --mods-dir "$INSTANCE_DIR/mods" \
+                    -jar ModTheSpire.jar \
+                    --skip-launcher \
+                    --mods BaseMod,CommunicationMod,SuperFastMode \
                     >> "$PROJECT_DIR/logs/eval_${i}.log" 2>&1 || true
 
                 COMPLETED=$(python3 -c "
