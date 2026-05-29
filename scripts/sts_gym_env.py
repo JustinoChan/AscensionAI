@@ -382,7 +382,10 @@ ENEMY_DAMAGE_REWARD = 0.015
 MONSTER_KILL_REWARD = 0.75
 FLOOR_ADVANCE_BASE = 0.50
 FLOOR_ADVANCE_HP_BONUS = 0.25
-ELITE_WIN_BONUS = 4.0
+# Act 1 elites are high-value (relics scale Ironclad), Act 2 are dangerous, Act 3 should be free
+ELITE_WIN_BONUS_ACT1 = 4.0
+ELITE_WIN_BONUS_ACT2 = 2.0
+ELITE_WIN_BONUS_ACT3 = 1.0
 ACT_ADVANCE_REWARD = 12.0
 VICTORY_REWARD = 60.0
 DEFEAT_PENALTY = 25.0
@@ -532,7 +535,13 @@ class RewardTracker:
             hp_ratio = hp / max_hp
             reward += FLOOR_ADVANCE_BASE + FLOOR_ADVANCE_HP_BONUS * hp_ratio
             if self._in_elite_fight:
-                reward += ELITE_WIN_BONUS
+                act = int(getattr(gs, "act", 1) or 1)
+                if act == 1:
+                    reward += ELITE_WIN_BONUS_ACT1
+                elif act == 2:
+                    reward += ELITE_WIN_BONUS_ACT2
+                else:
+                    reward += ELITE_WIN_BONUS_ACT3
                 self._in_elite_fight = False
 
         if not in_combat:
