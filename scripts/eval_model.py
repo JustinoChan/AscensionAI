@@ -26,30 +26,8 @@ _real_stdout = sys.stdout
 sys.stdout = open(os.devnull, "w")
 sys.stderr = open(os.devnull, "w")
 
-import spirecomm.communication.coordinator as _coord_module
-
-
-def _patched_write_stdout(output_queue):
-    while True:
-        output = output_queue.get()
-        _real_stdout.write(output + "\n")
-        _real_stdout.flush()
-
-
-_coord_module.write_stdout = _patched_write_stdout
-
-def _patched_read_stdin(input_queue):
-    while True:
-        stdin_input = ""
-        while True:
-            ch = sys.stdin.read(1)
-            if ch == '':
-                os._exit(1)
-            if ch == '\n':
-                break
-            stdin_input += ch
-        input_queue.put(stdin_input)
-_coord_module.read_stdin = _patched_read_stdin
+from spirecomm_patches import apply_all as _apply_spirecomm_patches
+_apply_spirecomm_patches(_real_stdout)
 # ---- End stdout fix ----
 
 _scripts = os.path.dirname(os.path.abspath(__file__))
@@ -83,7 +61,7 @@ from screen_handler import auto_handle_screen, recover_from_command_error
 from fight_tracker import FightTracker
 from behavior_clone import heuristic_action
 
-_coord_module.write_stdout = _patched_write_stdout
+_apply_spirecomm_patches(_real_stdout)
 
 
 os.makedirs(os.path.join(_root, "logs"), exist_ok=True)

@@ -24,34 +24,8 @@ _real_stdout = sys.stdout
 sys.stdout = open(os.devnull, "w")
 sys.stderr = open(os.devnull, "w")
 
-import spirecomm.communication.coordinator as _coord_module
-
-def _patched_write_stdout(output_queue):
-    while True:
-        output = output_queue.get()
-        _real_stdout.write(output + '\n')
-        _real_stdout.flush()
-
-_coord_module.write_stdout = _patched_write_stdout
-
-def _patched_read_stdin(input_queue):
-    """Detect stdin EOF (STS died) and exit instead of spinning forever."""
-    while True:
-        stdin_input = ""
-        while True:
-            ch = sys.stdin.read(1)
-            if ch == '':
-                try:
-                    _real_stdout.write("stdin EOF — STS process died, exiting\n")
-                    _real_stdout.flush()
-                except Exception:
-                    pass
-                os._exit(1)
-            if ch == '\n':
-                break
-            stdin_input += ch
-        input_queue.put(stdin_input)
-_coord_module.read_stdin = _patched_read_stdin
+from spirecomm_patches import apply_all as _apply_spirecomm_patches
+_apply_spirecomm_patches(_real_stdout)
 
 _scripts = os.path.dirname(os.path.abspath(__file__))
 _root = os.path.dirname(_scripts)

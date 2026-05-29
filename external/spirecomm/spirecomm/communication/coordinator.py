@@ -3,7 +3,6 @@ import queue
 import threading
 import json
 import collections
-import traceback
 
 from spirecomm.spire.game import Game
 from spirecomm.spire.screen import ScreenType
@@ -167,21 +166,7 @@ class Coordinator:
             if self.last_error is None:
                 self.in_game = communication_state.get("in_game")
                 if self.in_game:
-                    try:
-                        self.last_game_state = Game.from_json(communication_state.get("game_state"), communication_state.get("available_commands"))
-                    except Exception:
-                        import os
-                        _crash_log = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "..", "logs", "bug_debug.log")
-                        try:
-                            with open(_crash_log, "a") as f:
-                                f.write(f"Game.from_json CRASH:\n{traceback.format_exc()}\n")
-                                gs_json = communication_state.get("game_state", {})
-                                f.write(f"screen_type={gs_json.get('screen_type')}\n")
-                                f.write(f"screen_state keys={list((gs_json.get('screen_state') or {}).keys())}\n\n")
-                        except Exception:
-                            pass
-                        self.send_message("state")
-                        return True
+                    self.last_game_state = Game.from_json(communication_state.get("game_state"), communication_state.get("available_commands"))
             if perform_callbacks:
                 if self.last_error is not None:
                     self.action_queue.clear()
