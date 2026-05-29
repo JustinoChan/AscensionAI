@@ -27,6 +27,19 @@ def _patched_write_stdout(output_queue):
         _real_stdout.flush()
 
 _coord_module.write_stdout = _patched_write_stdout
+
+def _patched_read_stdin(input_queue):
+    while True:
+        stdin_input = ""
+        while True:
+            ch = sys.stdin.read(1)
+            if ch == '':
+                os._exit(1)
+            if ch == '\n':
+                break
+            stdin_input += ch
+        input_queue.put(stdin_input)
+_coord_module.read_stdin = _patched_read_stdin
 # ---- End stdout fix ----
 
 _scripts = os.path.dirname(os.path.abspath(__file__))

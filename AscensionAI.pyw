@@ -3384,93 +3384,100 @@ class AscensionApp:
             time.sleep(self._MONITOR_INTERVAL_SEC)
             if not self.running or getattr(self, "_graceful_stopping", False):
                 break
-            self._monitor_trainer()
-            for worker_id in list(self._worker_commands.keys()):
-                if not self.running:
-                    break
-                worker_mode = self._worker_modes.get(worker_id, "worker")
-                if worker_mode != "bc_collect" and self._worker_done(worker_id):
-                    target = self._worker_game_targets.get(worker_id, 0)
-                    _logger.info(f"Worker {worker_id}: game target reached "
-                                 f"(target={target}); closing worker")
-                    self._append_log(
-                        f"Worker {worker_id}",
-                        f"Game target reached ({target} games); closing STS instance.",
-                    )
-                    self._stop_single_worker(worker_id)
-                    self._worker_commands.pop(worker_id, None)
-                    self._worker_modes.pop(worker_id, None)
-                    self._worker_game_targets.pop(worker_id, None)
-                    continue
-                if worker_mode == "bc_collect" and self._bc_worker_complete(worker_id):
-                    _logger.info(f"BC worker {worker_id}: demo file complete; stopping worker")
-                    self._append_log(f"BC {worker_id}", "Demo file complete; closing STS instance.")
-                    self._stop_single_worker(worker_id)
-                    self._worker_commands.pop(worker_id, None)
-                    self._worker_modes.pop(worker_id, None)
-                    continue
-                launch_t = self._worker_launch_time.get(worker_id, 0)
-                age = time.time() - launch_t
-                if age < self._WORKER_BOOT_GRACE_SEC:
-                    continue
-                java_pids, py_pids = self._find_pids_for_worker(worker_id)
-                java_pids |= self._live_cached_java_pids(worker_id)
-                heartbeat_age = self._worker_heartbeat_age(worker_id)
-                missing_piece = not java_pids or not py_pids
-                stale_heartbeat = False
-                if worker_mode != "bc_collect":
-                    stale_heartbeat = (
-                        heartbeat_age is None
-                        or heartbeat_age > self._WORKER_HEARTBEAT_TIMEOUT_SEC
-                    )
-                if missing_piece or stale_heartbeat:
-                    restarts = self._worker_restarts.get(worker_id, 0)
-                    if restarts >= self._MAX_RESTARTS:
-                        if restarts == self._MAX_RESTARTS:
-                            _logger.warning(f"Worker {worker_id}: max restarts ({self._MAX_RESTARTS}) reached, giving up")
-                            self._append_log(f"BC {worker_id}" if worker_mode == "bc_collect" else f"Worker {worker_id}",
-                                             f"Max restarts ({self._MAX_RESTARTS}) reached — not relaunching.")
-                            self._worker_restarts[worker_id] = restarts + 1
-                        continue
-                    reason = (
-                        f"java={sorted(java_pids)} py={sorted(py_pids)} "
-                        f"heartbeat_age={heartbeat_age if heartbeat_age is not None else 'missing'}"
-                    )
-                    _logger.warning(f"Worker {worker_id}: unhealthy ({reason}), relaunching "
-                                    f"(restart #{restarts + 1})")
-                    self._append_log(f"BC {worker_id}" if worker_mode == "bc_collect" else f"Worker {worker_id}",
-                                     f"Unhealthy worker detected — relaunching "
-                                     f"(restart #{restarts + 1}).")
-                    self._stop_single_worker(worker_id)
-                    self._relaunch_worker(worker_id)
-                    time.sleep(15.0)
-            self._kill_excess_unowned_sts_instances("monitor")
-            current_mode = getattr(self, "_current_mode", "")
-            if self.running and not self._worker_commands and current_mode == "bc_collect":
-                _logger.info("All BC collection workers completed")
-                self._append_log("BC Collect", "All selected BC workers completed.")
-                self.running = False
-                self.root.after(0, lambda: self.start_btn.configure(state="normal"))
-                self.root.after(0, lambda: self.stop_btn.configure(state="disabled"))
-                self.root.after(0, lambda: self.graceful_btn.configure(state="disabled"))
-                self.root.after(0, lambda: self.status_var.set("BC collection complete"))
-                break
-            if (
-                self.running
-                and not self._worker_commands
-                and current_mode in ("worker", "collect")
-                and self._n_workers > 0
-            ):
-                _logger.info("All parallel workers reached game target")
-                self._append_log(
-                    "All", "All workers reached game target. Stopping trainer."
-                )
-                self.root.after(
-                    0, lambda: self.status_var.set("Game target reached; stopping...")
-                )
-                self.root.after(0, self._stop)
-                break
+            try:
+                self._monitor_workers_tick()
+            except Exception as e:
+                _logger.error(f"_monitor_workers: tick failed (will retry next cycle): {e}",
+                              exc_info=True)
         _logger.info("_monitor_workers: loop ended")
+
+    def _monitor_workers_tick(self):
+        """Single pass of the health-check loop, separated so exceptions
+        don't kill the outer monitor thread."""
+        self._monitor_trainer()
+        for worker_id in list(self._worker_commands.keys()):
+            if not self.running:
+                break
+            worker_mode = self._worker_modes.get(worker_id, "worker")
+            if worker_mode != "bc_collect" and self._worker_done(worker_id):
+                target = self._worker_game_targets.get(worker_id, 0)
+                _logger.info(f"Worker {worker_id}: game target reached "
+                             f"(target={target}); closing worker")
+                self._append_log(
+                    f"Worker {worker_id}",
+                    f"Game target reached ({target} games); closing STS instance.",
+                )
+                self._stop_single_worker(worker_id)
+                self._worker_commands.pop(worker_id, None)
+                self._worker_modes.pop(worker_id, None)
+                self._worker_game_targets.pop(worker_id, None)
+                continue
+            if worker_mode == "bc_collect" and self._bc_worker_complete(worker_id):
+                _logger.info(f"BC worker {worker_id}: demo file complete; stopping worker")
+                self._append_log(f"BC {worker_id}", "Demo file complete; closing STS instance.")
+                self._stop_single_worker(worker_id)
+                self._worker_commands.pop(worker_id, None)
+                self._worker_modes.pop(worker_id, None)
+                continue
+            launch_t = self._worker_launch_time.get(worker_id, 0)
+            age = time.time() - launch_t
+            if age < self._WORKER_BOOT_GRACE_SEC:
+                continue
+            java_pids, py_pids = self._find_pids_for_worker(worker_id)
+            java_pids |= self._live_cached_java_pids(worker_id)
+            heartbeat_age = self._worker_heartbeat_age(worker_id)
+            missing_piece = not java_pids or not py_pids
+            stale_heartbeat = False
+            if worker_mode != "bc_collect":
+                stale_heartbeat = (
+                    heartbeat_age is None
+                    or heartbeat_age > self._WORKER_HEARTBEAT_TIMEOUT_SEC
+                )
+            if missing_piece or stale_heartbeat:
+                restarts = self._worker_restarts.get(worker_id, 0)
+                if restarts >= self._MAX_RESTARTS:
+                    if restarts == self._MAX_RESTARTS:
+                        _logger.warning(f"Worker {worker_id}: max restarts ({self._MAX_RESTARTS}) reached, giving up")
+                        self._append_log(f"BC {worker_id}" if worker_mode == "bc_collect" else f"Worker {worker_id}",
+                                         f"Max restarts ({self._MAX_RESTARTS}) reached — not relaunching.")
+                        self._worker_restarts[worker_id] = restarts + 1
+                    continue
+                reason = (
+                    f"java={sorted(java_pids)} py={sorted(py_pids)} "
+                    f"heartbeat_age={heartbeat_age if heartbeat_age is not None else 'missing'}"
+                )
+                _logger.warning(f"Worker {worker_id}: unhealthy ({reason}), relaunching "
+                                f"(restart #{restarts + 1})")
+                self._append_log(f"BC {worker_id}" if worker_mode == "bc_collect" else f"Worker {worker_id}",
+                                 f"Unhealthy worker detected — relaunching "
+                                 f"(restart #{restarts + 1}).")
+                self._stop_single_worker(worker_id)
+                self._relaunch_worker(worker_id)
+                time.sleep(15.0)
+        self._kill_excess_unowned_sts_instances("monitor")
+        current_mode = getattr(self, "_current_mode", "")
+        if self.running and not self._worker_commands and current_mode == "bc_collect":
+            _logger.info("All BC collection workers completed")
+            self._append_log("BC Collect", "All selected BC workers completed.")
+            self.running = False
+            self.root.after(0, lambda: self.start_btn.configure(state="normal"))
+            self.root.after(0, lambda: self.stop_btn.configure(state="disabled"))
+            self.root.after(0, lambda: self.graceful_btn.configure(state="disabled"))
+            self.root.after(0, lambda: self.status_var.set("BC collection complete"))
+        elif (
+            self.running
+            and not self._worker_commands
+            and current_mode in ("worker", "collect")
+            and self._n_workers > 0
+        ):
+            _logger.info("All parallel workers reached game target")
+            self._append_log(
+                "All", "All workers reached game target. Stopping trainer."
+            )
+            self.root.after(
+                0, lambda: self.status_var.set("Game target reached; stopping...")
+            )
+            self.root.after(0, self._stop)
 
     def _bc_worker_complete(self, worker_id: int) -> bool:
         demo_path = self._worker_demo_paths.get(worker_id)
