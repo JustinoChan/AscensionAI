@@ -136,7 +136,7 @@ launch_worker() {
             --add-opens java.base/java.lang=ALL-UNNAMED \
             -jar ModTheSpire.jar \
             --skip-launcher \
-            --mods BaseMod,CommunicationMod,SuperFastMode \
+            --mods basemod,CommunicationMod,superfastmode \
             >> "$log_file" 2>&1 || true
 
         if [ $(date +%s) -lt $END_TIME ] && [ ! -f "$STOP_FILE" ]; then

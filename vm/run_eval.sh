@@ -100,7 +100,7 @@ EOF
             --add-opens java.base/java.lang=ALL-UNNAMED \
             -jar ModTheSpire.jar \
             --skip-launcher \
-            --mods BaseMod,CommunicationMod,SuperFastMode \
+            --mods basemod,CommunicationMod,superfastmode \
             >> "$PROJECT_DIR/logs/eval_1.log" 2>&1 || true
 
         # Check if eval is done by looking at the CSV
@@ -159,7 +159,7 @@ EOF
                     --add-opens java.base/java.lang=ALL-UNNAMED \
                     -jar ModTheSpire.jar \
                     --skip-launcher \
-                    --mods BaseMod,CommunicationMod,SuperFastMode \
+                    --mods basemod,CommunicationMod,superfastmode \
                     >> "$PROJECT_DIR/logs/eval_${i}.log" 2>&1 || true
 
                 COMPLETED=$(python3 -c "
