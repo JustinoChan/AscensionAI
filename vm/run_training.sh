@@ -89,6 +89,18 @@ done
 DURATION_SECS=$((HOURS * 3600))
 END_TIME=$(($(date +%s) + DURATION_SECS))
 
+# Start a shared virtual display using Xorg with dummy driver
+DISPLAY_NUM=99
+if [ -f /etc/X11/xorg-dummy.conf ]; then
+    sudo Xorg :$DISPLAY_NUM -config /etc/X11/xorg-dummy.conf -noreset +extension GLX +extension RANDR &
+else
+    Xvfb :$DISPLAY_NUM -screen 0 1280x720x24 +extension GLX +extension RANDR &
+fi
+XORG_PID=$!
+export DISPLAY=:$DISPLAY_NUM
+export LIBGL_ALWAYS_SOFTWARE=1
+sleep 2
+
 echo "=== AscensionAI Training ==="
 echo "Workers:        $WORKERS"
 echo "Duration:       ${HOURS}h (until $(date -d @$END_TIME '+%Y-%m-%d %H:%M'))"
@@ -125,22 +137,13 @@ launch_worker() {
     generate_config "$id"
     local config_dir="$PROJECT_DIR/instances/worker_$id/config"
     local log_file="$PROJECT_DIR/logs/worker_${id}.log"
-    local display_num=$((99 + id))
-
-    # Each worker gets its own Xvfb display with RANDR extension
-    Xvfb :$display_num -screen 0 1280x720x24 +extension GLX +extension RANDR &
-    local xvfb_pid=$!
-    sleep 1
 
     while [ $(date +%s) -lt $END_TIME ] && [ ! -f "$STOP_FILE" ]; do
         echo "[$(date '+%H:%M:%S')] Worker $id: starting STS instance"
 
         cd "$GAME_DIR"
-        DISPLAY=:$display_num \
-        LIBGL_ALWAYS_SOFTWARE=1 \
         XDG_CONFIG_HOME="$config_dir" \
             java -Xmx512m -Xms256m \
-            -Dorg.lwjgl.openal.libname=/usr/lib/x86_64-linux-gnu/libopenal.so.1 \
             -jar ModTheSpire.jar \
             --skip-launcher \
             --mods basemod,CommunicationMod,superfastmode \

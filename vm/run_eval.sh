@@ -60,6 +60,18 @@ for jar in BaseMod.jar CommunicationMod.jar SuperFastMode.jar; do
     fi
 done
 
+# Start a shared virtual display using Xorg with dummy driver
+DISPLAY_NUM=99
+if [ -f /etc/X11/xorg-dummy.conf ]; then
+    sudo Xorg :$DISPLAY_NUM -config /etc/X11/xorg-dummy.conf -noreset +extension GLX +extension RANDR &
+else
+    Xvfb :$DISPLAY_NUM -screen 0 1280x720x24 +extension GLX +extension RANDR &
+fi
+XORG_PID=$!
+export DISPLAY=:$DISPLAY_NUM
+export LIBGL_ALWAYS_SOFTWARE=1
+sleep 2
+
 echo "=== AscensionAI Evaluation ==="
 echo "Games:     $GAMES"
 echo "Instances: $INSTANCES"
@@ -92,16 +104,10 @@ EOF
     echo "Starting eval (single instance, $GAMES games)..."
     echo "Monitor: tail -f $PROJECT_DIR/logs/eval_debug.log"
 
-    Xvfb :99 -screen 0 1280x720x24 +extension GLX +extension RANDR &
-    sleep 1
-
     while true; do
         cd "$GAME_DIR"
-        DISPLAY=:99 \
-        LIBGL_ALWAYS_SOFTWARE=1 \
         XDG_CONFIG_HOME="$INSTANCE_DIR/config" \
             java -Xmx512m -Xms256m \
-            -Dorg.lwjgl.openal.libname=/usr/lib/x86_64-linux-gnu/libopenal.so.1 \
             -jar ModTheSpire.jar \
             --skip-launcher \
             --mods basemod,CommunicationMod,superfastmode \
@@ -154,18 +160,11 @@ deltaMultiplier=4.999997
 isInstantLerp=true
 EOF
 
-        EVAL_DISPLAY=$((98 + i))
-        Xvfb :$EVAL_DISPLAY -screen 0 1280x720x24 +extension GLX +extension RANDR &
-        sleep 1
-
         (
             while true; do
                 cd "$GAME_DIR"
-                DISPLAY=:$EVAL_DISPLAY \
-                LIBGL_ALWAYS_SOFTWARE=1 \
                 XDG_CONFIG_HOME="$INSTANCE_DIR/config" \
                     java -Xmx512m -Xms256m \
-                    -Dorg.lwjgl.openal.libname=/usr/lib/x86_64-linux-gnu/libopenal.so.1 \
                     -jar ModTheSpire.jar \
                     --skip-launcher \
                     --mods basemod,CommunicationMod,superfastmode \
