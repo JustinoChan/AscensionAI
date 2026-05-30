@@ -92,11 +92,16 @@ EOF
     echo "Starting eval (single instance, $GAMES games)..."
     echo "Monitor: tail -f $PROJECT_DIR/logs/eval_debug.log"
 
+    Xvfb :99 -screen 0 1280x720x24 +extension GLX +extension RANDR &
+    sleep 1
+
     while true; do
         cd "$GAME_DIR"
+        DISPLAY=:99 \
+        LIBGL_ALWAYS_SOFTWARE=1 \
         XDG_CONFIG_HOME="$INSTANCE_DIR/config" \
-        xvfb-run -a -s "-screen 0 1280x720x24" \
             java -Xmx512m -Xms256m \
+            -Dorg.lwjgl.openal.libname=/usr/lib/x86_64-linux-gnu/libopenal.so.1 \
             -jar ModTheSpire.jar \
             --skip-launcher \
             --mods basemod,CommunicationMod,superfastmode \
@@ -149,13 +154,18 @@ deltaMultiplier=4.999997
 isInstantLerp=true
 EOF
 
+        EVAL_DISPLAY=$((98 + i))
+        Xvfb :$EVAL_DISPLAY -screen 0 1280x720x24 +extension GLX +extension RANDR &
+        sleep 1
+
         (
             while true; do
                 cd "$GAME_DIR"
+                DISPLAY=:$EVAL_DISPLAY \
+                LIBGL_ALWAYS_SOFTWARE=1 \
                 XDG_CONFIG_HOME="$INSTANCE_DIR/config" \
-                xvfb-run -a -s "-screen 0 1280x720x24" \
                     java -Xmx512m -Xms256m \
-                    --add-opens java.base/java.lang=ALL-UNNAMED \
+                    -Dorg.lwjgl.openal.libname=/usr/lib/x86_64-linux-gnu/libopenal.so.1 \
                     -jar ModTheSpire.jar \
                     --skip-launcher \
                     --mods basemod,CommunicationMod,superfastmode \
