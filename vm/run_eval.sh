@@ -95,7 +95,7 @@ EOF
     while true; do
         cd "$GAME_DIR"
         XDG_CONFIG_HOME="$INSTANCE_DIR/config" \
-        xvfb-run -a \
+        xvfb-run -a -s "-screen 0 1280x720x24" \
             java -Xmx512m -Xms256m \
             -jar ModTheSpire.jar \
             --skip-launcher \
@@ -153,7 +153,7 @@ EOF
             while true; do
                 cd "$GAME_DIR"
                 XDG_CONFIG_HOME="$INSTANCE_DIR/config" \
-                xvfb-run -a \
+                xvfb-run -a -s "-screen 0 1280x720x24" \
                     java -Xmx512m -Xms256m \
                     --add-opens java.base/java.lang=ALL-UNNAMED \
                     -jar ModTheSpire.jar \

@@ -131,7 +131,7 @@ launch_worker() {
 
         cd "$GAME_DIR"
         XDG_CONFIG_HOME="$config_dir" \
-        xvfb-run -a \
+        xvfb-run -a -s "-screen 0 1280x720x24" \
             java -Xmx512m -Xms256m \
             -jar ModTheSpire.jar \
             --skip-launcher \
