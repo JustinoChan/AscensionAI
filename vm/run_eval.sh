@@ -97,7 +97,6 @@ EOF
         XDG_CONFIG_HOME="$INSTANCE_DIR/config" \
         xvfb-run -a \
             java -Xmx512m -Xms256m \
-            --add-opens java.base/java.lang=ALL-UNNAMED \
             -jar ModTheSpire.jar \
             --skip-launcher \
             --mods basemod,CommunicationMod,superfastmode \
