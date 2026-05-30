@@ -63,9 +63,9 @@ done
 # Start a shared virtual display using Xorg with dummy driver
 DISPLAY_NUM=99
 if [ -f /etc/X11/xorg-dummy.conf ]; then
-    sudo Xorg :$DISPLAY_NUM -config /etc/X11/xorg-dummy.conf -noreset +extension GLX +extension RANDR &
+    sudo Xorg :$DISPLAY_NUM -config /etc/X11/xorg-dummy.conf -noreset -ac +extension GLX +extension RANDR +extension RENDER &
 else
-    Xvfb :$DISPLAY_NUM -screen 0 1280x720x24 +extension GLX +extension RANDR &
+    Xvfb :$DISPLAY_NUM -screen 0 1280x720x24 -ac +extension GLX +extension RANDR &
 fi
 XORG_PID=$!
 export DISPLAY=:$DISPLAY_NUM
@@ -106,8 +106,13 @@ EOF
 
     while true; do
         cd "$GAME_DIR"
+        # Large heap: a long eval runs many games per JVM and 512m OOMs after
+        # ~35 games (silently restarting mid-run). 8 GB gives ample margin
+        # for a full 200-game eval; the VM has 86 GB RAM.
         XDG_CONFIG_HOME="$INSTANCE_DIR/config" \
-            java -Xmx512m -Xms256m \
+            java -Xmx8192m -Xms512m \
+            -Dorg.lwjgl.openal.libname=/usr/lib/x86_64-linux-gnu/libopenal.so.1 \
+            -Dorg.lwjgl.opengl.Display.allowSoftwareOpenGL=true \
             -jar ModTheSpire.jar \
             --skip-launcher \
             --mods basemod,CommunicationMod,superfastmode \
@@ -163,8 +168,11 @@ EOF
         (
             while true; do
                 cd "$GAME_DIR"
+                # Large heap (see single-instance note above): avoid mid-eval OOM.
                 XDG_CONFIG_HOME="$INSTANCE_DIR/config" \
-                    java -Xmx512m -Xms256m \
+                    java -Xmx8192m -Xms512m \
+                    -Dorg.lwjgl.openal.libname=/usr/lib/x86_64-linux-gnu/libopenal.so.1 \
+                    -Dorg.lwjgl.opengl.Display.allowSoftwareOpenGL=true \
                     -jar ModTheSpire.jar \
                     --skip-launcher \
                     --mods basemod,CommunicationMod,superfastmode \

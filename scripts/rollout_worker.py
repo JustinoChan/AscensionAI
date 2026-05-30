@@ -24,6 +24,11 @@ _real_stdout = sys.stdout
 sys.stdout = open(os.devnull, "w")
 sys.stderr = open(os.devnull, "w")
 
+# Signal ready to CommunicationMod immediately (10s timeout).
+# Must happen before any heavy imports (torch takes several seconds).
+_real_stdout.write("ready\n")
+_real_stdout.flush()
+
 from spirecomm_patches import apply_all as _apply_spirecomm_patches
 _apply_spirecomm_patches(_real_stdout)
 
@@ -682,8 +687,8 @@ def main():
                         help="Path to model checkpoint to load")
     parser.add_argument("--out", type=str, default="rollouts_shared",
                         help="Directory for shared transition files")
-    parser.add_argument("--id", type=str, default="1",
-                        help="Worker ID (for logging and filenames)")
+    parser.add_argument("--id", type=str, default=str(os.getpid()),
+                        help="Worker ID (for logging and filenames; defaults to PID)")
     parser.add_argument("--reload-every", type=int, default=5,
                         help="Reload model every N games")
     parser.add_argument("--games", type=int, default=0,
@@ -701,6 +706,11 @@ def main():
     VERBOSE = VERBOSE or args.verbose
 
     _init_log(args.id)
+
+    # READY was already sent at module level (before torch import).
+    # Create coordinator — it will NOT re-send READY.
+    coord = Coordinator()
+
     net_arch = tuple(int(x) for x in args.net_arch.split(","))
     log("=== ROLLOUT WORKER STARTING ===")
     log(f"Config: model={args.model} out={args.out} id={args.id} "
@@ -731,13 +741,11 @@ def main():
         restart_every=args.restart_every,
     )
 
-    coord = Coordinator()
     coord.register_state_change_callback(agent.on_state_change)
     coord.register_out_of_game_callback(agent.on_out_of_game)
     coord.register_command_error_callback(agent.on_error)
 
-    log("Signaling ready...")
-    coord.signal_ready()
+    log("Callbacks registered, entering game loop...")
     coord.run()
 
 

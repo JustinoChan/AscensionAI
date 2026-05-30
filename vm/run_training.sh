@@ -2,13 +2,13 @@
 # AscensionAI Training Runner — launches N headless STS workers
 #
 # Usage:
-#   ./run_training.sh                     # 8 workers, 12 hours, 50 games/restart
+#   ./run_training.sh                     # 8 workers, 12 hours, 25 games/restart
 #   ./run_training.sh --workers 6 --hours 24 --restart-every 30
 #   ./run_training.sh --workers 10 --hours 8 --restart-every 40
 #
-# Each worker runs inside its own xvfb-run display, cycling through games
+# Each worker runs inside its own Xvfb display, cycling through games
 # until the time limit expires. Workers restart every N games (configurable)
-# to prevent JVM memory leaks.
+# to prevent JVM memory leaks / OOM (heap grows over a long session).
 #
 # The trainer (train_offline.py) runs alongside, consuming rollouts as they
 # arrive. When the timer expires, all workers and the trainer stop gracefully.
@@ -18,7 +18,7 @@ set -e
 # ─── Defaults ───────────────────────────────────────────────────────────────
 WORKERS=8
 HOURS=12
-RESTART_EVERY=50
+RESTART_EVERY=25
 MODEL="models/ppo_sts.pt"
 ROLLOUT_DIR="rollouts_shared"
 RUN_TRAINER=true
@@ -39,7 +39,7 @@ while [[ $# -gt 0 ]]; do
             echo "Usage: $0 [OPTIONS]"
             echo "  --workers N        Number of STS instances (default: 8)"
             echo "  --hours N          Run duration in hours (default: 12)"
-            echo "  --restart-every N  Games per worker before JVM restart (default: 50)"
+            echo "  --restart-every N  Games per worker before JVM restart (default: 25)"
             echo "  --model PATH       Model checkpoint path (default: models/ppo_sts.pt)"
             echo "  --no-trainer       Don't run the offline trainer (workers only)"
             echo "  --batch-games N    Rollouts per PPO update (default: 8)"
@@ -89,17 +89,9 @@ done
 DURATION_SECS=$((HOURS * 3600))
 END_TIME=$(($(date +%s) + DURATION_SECS))
 
-# Start a shared virtual display using Xorg with dummy driver
-DISPLAY_NUM=99
-if [ -f /etc/X11/xorg-dummy.conf ]; then
-    sudo Xorg :$DISPLAY_NUM -config /etc/X11/xorg-dummy.conf -noreset +extension GLX +extension RANDR &
-else
-    Xvfb :$DISPLAY_NUM -screen 0 1280x720x24 +extension GLX +extension RANDR &
-fi
-XORG_PID=$!
-export DISPLAY=:$DISPLAY_NUM
+# Each worker gets its own Xvfb display to avoid rendering contention.
+# Shared display causes 100x+ slowdown with multiple OpenGL windows.
 export LIBGL_ALWAYS_SOFTWARE=1
-sleep 2
 
 echo "=== AscensionAI Training ==="
 echo "Workers:        $WORKERS"
@@ -110,21 +102,20 @@ echo "Trainer:        $RUN_TRAINER"
 echo ""
 
 # ─── Instance config generation ─────────────────────────────────────────────
-# Each worker instance needs its own CommunicationMod config pointing to
-# the correct python command with --id flag
+# CommunicationMod ignores XDG_CONFIG_HOME — all workers share ~/.config/.
+# Worker ID defaults to PID, so each spawned python process gets a unique ID.
 
 generate_config() {
-    local id=$1
-    local config_dir="$PROJECT_DIR/instances/worker_$id/config/ModTheSpire"
-    mkdir -p "$config_dir/CommunicationMod"
-    mkdir -p "$config_dir/SuperFastMode"
+    local commmod_dir="$HOME/.config/ModTheSpire/CommunicationMod"
+    local sfm_dir="$HOME/.config/ModTheSpire/SuperFastMode"
+    mkdir -p "$commmod_dir" "$sfm_dir"
 
-    cat > "$config_dir/CommunicationMod/config.properties" << EOF
-command=python3 $SCRIPTS_DIR/rollout_worker.py --model $PROJECT_DIR/$MODEL --out $PROJECT_DIR/$ROLLOUT_DIR --id $id --restart-every $RESTART_EVERY --verbose
+    cat > "$commmod_dir/config.properties" << EOF
+command=python3 $SCRIPTS_DIR/rollout_worker.py --model $PROJECT_DIR/$MODEL --out $PROJECT_DIR/$ROLLOUT_DIR --restart-every $RESTART_EVERY --verbose
 runAtGameStart=true
 EOF
 
-    cat > "$config_dir/SuperFastMode/SuperFastModeConfig.properties" << EOF
+    cat > "$sfm_dir/SuperFastModeConfig.properties" << EOF
 isDeltaMultiplied=true
 deltaMultiplier=4.999997
 isInstantLerp=true
@@ -134,16 +125,25 @@ EOF
 # ─── Worker launcher ────────────────────────────────────────────────────────
 launch_worker() {
     local id=$1
-    generate_config "$id"
-    local config_dir="$PROJECT_DIR/instances/worker_$id/config"
     local log_file="$PROJECT_DIR/logs/worker_${id}.log"
+    local tmpdir="/tmp/sts_worker_${id}"
+    local display_num=$((99 + id))
+    mkdir -p "$tmpdir"
+
+    # Each worker gets its own Xvfb — small resolution reduces software rendering cost
+    Xvfb :$display_num -screen 0 320x240x16 -ac +extension GLX +extension RANDR &>/dev/null &
+    local xvfb_pid=$!
+    export DISPLAY=:$display_num
+    sleep 1
 
     while [ $(date +%s) -lt $END_TIME ] && [ ! -f "$STOP_FILE" ]; do
-        echo "[$(date '+%H:%M:%S')] Worker $id: starting STS instance"
+        echo "[$(date '+%H:%M:%S')] Worker $id: starting STS instance (display :$display_num)"
 
         cd "$GAME_DIR"
-        XDG_CONFIG_HOME="$config_dir" \
-            java -Xmx512m -Xms256m \
+        DISPLAY=:$display_num java -Xmx2048m -Xms512m \
+            -Dorg.lwjgl.openal.libname=/usr/lib/x86_64-linux-gnu/libopenal.so.1 \
+            -Dorg.lwjgl.opengl.Display.allowSoftwareOpenGL=true \
+            -Djava.io.tmpdir="$tmpdir" \
             -jar ModTheSpire.jar \
             --skip-launcher \
             --mods basemod,CommunicationMod,superfastmode \
@@ -155,6 +155,7 @@ launch_worker() {
         fi
     done
     echo "[$(date '+%H:%M:%S')] Worker $id: time limit reached, stopping"
+    kill $xvfb_pid 2>/dev/null
 }
 
 # ─── Offline trainer ────────────────────────────────────────────────────────
@@ -170,10 +171,9 @@ run_trainer() {
             --batch-games "$BATCH_GAMES" \
             --lr 3e-5 \
             --bc-coef 0.001 \
-            --max-rollout-lag "$MAX_ROLLOUT_LAG" \
+            --max-rollout-lag 9999 \
             --ent-coef 0.001 \
             --auto-tune \
-            --max-rollout-lag 9999 \
             >> "$log_file" 2>&1 || true
 
         if [ $(date +%s) -lt $END_TIME ] && [ ! -f "$STOP_FILE" ]; then
@@ -184,6 +184,8 @@ run_trainer() {
 }
 
 # ─── Launch everything ──────────────────────────────────────────────────────
+generate_config
+
 echo "Starting $WORKERS workers..."
 PIDS=()
 

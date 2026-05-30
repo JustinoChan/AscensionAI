@@ -47,11 +47,11 @@ function GCP-SSH {
 switch ($Action) {
     "push" {
         Write-Host "=== Pushing model + code + seeds to VM ===" -ForegroundColor Green
-        GCP-SCP -Local "$LOCAL_PROJECT\scripts" -Remote "$VM_PROJECT_PATH/scripts/" -Upload
-        GCP-SCP -Local "$LOCAL_PROJECT\external" -Remote "$VM_PROJECT_PATH/external/" -Upload
+        GCP-SCP -Local "$LOCAL_PROJECT\scripts" -Remote "$VM_PROJECT_PATH/" -Upload
+        GCP-SCP -Local "$LOCAL_PROJECT\external" -Remote "$VM_PROJECT_PATH/" -Upload
         GCP-SCP -Local "$LOCAL_PROJECT\models\ppo_sts.pt" -Remote "$VM_PROJECT_PATH/models/" -Upload
-        GCP-SCP -Local "$LOCAL_PROJECT\seeds" -Remote "$VM_PROJECT_PATH/seeds/" -Upload
-        GCP-SCP -Local "$LOCAL_PROJECT\vm" -Remote "$VM_PROJECT_PATH/vm/" -Upload
+        GCP-SCP -Local "$LOCAL_PROJECT\seeds" -Remote "$VM_PROJECT_PATH/" -Upload
+        GCP-SCP -Local "$LOCAL_PROJECT\vm" -Remote "$VM_PROJECT_PATH/" -Upload
         Write-Host "Done. SSH in and run: cd ~/ascension && ./vm/run_training.sh" -ForegroundColor Green
     }
     "pull" {
@@ -63,9 +63,9 @@ switch ($Action) {
     }
     "push-code" {
         Write-Host "=== Pushing code only ===" -ForegroundColor Green
-        GCP-SCP -Local "$LOCAL_PROJECT\scripts" -Remote "$VM_PROJECT_PATH/scripts/" -Upload
-        GCP-SCP -Local "$LOCAL_PROJECT\external" -Remote "$VM_PROJECT_PATH/external/" -Upload
-        GCP-SCP -Local "$LOCAL_PROJECT\vm" -Remote "$VM_PROJECT_PATH/vm/" -Upload
+        GCP-SCP -Local "$LOCAL_PROJECT\scripts" -Remote "$VM_PROJECT_PATH/" -Upload
+        GCP-SCP -Local "$LOCAL_PROJECT\external" -Remote "$VM_PROJECT_PATH/" -Upload
+        GCP-SCP -Local "$LOCAL_PROJECT\vm" -Remote "$VM_PROJECT_PATH/" -Upload
         Write-Host "Done. Restart workers on VM to pick up changes." -ForegroundColor Green
     }
     "pull-model" {
