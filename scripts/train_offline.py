@@ -542,8 +542,14 @@ def main():
                 bc_obs, bc_actions, bc_masks = load_bc_demo(bc_demo_path)
                 anchor_coef = args.bc_coef
                 loaded_bc_coef = getattr(trainer, "_loaded_bc_coef", None)
-                if args.auto_tune and loaded_bc_coef is not None:
+                # Only inherit the checkpoint's tuned coef if it is POSITIVE. A
+                # stale 0.0 (from demo-less runs) must not override args.bc_coef.
+                if args.auto_tune and loaded_bc_coef:
                     anchor_coef = loaded_bc_coef
+                # Never store the anchor at coef 0: set_bc_reference would discard
+                # the demos and the auto-tuner could then never lift bc_coef again.
+                if args.auto_tune:
+                    anchor_coef = max(anchor_coef, args.auto_min_bc_coef)
                 trainer.set_bc_reference(
                     bc_obs, bc_actions, bc_masks,
                     coef=anchor_coef,
