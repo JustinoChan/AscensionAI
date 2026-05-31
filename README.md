@@ -133,7 +133,7 @@ This means the agent doesn't need thousands of games to rediscover that Gremlin 
 5. **Super Fast Mode** (recommended) — [GitHub](https://github.com/Skrelpoid/SuperFastMode) — raises the in-game speed cap well beyond vanilla Fast Mode
 6. **Python 3.10+**
 
-AscensionAI is currently developed and documented for **Windows**. The GUI launcher, PowerShell helper, Steam/ModTheSpire process handling, and `%LOCALAPPDATA%` CommunicationMod config paths assume a Windows setup.
+AscensionAI is primarily developed and documented for **Windows** — the GUI launcher, PowerShell helper, Steam/ModTheSpire process handling, and `%LOCALAPPDATA%` CommunicationMod config paths assume a Windows setup. A **headless Linux path** for cloud training also exists under `vm/` (see [Cloud / Headless Deployment](#cloud--headless-deployment-gcp)); it runs the same workers and trainer on a GPU-less server via Xvfb.
 
 Enable **Fast Mode** in STS game settings (Settings → Fast Mode ON). If you install Super Fast Mode, push the speed slider to 200%+ in its mod config — this alone can 2-3× training throughput on top of Fast Mode.
 
@@ -278,6 +278,44 @@ Training an RL agent on Slay the Spire is compute-bound by real-time game simula
 - **GPU rollout workers** — the live STS Java instances and CommunicationMod bridge are still CPU-bound. GPU support only helps the offline PPO trainer, not the game simulation load.
 - **STS graphics settings** — animations are the bottleneck, not rendering quality. Leave graphics on whatever is stable.
 
+## Cloud / Headless Deployment (GCP)
+
+The training stack also runs **headless on a Linux cloud VM**, with no GPU and no display, so an overnight 8-worker run can happen on a spot instance instead of tying up a desktop. The current deployment target is a **GCP `c3-standard-22` spot VM** (22 vCPU, 88 GB RAM, modern Intel Sapphire Rapids cores). Everything lives under `vm/`:
+
+| Script | Role |
+|---|---|
+| `vm/install.sh` | One-shot, idempotent installer for a fresh Ubuntu 22.04 VM (Java 8, Xvfb, OpenAL, Python venv + torch, directory layout, validation). |
+| `vm/run_training.sh` | Launches N headless STS workers + the offline trainer; each worker gets its own Xvfb display and JVM tmpdir, and restarts every 25 games to reclaim memory. |
+| `vm/run_eval.sh` | Headless fixed-seed evaluation (single or multi-instance). |
+| `vm/stop.sh` | Graceful stop + orphan sweep. |
+| `vm/sync.ps1` / `vm/sync.sh` | Push code/model/seeds to the VM and pull model/logs back (gcloud or rsync). |
+| `vm/quickstart.sh` | Printable cheat-sheet: VM creation, spot recovery, daily workflow, cost. |
+
+```bash
+# On a fresh VM (after pushing vm/ + scripts/ + external/):
+bash vm/install.sh
+# Copy the Steam game files into ~/ascension/game/, push your model, then:
+./vm/run_training.sh --workers 8 --hours 12
+```
+
+Sizing rule of thumb: each STS worker consumes ~2 vCPU (game loop) + ~0.7 vCPU (Python policy/IO), so 8 workers is the sweet spot on 22 vCPUs — more just adds contention. Spot pricing is ~$0.19/hr, and with `--instance-termination-action=STOP` a preemption stops the VM (disk preserved) rather than deleting it, so training resumes after a `start` + relaunch.
+
+### Headless engineering challenges (and fixes)
+
+Getting a GUI-bound, mod-loaded desktop game to run reliably across many instances on a headless server surfaced a series of non-obvious failures. Each fix is baked into the `vm/` scripts:
+
+| Challenge | Symptom | Fix |
+|---|---|---|
+| **No GPU / no display** | LWJGL can't open an OpenGL context | Per-worker **Xvfb** virtual display + software GL (`LIBGL_ALWAYS_SOFTWARE=1`, `allowSoftwareOpenGL=true`). |
+| **Display contention** | Multiple instances on one shared display ran ~100× slower | Give **each worker its own Xvfb display** — OpenGL serializes across windows on a shared X server. |
+| **Native-lib extraction race** | Random SIGSEGV crashes when several JVMs started together | Per-worker `-Djava.io.tmpdir` so LWJGL natives don't collide during extraction. |
+| **Wrong Java** | Mods silently fail to load on Java 17+ | Pin **Java 8** (`update-alternatives`); ModTheSpire/BaseMod need the 8-era module model. |
+| **Headless audio** | Instances crash at startup on `libopenal.so.1` | Install `libopenal1` and point LWJGL at it via `-Dorg.lwjgl.openal.libname`. |
+| **CommunicationMod READY timeout** | Worker killed within 10 s of launch | Signal `ready` on stdout **before** the heavy `import torch` (which alone exceeds the 10 s window). |
+| **JVM heap OOM** | Workers died silently after ~35 games, dragging throughput down | Raise heap to `-Xmx2048m` and restart each worker every 25 games. |
+| **Shared config dir** | CommunicationMod ignores `XDG_CONFIG_HOME`, so all workers read one config | Default each worker's `--id` to its PID so per-process logs/rollouts stay isolated. |
+| **Spot preemption** | VM reclaimed mid-run | `--instance-termination-action=STOP` preserves the disk; a monitor restarts training on the next boot. |
+
 ## Command-Line Alternative
 
 If you prefer the terminal, use `launch_workers.ps1`:
@@ -417,6 +455,13 @@ AscensionAI/
 │   └── resume_portfolio.md   # Portfolio summary and resume bullets
 ├── external/
 │   └── spirecomm/            # SpireComm library (Communication Mod protocol)
+├── vm/                       # Headless cloud training (GCP spot VM)
+│   ├── install.sh            # One-shot Ubuntu installer (Java 8, Xvfb, venv, validation)
+│   ├── run_training.sh       # N headless STS workers + offline trainer
+│   ├── run_eval.sh           # Headless fixed-seed evaluation
+│   ├── stop.sh               # Graceful stop + orphan sweep
+│   ├── sync.ps1 / sync.sh    # Push/pull code, model, logs to/from the VM
+│   └── quickstart.sh         # VM creation, spot recovery, and workflow cheat-sheet
 ├── requirements.txt
 ├── LICENSE
 └── README.md

@@ -226,6 +226,12 @@
         <thead><tr><th>Date</th><th>Area</th><th>Change</th><th>Impact</th></tr></thead>
         <tbody>
           <tr>
+            <td><strong>May 30</strong></td>
+            <td><strong>Headless cloud deployment</strong></td>
+            <td>Ported the worker + trainer stack to a headless GCP <code>c3-standard-22</code> spot VM (22 vCPU, no GPU). Added a one-shot installer (<code>vm/install.sh</code>) and headless launcher (<code>vm/run_training.sh</code>). Solved per-worker Xvfb + software GL, per-worker JVM tmpdir (SIGSEGV race), Java 8 pin, OpenAL path, CommunicationMod READY-before-import, 2&nbsp;GB heap + 25-game restart (OOM fix), and spot preemption recovery.</td>
+            <td>Unattended overnight training now runs in the cloud at ~90+ games/hour on 8 workers for a few dollars per run, freeing the desktop. Fixing a silent heap OOM lifted throughput from ~55 to ~90+ games/hour on the same hardware.</td>
+          </tr>
+          <tr>
             <td><strong>May 27</strong></td>
             <td><strong>HP-urgency heal reward</strong></td>
             <td>Added HP-urgency-scaled rest-site heal reward: 0.025 &times; hp_healed &times; (1 &minus; hp_before/max_hp). Healing at 25% HP gives ~0.45 reward (beats 0.30 upgrade); healing at 75% HP gives ~0.15 (upgrade wins).</td>

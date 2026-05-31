@@ -1,6 +1,6 @@
 # AscensionAI Architecture
 
-AscensionAI is a local distributed reinforcement-learning system. It does not expose the live game as a hosted service; it coordinates several local Slay the Spire processes, a Communication Mod bridge, rollout collectors, and an offline PPO trainer through files and checkpoints.
+AscensionAI is a distributed reinforcement-learning system. It does not expose the live game as a hosted service; it coordinates several Slay the Spire processes, a Communication Mod bridge, rollout collectors, and an offline PPO trainer through files and checkpoints. The same topology runs two ways: on a local Windows desktop under the GUI control panel, and **headless on a GPU-less Linux cloud VM** for unattended long runs (see [Headless Cloud Deployment](#headless-cloud-deployment-gcp)).
 
 ![AscensionAI architecture](assets/architecture.svg)
 
@@ -92,3 +92,27 @@ The current implementation uses a local filesystem queue because the bottleneck 
 | CSV logs | Metrics sink or experiment tracker |
 
 The public dashboard and experiment reports are intentionally deployable without the game dependency. A reviewer can inspect the architecture, results, and training loop without installing Slay the Spire.
+
+## Headless Cloud Deployment (GCP)
+
+The local-vs-cloud distinction in the table above is no longer hypothetical. The full worker + trainer loop runs **headless on a GCP `c3-standard-22` spot VM** (22 vCPU, 88 GB RAM, no GPU, no display). The `vm/` directory holds a one-shot installer (`vm/install.sh`), a worker/trainer launcher (`vm/run_training.sh`), a headless eval runner, and push/pull sync helpers. A single command on a fresh Ubuntu image provisions Java 8, Xvfb, OpenAL, a Python venv with CPU PyTorch, and the directory layout; a second command launches 8 workers plus the offline trainer.
+
+The cloud path keeps the same file-queue architecture (per-game `.npz` rollouts → offline PPO → atomic checkpoint → worker reload). What changed is the *operational* layer: running a GUI-bound, mod-loaded desktop game many times over on a server with no graphics stack.
+
+### Headless reliability challenges
+
+| Challenge | Root cause | Handling |
+|---|---|---|
+| No GPU / no display | LWJGL needs an OpenGL context | Per-worker **Xvfb** virtual display + software GL (`LIBGL_ALWAYS_SOFTWARE`, `allowSoftwareOpenGL`). |
+| ~100× slowdown with multiple instances | OpenGL serializes across windows on a shared X server | Give **each worker its own Xvfb display** (`:99+id`). |
+| Intermittent SIGSEGV at startup | LWJGL native-library extraction races when JVMs share a tmpdir | Per-worker `-Djava.io.tmpdir`. |
+| Mods silently don't load | ModTheSpire/BaseMod break on the Java 17+ module model | Pin **Java 8** via `update-alternatives`. |
+| Startup crash on audio init | `libopenal.so.1` missing on a headless image | Install `libopenal1`, point LWJGL at it explicitly. |
+| Worker killed ~10 s after launch | CommunicationMod's READY handshake times out; `import torch` is slower than 10 s | Emit `ready` on stdout **before** any heavy import. |
+| Silent worker death after ~35 games | JVM heap (512 MB) OOMs over a long session | `-Xmx2048m` + restart every 25 games. |
+| Shared CommunicationMod config | The mod ignores `XDG_CONFIG_HOME`; all workers read one file | Default `--id` to PID so per-process artifacts stay isolated. |
+| Spot preemption | GCP reclaims the VM | `--instance-termination-action=STOP` preserves the disk; a watcher restarts training on the next boot. |
+
+### Throughput and sizing
+
+Each STS instance is CPU-bound at roughly 2 vCPU for the game loop plus ~0.7 vCPU for the Python policy/IO bridge — there is no effective frame limiter under software GL. On 22 vCPUs, 8 concurrent workers saturate the machine without thrashing and sustain ~90+ games/hour once heap-stable. Adding workers past that point only trades per-game speed for parallelism. Spot pricing (~$0.19/hr) makes a 12-hour unattended run cost a few dollars.

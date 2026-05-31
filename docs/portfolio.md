@@ -14,6 +14,13 @@ AscensionAI is a local distributed reinforcement-learning system for Slay the Sp
 | Distributed systems | N game workers write checkpoint-tagged rollouts; one trainer consumes fresh files and rejects stale data. |
 | Evaluation | Heuristic, BC, and PPO policies run on the same deterministic seed file with comparable CSV metrics. |
 | Tooling | Desktop control panel launches workers, tails logs, recommends worker counts, and cleans up orphaned processes. |
+| Cloud / DevOps | One-shot installer deploys the whole stack **headless on a GPU-less GCP spot VM**; 8 game instances run under per-worker Xvfb displays with software OpenGL, surviving spot preemption. |
+
+## Headless Cloud Deployment
+
+The training loop also runs unattended on a **GCP `c3-standard-22` spot VM** (22 vCPU, no GPU, no display). A single idempotent installer (`vm/install.sh`) provisions Java 8, Xvfb, OpenAL, and a CPU PyTorch venv; one launcher (`vm/run_training.sh`) brings up 8 headless workers plus the offline trainer at ~90+ games/hour.
+
+Making a GUI-bound, mod-loaded desktop game run many times over on a headless server required solving a chain of non-obvious failures: giving each worker its **own Xvfb display** (a shared display ran ~100× slower because OpenGL serializes across windows) and its **own JVM tmpdir** (shared `/tmp` caused LWJGL native-extraction SIGSEGV races), pinning **Java 8** (mods silently fail to load on 17+), wiring up headless **OpenAL**, signaling CommunicationMod's READY handshake **before** the slow `import torch` (its timeout is 10 s), and fixing a silent JVM heap OOM that had been killing workers after ~35 games (a 2 GB heap + 25-game restart lifted throughput from ~55 to ~90+ games/hour). Spot preemption is handled by `STOP`-on-preempt (disk preserved) plus an auto-restart monitor.
 
 ## Public Demo
 

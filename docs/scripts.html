@@ -257,6 +257,49 @@
     </section>
 
     <section class="section">
+      <h2>Cloud / Headless Deployment (vm/)</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>File</th><th>Role</th><th>Use When</th><th>Typical Command</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>vm/install.sh</code></td>
+              <td><span class="tag">one-shot installer</span></td>
+              <td>Provisions a fresh Ubuntu 22.04 VM: Java 8, Xvfb, OpenAL, Python venv + CPU torch, directory layout, and validation. Idempotent.</td>
+              <td><code>bash vm/install.sh</code></td>
+            </tr>
+            <tr>
+              <td><code>vm/run_training.sh</code></td>
+              <td><span class="tag">headless launcher</span></td>
+              <td>Launches N headless STS workers + the offline trainer; per-worker Xvfb display and JVM tmpdir, 2&nbsp;GB heap, restart every 25 games.</td>
+              <td><code>./vm/run_training.sh --workers 8 --hours 12</code></td>
+            </tr>
+            <tr>
+              <td><code>vm/run_eval.sh</code></td>
+              <td><span class="tag">headless eval</span></td>
+              <td>Runs a fixed-seed evaluation headless (single or multi-instance), 8&nbsp;GB heap to survive a full 200-game run.</td>
+              <td><code>./vm/run_eval.sh --games 200 --instances 4</code></td>
+            </tr>
+            <tr>
+              <td><code>vm/sync.ps1</code> / <code>vm/sync.sh</code></td>
+              <td><span class="tag">sync</span></td>
+              <td>Push code/model/seeds to the VM and pull the model + logs back, via gcloud (PowerShell) or rsync (bash).</td>
+              <td><code>.\vm\sync.ps1 push</code> · <code>.\vm\sync.ps1 pull</code></td>
+            </tr>
+            <tr>
+              <td><code>vm/quickstart.sh</code> / <code>vm/stop.sh</code></td>
+              <td><span class="tag">ops</span></td>
+              <td>Printable cheat-sheet (VM creation, spot preemption recovery, cost) and a graceful stop with orphan-process sweep.</td>
+              <td><code>./vm/quickstart.sh</code> · <code>./vm/stop.sh</code></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section">
       <h2>Evaluation, Logging, and Analysis</h2>
       <div class="table-wrap">
         <table>

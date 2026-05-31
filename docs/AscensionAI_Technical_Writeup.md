@@ -1,7 +1,7 @@
 # AscensionAI Technical Writeup
 
-**Version:** 0.6.0
-**Document Date:** 2026-05-23
+**Version:** 0.7.0
+**Document Date:** 2026-05-30
 **Author:** Justin Chan
 **Repository:** https://github.com/JustinoChan/AscensionAI
 
@@ -9,7 +9,7 @@
 
 ## Abstract
 
-AscensionAI is a reinforcement learning system that trains an autonomous agent to play *Slay the Spire* (Ironclad) end-to-end against the live, modded game process. The system uses a structured 585-dimensional observation encoder (expanded from 530 with 19 monster power slots), a 134-action discrete action space with legal-action masking, dense reward shaping, behavior cloning warm-start, and Proximal Policy Optimization (PPO) fine-tuning. Training is parallelized across multiple live game instances feeding a central offline trainer over a checkpoint-tagged rollout protocol, with fixed-seed evaluation and dashboard artifacts used to separate real policy progress from run-to-run variance. As of 2026-05-23, the observation encoder covers all combat-relevant STS1 monster powers and the reward structure includes upgrade incentives, Guardian phase-aware shaping, and tuned elite bonuses. The system currently runs on Windows and integrates with ModTheSpire, BaseMod, CommunicationMod, and a bundled SpireComm Python interface. This document describes the architecture, algorithmic choices, implementation, observed throughput, current limitations, and a phased roadmap.
+AscensionAI is a reinforcement learning system that trains an autonomous agent to play *Slay the Spire* (Ironclad) end-to-end against the live, modded game process. The system uses a structured 585-dimensional observation encoder (expanded from 530 with 19 monster power slots), a 134-action discrete action space with legal-action masking, dense reward shaping, behavior cloning warm-start, and Proximal Policy Optimization (PPO) fine-tuning. Training is parallelized across multiple live game instances feeding a central offline trainer over a checkpoint-tagged rollout protocol, with fixed-seed evaluation and dashboard artifacts used to separate real policy progress from run-to-run variance. As of 2026-05-23, the observation encoder covers all combat-relevant STS1 monster powers and the reward structure includes upgrade incentives, Guardian phase-aware shaping, and tuned elite bonuses. The system integrates with ModTheSpire, BaseMod, CommunicationMod, and a bundled SpireComm Python interface; it runs on Windows under a GUI control panel and, as of 2026-05-30, **headless on a GPU-less Linux cloud VM** for unattended training (see §19). This document describes the architecture, algorithmic choices, implementation, observed throughput, current limitations, and a phased roadmap.
 
 ---
 
@@ -28,7 +28,8 @@ AscensionAI is a reinforcement learning system that trains an autonomous agent t
 | GUI control panel | Complete - Windows-native launcher, monitor, archive controls, eval set mode, RAM cap controls |
 | Evaluation/reporting | Complete - deterministic seed sets, resumable eval logs, experiment reports, static dashboard |
 | Win-rate convergence | **Not yet demonstrated**; no recorded full victory in the published fixed-seed evals |
-| Cross-platform support | **Windows-only** for now |
+| Cross-platform support | Windows GUI is primary; **headless Linux cloud path** added (GCP spot VM, no GPU) — see §19 |
+| Cloud deployment | Complete - one-shot installer + headless worker/trainer launcher on a GCP `c3-standard-22` spot VM |
 
 **Headline metrics (current state):**
 
@@ -64,6 +65,7 @@ AscensionAI is a reinforcement learning system that trains an autonomous agent t
 16. [Hyperparameter Reference](#16-hyperparameter-reference)
 17. [Glossary](#17-glossary)
 18. [May 21, 2026 Current-System Addendum](#18-may-21-2026-current-system-addendum)
+19. [May 30, 2026 Headless Cloud Deployment Addendum](#19-may-30-2026-headless-cloud-deployment-addendum)
 
 ---
 
@@ -597,8 +599,8 @@ Long-running modded *Slay the Spire* sessions are fragile. Concrete reliability 
 
 ### 12.2 Throughput
 
-- **Live-game bottleneck.** Even at maximum Fast Mode + Super Fast Mode 200%, one game costs ~30–90 seconds. There is no headless simulator integration.
-- **Single-machine ceiling.** ~6–8 concurrent instances is realistic on a 16-core machine; beyond that, mod thread contention dominates. Multi-machine pooling exists but is manual.
+- **Live-game bottleneck.** Even at maximum Fast Mode + Super Fast Mode 200%, one game costs ~30–90 seconds. There is no headless *simulator* integration — the cloud path (§19) still runs the real game, just without a display.
+- **Single-machine ceiling.** ~6–8 concurrent instances is realistic on a 16-core machine; beyond that, mod thread contention and CPU saturation dominate (each instance is ~2 vCPU). Cloud spot VMs raise the ceiling per node but the per-instance cost is unchanged. Multi-machine pooling exists but is manual.
 
 ### 12.3 Algorithmic / training risk
 
@@ -615,8 +617,8 @@ Long-running modded *Slay the Spire* sessions are fragile. Concrete reliability 
 
 ### 12.5 Platform
 
-- **Windows-only at present.** GUI, PowerShell launcher, process cleanup, Steam path detection, and CommunicationMod config paths assume Windows. macOS / Linux would need a port.
-- **Path handling.** Several scripts use Windows path separators in defaults; switching shells requires care.
+- **Windows GUI is primary.** The control panel, PowerShell launcher, process cleanup, and Steam path detection assume Windows. A **headless Linux path** now exists for the core training loop (§19), but the GUI itself is not ported; macOS is untested.
+- **Path handling.** Several scripts use Windows path separators in defaults; the `vm/` scripts handle the Linux equivalents but other tooling switching shells requires care.
 
 ### 12.6 Evaluation
 
@@ -828,6 +830,61 @@ The 256x256 network appeared to plateau: it reached roughly 15 average floor ear
 
 ---
 
+## 19. May 30, 2026 Headless Cloud Deployment Addendum
+
+This addendum documents moving the training stack off the desktop and onto a **headless Linux cloud VM**, so unattended multi-hour runs no longer occupy a workstation. The architecture is unchanged — the same parallel workers, file-queue rollouts, and offline PPO trainer described in §8 — but the operational substrate is new: a GPU-less server with no display running a GUI-bound, mod-loaded desktop game many times concurrently.
+
+### 19.1 Deployment target and tooling
+
+| Item | Value |
+|---|---|
+| Provider / instance | GCP `c3-standard-22` **spot** (22 vCPU, 88 GB RAM, Intel Sapphire Rapids, no GPU) |
+| OS | Ubuntu 22.04 LTS |
+| Provisioning | `--provisioning-model=SPOT --instance-termination-action=STOP` (preemption stops, does not delete) |
+| Installer | `vm/install.sh` — one-shot, idempotent: system packages, Java 8 pin, Python venv + CPU torch, dir layout, validation |
+| Launcher | `vm/run_training.sh --workers 8 --hours 12` — N workers + offline trainer |
+| Eval | `vm/run_eval.sh` — headless fixed-seed evaluation (single or multi-instance) |
+| Sync | `vm/sync.ps1` / `vm/sync.sh` — push code/model/seeds, pull model/logs (gcloud or rsync) |
+
+A reviewer goes from a blank Ubuntu image to a running 8-worker job in three steps: push the repo's `vm/` + `scripts/` + `external/`, run `bash vm/install.sh`, copy the Steam game files in, then `./vm/run_training.sh`.
+
+### 19.2 Headless engineering challenges
+
+Each of the following was an observed failure during bring-up; the fix is encoded in the `vm/` scripts.
+
+| # | Challenge | Root cause | Fix |
+|---|---|---|---|
+| 1 | No OpenGL context | No GPU and no X display on the server | Per-worker **Xvfb** virtual display + software GL (`LIBGL_ALWAYS_SOFTWARE=1`, `-Dorg.lwjgl.opengl.Display.allowSoftwareOpenGL=true`) |
+| 2 | ~100× slowdown with multiple instances | OpenGL rendering serializes across windows sharing one X server | One **Xvfb display per worker** (`:99+id`) |
+| 3 | Intermittent SIGSEGV at startup | LWJGL native-library extraction races when JVMs share `/tmp` | Per-worker `-Djava.io.tmpdir=/tmp/sts_worker_<id>` |
+| 4 | Mods silently fail to load | ModTheSpire/BaseMod assume the Java 8 module model; Java 17+ blocks the reflective access they rely on | Install and pin **Java 8** via `update-alternatives` |
+| 5 | Startup crash on audio init | Headless image lacks `libopenal.so.1` that LWJGL dlopen's | Install `libopenal1`, set `-Dorg.lwjgl.openal.libname=/usr/lib/x86_64-linux-gnu/libopenal.so.1` |
+| 6 | Worker killed ~10 s after launch | CommunicationMod's READY handshake has a 10 s timeout; the worker's `import torch` alone exceeds it | Write `ready\n` to the real stdout **before** any heavy import, then load torch |
+| 7 | Silent worker death after ~35 games | JVM heap (`-Xmx512m`) OOMs over a long session; the worker just disappears, dropping throughput | `-Xmx2048m` plus `--restart-every 25` for a fresh heap |
+| 8 | All workers share one config | CommunicationMod ignores `XDG_CONFIG_HOME` and always reads `~/.config/ModTheSpire/` | Default each worker `--id` to its PID so logs/rollouts don't collide |
+| 9 | Spot preemption mid-run | GCP reclaims the instance | `STOP` termination preserves the disk; a 30-minute monitor restarts training after the next boot |
+
+Challenge #6 is worth emphasizing: the READY timeout is a hard 10 seconds, and a cold CPython process importing torch + numpy can take longer than that, so the obvious "set everything up, then signal ready" ordering fails 100% of the time on a fresh VM. The worker now redirects its own stdout, emits `ready` on the real handle first, and only then performs heavy initialization.
+
+### 19.3 Throughput and sizing
+
+Under software GL there is no effective frame limiter, so each STS instance is CPU-bound at roughly **2 vCPU for the game loop plus ~0.7 vCPU** for the Python policy/IO bridge. On 22 vCPUs this makes **8 workers** the practical sweet spot: the machine runs near saturation (load ≈ core count) without thrashing, sustaining **~90+ games/hour** once heap-stable. Pushing to 10–12 workers oversubscribes the cores and slows every instance, netting no gain. An earlier silent-OOM bug (challenge #7) had masked this, capping the same hardware at ~55 games/hour until heap and restart cadence were fixed.
+
+Machine choice matters more than core count: an `e2-standard-16` (older Broadwell, shared cores) ran the same workload ~2–3× slower per core than the `c3` (dedicated Sapphire Rapids), so the compute-optimized class is worth the marginal spot premium.
+
+### 19.4 Cost and recovery
+
+Spot pricing is ~$0.19/hr for the `c3-standard-22`, so a 12-hour unattended run costs a few dollars. Converting an existing standard VM to spot is not an in-place operation — it requires detaching the boot disk, deleting the instance, and recreating it as spot with the same disk reattached (`set-disk-auto-delete --no-auto-delete` → `delete` → `create --disk=...`). Because `--instance-termination-action=STOP` preserves the disk, the model checkpoint and `training_stats.csv` survive a preemption, and training resumes from the last atomic checkpoint after a `start` + relaunch.
+
+### 19.5 Code-level changes to remember
+
+- `scripts/rollout_worker.py` now signals READY before heavy imports and defaults `--id` to the process PID for multi-worker isolation on the shared CommunicationMod config.
+- `vm/install.sh` is the canonical headless installer (it replaces an earlier `vm/setup.sh` that incorrectly installed Java 17).
+- `vm/run_training.sh` encodes the per-worker Xvfb display, per-worker JVM tmpdir, 2 GB heap, software-GL env, OpenAL path, and 25-game restart cadence.
+- `vm/run_eval.sh` uses an 8 GB heap so a full 200-game eval does not OOM mid-run.
+
+---
+
 ## Document History
 
 | Version | Date | Notes |
@@ -839,3 +896,4 @@ The 256x256 network appeared to plateau: it reached roughly 15 average floor ear
 | 0.5 | 2026-05-21 | Updated current status after 33 post-writeup commits, 12k PPO diagnosis, boss reward shaping, auto-tune maturation, dashboard/eval hardening, and 512/256/256 GELU warm-transfer upgrade |
 | 0.5.1 | 2026-05-22 | Updated reward weights table with current values, added elite win bonus and HP-scaled floor advance documentation, corrected heuristic vs RL decision boundary |
 | 0.6.0 | 2026-05-23 | Expanded observation encoder from 530-d to 585-d with 19 monster power slots (11 new STS1-verified powers). Added REST_UPGRADE_REWARD (+0.30), bumped ELITE_WIN_BONUS to +4.0, added GUARDIAN_OPEN_DMG_BONUS (+0.03). Fixed warm_load() to zero-initialize extra capacity. Added --warm-resume/--net-arch/--activation to train_ppo.py. 16,900+ training games, 1,856+ PPO updates. |
+| 0.7.0 | 2026-05-30 | Added §19 Headless Cloud Deployment addendum: GCP `c3-standard-22` spot VM, one-shot `vm/install.sh` installer, headless worker/trainer launcher. Documented the nine headless bring-up challenges (per-worker Xvfb + software GL, per-worker JVM tmpdir, Java 8 pin, OpenAL path, CommunicationMod READY-before-import, 2 GB heap + restart cadence, PID worker IDs, spot preemption recovery) and CPU-bound throughput/sizing (~90+ games/hr on 8 workers). |
