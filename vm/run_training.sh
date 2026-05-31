@@ -123,11 +123,19 @@ EOF
 }
 
 # ─── Worker launcher ────────────────────────────────────────────────────────
+# The JVM runs in the background so a watchdog can supervise it. A healthy
+# worker writes CommunicationMod game-state lines to its log many times per
+# second; if the Python commander dies but the JVM keeps running (the failure
+# that silently wedged 8 workers ~2.5h into a 12h run and produced nothing for
+# the next 9h), the log goes quiet. The watchdog detects that stall and kills
+# the JVM so the loop relaunches a fresh game + commander.
 launch_worker() {
     local id=$1
     local log_file="$PROJECT_DIR/logs/worker_${id}.log"
     local tmpdir="/tmp/sts_worker_${id}"
     local display_num=$((99 + id))
+    local stale_limit=120   # seconds with no log output => worker is wedged
+    local boot_grace=150    # seconds to let the JVM boot before watching
     mkdir -p "$tmpdir"
 
     # Each worker gets its own Xvfb — small resolution reduces software rendering cost
@@ -147,7 +155,29 @@ launch_worker() {
             -jar ModTheSpire.jar \
             --skip-launcher \
             --mods basemod,CommunicationMod,superfastmode \
-            >> "$log_file" 2>&1 || true
+            >> "$log_file" 2>&1 &
+        local java_pid=$!
+        local launch_ts=$(date +%s)
+
+        # Supervise the JVM: relaunch on exit, or kill+relaunch if it wedges.
+        while kill -0 "$java_pid" 2>/dev/null; do
+            sleep 20
+            if [ $(date +%s) -ge $END_TIME ] || [ -f "$STOP_FILE" ]; then
+                kill "$java_pid" 2>/dev/null || true
+                sleep 2
+                kill -9 "$java_pid" 2>/dev/null || true
+                break
+            fi
+            local now=$(date +%s)
+            [ $((now - launch_ts)) -lt $boot_grace ] && continue
+            local mtime=$(stat -c %Y "$log_file" 2>/dev/null || echo "$now")
+            if [ $((now - mtime)) -gt $stale_limit ]; then
+                echo "[$(date '+%H:%M:%S')] Worker $id: WEDGED ($((now - mtime))s no log output) — killing JVM to relaunch"
+                kill -9 "$java_pid" 2>/dev/null || true
+                break
+            fi
+        done
+        wait "$java_pid" 2>/dev/null || true
 
         if [ $(date +%s) -lt $END_TIME ] && [ ! -f "$STOP_FILE" ]; then
             echo "[$(date '+%H:%M:%S')] Worker $id: restarting after game cycle"
@@ -155,7 +185,8 @@ launch_worker() {
         fi
     done
     echo "[$(date '+%H:%M:%S')] Worker $id: time limit reached, stopping"
-    kill $xvfb_pid 2>/dev/null
+    kill "$java_pid" 2>/dev/null || true
+    kill "$xvfb_pid" 2>/dev/null || true
 }
 
 # ─── Offline trainer ────────────────────────────────────────────────────────

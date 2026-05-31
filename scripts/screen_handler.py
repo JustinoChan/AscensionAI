@@ -1003,6 +1003,11 @@ def auto_handle_screen(
                     return Action("leave")
                 return Action("state")
             if for_upgrade or smith_grid:
+                # RL chooses which card to upgrade — it now observes the full
+                # deck via the per-card count vector. BC/demo still uses the
+                # heuristic (heuristic_all=True) to teach a sane starting policy.
+                if not heuristic_all:
+                    return None
                 unsel = [(i, c) for i, c in enumerate(grid_choices)
                          if str(c).lower() not in selected_names]
                 if unsel:
@@ -1020,6 +1025,10 @@ def auto_handle_screen(
                           if str(c).lower() not in selected_names]
             if not unselected:
                 unselected = list(enumerate(grid_choices))
+            # RL chooses which card to remove (purge) — it now sees the full
+            # deck. BC/demo path keeps the heuristic purge for warm-start demos.
+            if not heuristic_all:
+                return None
             best_idx = _pick_from_unselected(unselected, scr)
             return ChooseAction(choice_index=best_idx)
         if proceed_avail:

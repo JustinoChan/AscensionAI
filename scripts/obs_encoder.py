@@ -166,6 +166,13 @@ RELIC_DIM = RELIC_FEATURE_DIM                 # 25
 POTION_SLOT_DIM = 8
 POTION_DIM = MAX_POTIONS * POTION_SLOT_DIM    # 40
 DECK_PROFILE_DIM = 20
+# Per-card count vector over the full Ironclad-encounterable card pool. Lets the
+# policy see exact deck composition (which/how many cards) instead of only the
+# 20-d aggregate profile — a prerequisite for learning card-reward picks,
+# removal, and upgrades. Appended at the END of the observation so warm-transfer
+# keeps the existing feature->weight mapping intact and zero-inits these inputs.
+DECK_CARD_VEC_DIM = len(CARD_ID_LIST)
+_CARD_VEC_INDEX = {cid: i for i, cid in enumerate(CARD_ID_LIST)}
 
 MAX_MAP_CHOICES = 4
 MAP_NODE_TYPES = 6                            # M, E, R, $, ?, T
@@ -216,7 +223,8 @@ OBS_SIZE = (
     + POTION_DIM
     + DECK_PROFILE_DIM
     + MAP_DIM
-)  # 585
+    + DECK_CARD_VEC_DIM
+)  # 585 + len(CARD_ID_LIST)
 
 
 # ---------------------------------------------------------------------------
@@ -846,6 +854,16 @@ def encode_game_state(gs: Any) -> np.ndarray:
         obs[gbase + 1] = float(boss_avail)
         obs[gbase + 2] = floors_remaining / 17.0
     offset += MAP_DIM
+
+    # === DECK CARD COUNT VECTOR (per-card counts over the Ironclad pool) ===
+    # Must stay the LAST block so warm-transfer's top-left weight copy keeps the
+    # earlier features aligned and zero-inits these new inputs.
+    for c in deck:
+        idx = _CARD_VEC_INDEX.get(str(getattr(c, "card_id", "") or ""))
+        if idx is not None:
+            obs[offset + idx] += 1.0
+    obs[offset:offset + DECK_CARD_VEC_DIM] /= 5.0  # normalize (Strikes start at 5)
+    offset += DECK_CARD_VEC_DIM
 
     np.nan_to_num(obs, copy=False)
     return obs

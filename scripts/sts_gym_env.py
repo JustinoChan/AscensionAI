@@ -40,6 +40,7 @@ from obs_encoder import (
 )
 from screen_handler import event_choice_targets as get_event_choice_targets
 from screen_handler import event_choice_for_slot, note_rest_choice
+from game_data import CARD_MECHANICS
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +182,12 @@ def compute_action_mask(gs: Any) -> np.ndarray:
                           if st_name == "COMBAT_REWARD" and scr else [])
         if st_name == "COMBAT_REWARD" and not n_choices and combat_rewards:
             n_choices = len(combat_rewards)
+        # GRID purge/upgrade is now RL-controlled. If choice_list is empty,
+        # fall back to the grid cards so the choices get masked legal.
+        if st_name == "GRID" and not n_choices and scr is not None:
+            grid_cards = list(getattr(scr, "cards", []) or [])
+            if grid_cards:
+                n_choices = len(grid_cards)
         if st_name == "EVENT":
             event_choice_targets = get_event_choice_targets(gs, max_choices=MAX_CHOICES)
             if event_choice_targets:
@@ -391,8 +398,29 @@ VICTORY_REWARD = 60.0
 DEFEAT_PENALTY = 25.0
 DEFEAT_FLOOR_OFFSET = 0.25
 MAX_HP_GAIN_REWARD = 0.10
-REST_UPGRADE_REWARD = 0.30
 REST_HEAL_PER_HP = 0.025
+
+# Deck-quality potential shaping (Phi). Phi(deck) = mean card quality, with an
+# upgrade boost. Rewarding its per-step change teaches the RL to cut junk, draft
+# above its current average, and upgrade impactful cards — and penalizes the
+# reverse — all quality-weighted and context-dependent (the mean makes the same
+# card pay differently depending on the rest of the deck). Replaces the old flat
+# per-removal and per-upgrade rewards now that the RL controls those screens.
+DECK_QUALITY_COEF = 1.0       # lambda: scale on the Phi change each step
+UPGRADE_QUALITY_BONUS = 0.3   # u: an upgraded card counts as quality*(1+u)
+
+
+def _deck_potential(deck) -> float:
+    """Phi(deck): mean card quality with an upgrade boost (0.0 for empty deck)."""
+    if not deck:
+        return 0.0
+    total = 0.0
+    for c in deck:
+        mech = CARD_MECHANICS.get(str(getattr(c, "card_id", "") or ""))
+        q = mech[4] if mech is not None else 0.0
+        upg = 1 if int(getattr(c, "upgrades", 0) or 0) > 0 else 0
+        total += q * (1.0 + UPGRADE_QUALITY_BONUS * upg)
+    return total / len(deck)
 
 # ---------------------------------------------------------------------------
 # Boss fight reward shaping
@@ -456,7 +484,7 @@ class RewardTracker:
         self._boss_last_hp = 0
         self._boss_max_hp = 0
         self._in_elite_fight = False
-        self._last_upgrades = 0
+        self.last_deck_potential = 0.0
 
     def _enemy_stats(self, gs: Any) -> Tuple[Optional[int], int]:
         total_hp = 0
@@ -497,10 +525,7 @@ class RewardTracker:
         self._boss_last_hp = 0
         self._boss_max_hp = 0
         self._in_elite_fight = False
-        self._last_upgrades = sum(
-            int(getattr(c, "upgrades", 0) or 0)
-            for c in (getattr(gs, "deck", []) or [])
-        )
+        self.last_deck_potential = _deck_potential(getattr(gs, "deck", []) or [])
         if self.last_in_combat:
             self.last_enemy_hp, self.last_alive = self._enemy_stats(gs)
             self._last_priority_hp = self._priority_hp_map(gs)
@@ -527,8 +552,11 @@ class RewardTracker:
         reward += (gold - self.last_gold) * 0.01
         reward += (relic_count - self.last_relics) * 1.0
         reward += max(0, int(getattr(gs, "max_hp", 0) or 0) - self.last_max_hp) * MAX_HP_GAIN_REWARD
-        if deck_size < self.last_deck_size:
-            reward += (self.last_deck_size - deck_size) * 0.2
+        # Deck-quality potential shaping: reward Phi rising (good removals,
+        # drafts, upgrades) and penalize it falling (cutting a bomb, taking junk).
+        deck_potential = _deck_potential(getattr(gs, "deck", []) or [])
+        reward += DECK_QUALITY_COEF * (deck_potential - self.last_deck_potential)
+        self.last_deck_potential = deck_potential
 
         if floor_num > self.last_floor:
             max_hp = max(1, int(getattr(gs, "max_hp", 1) or 1))
@@ -545,15 +573,6 @@ class RewardTracker:
                 self._in_elite_fight = False
 
         if not in_combat:
-            upgrades = sum(
-                int(getattr(c, "upgrades", 0) or 0)
-                for c in (getattr(gs, "deck", []) or [])
-            )
-            new_ups = upgrades - self._last_upgrades
-            if new_ups > 0:
-                reward += new_ups * REST_UPGRADE_REWARD
-            self._last_upgrades = upgrades
-
             hp_recovered = max(0, hp - self.last_hp)
             if hp_recovered > 0:
                 max_hp = max(1, int(getattr(gs, "max_hp", 1) or 1))
