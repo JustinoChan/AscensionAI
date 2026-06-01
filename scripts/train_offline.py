@@ -424,6 +424,9 @@ def main():
                         help="Dynamically adjust lr, ent_coef, and bc_coef from KL/clip/normalized entropy")
     parser.add_argument("--override-ent-coef", action="store_true",
                         help="Apply --ent-coef after loading checkpoint hparams")
+    parser.add_argument("--override-lr", action="store_true",
+                        help="Apply --lr after loading checkpoint hparams (e.g. to "
+                             "re-raise lr for learning newly added obs inputs)")
     parser.add_argument("--clip", type=float, default=0.15,
                         help="PPO clip range (default: 0.15)")
     parser.add_argument("--target-kl", type=float, default=0.03,
@@ -525,6 +528,11 @@ def main():
                     "Loaded existing model; keeping checkpoint auto-tune state "
                     f"lr={_current_lr(trainer):.2e} ent_coef={trainer.ent_coef:.5f}"
                 )
+            if args.override_lr:
+                old_lr = _current_lr(trainer)
+                trainer.set_lr(args.lr)
+                log("Manual lr override after checkpoint load: "
+                    f"lr {old_lr:.2e}->{args.lr:.2e}")
         else:
             trainer.set_lr(args.lr)
             trainer.ent_coef = args.ent_coef

@@ -202,7 +202,9 @@ run_trainer() {
             --data "$PROJECT_DIR/$ROLLOUT_DIR" \
             --delete-consumed \
             --batch-games "$BATCH_GAMES" \
-            --lr 3e-5 \
+            --lr 1e-4 \
+            --override-lr \
+            --auto-min-lr 3e-5 \
             --bc-coef 0.001 \
             --max-rollout-lag 9999 \
             --ent-coef 0.001 \
