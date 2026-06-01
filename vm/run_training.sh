@@ -88,6 +88,8 @@ done
 
 DURATION_SECS=$((HOURS * 3600))
 END_TIME=$(($(date +%s) + DURATION_SECS))
+# Publish the scheduled end for the cron self-heal monitor (vm/monitor.sh).
+echo "$END_TIME" > "$PROJECT_DIR/logs/.run_end_epoch"
 
 # Each worker gets its own Xvfb display to avoid rendering contention.
 # Shared display causes 100x+ slowdown with multiple OpenGL windows.
@@ -247,6 +249,8 @@ echo "Training will auto-stop at $(date -d @$END_TIME '+%Y-%m-%d %H:%M')"
 # Wait for time limit
 wait
 echo ""
+# Clear the window sentinel so the cron monitor won't relaunch after a clean end.
+rm -f "$PROJECT_DIR/logs/.run_end_epoch"
 echo "=== Training session complete ==="
 echo "Total duration: ${HOURS}h"
 echo "Pull results:  vm/sync.sh pull   (from your local machine)"
