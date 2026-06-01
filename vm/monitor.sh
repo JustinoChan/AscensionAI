@@ -14,7 +14,7 @@
 
 PROJECT_DIR="$HOME/ascension"
 HEARTBEAT="$PROJECT_DIR/logs/monitor_heartbeat.log"
-END_FILE="$PROJECT_DIR/logs/.run_end_epoch"
+AUTORUN="$PROJECT_DIR/logs/.autorun"
 STOP_FILE="$PROJECT_DIR/logs/.stop_training"
 TRAINER_LOG="$PROJECT_DIR/logs/trainer.log"
 
@@ -30,17 +30,16 @@ wedged=$(grep -hc WEDGED "$PROJECT_DIR"/logs/worker_*.log 2>/dev/null | paste -s
 tage="na"
 [ -f "$TRAINER_LOG" ] && tage=$(( (now - $(stat -c %Y "$TRAINER_LOG")) / 60 ))
 
-end_epoch=0
-[ -f "$END_FILE" ] && end_epoch=$(cat "$END_FILE" 2>/dev/null || echo 0)
-
 action="ok"
-# Relaunch only if: not intentionally stopped, still inside the scheduled window,
-# and the run is actually gone (no orchestrator and no game JVMs).
-if [ ! -f "$STOP_FILE" ] && [ "$end_epoch" -gt "$now" ] && [ "$run" -eq 0 ] && [ "$java" -eq 0 ]; then
-    remaining_h=$(( (end_epoch - now) / 3600 + 1 ))
-    cd "$PROJECT_DIR" && nohup bash vm/run_training.sh --workers 8 --hours "$remaining_h" \
-        > /tmp/training_relaunch.log 2>&1 &
-    action="RELAUNCHED (run was dead, ${remaining_h}h left in window)"
+# Master switch: while logs/.autorun exists (and training isn't intentionally
+# stopped), keep training running continuously — relaunch whenever it's down,
+# including ~10 min after a preemption+reboot or a clean 24h end. Because cron
+# starts at boot, this also auto-resumes training after the VM comes back up.
+# Remove logs/.autorun to turn auto-resume off.
+if [ -f "$AUTORUN" ] && [ ! -f "$STOP_FILE" ] && [ "$run" -eq 0 ] && [ "$java" -eq 0 ]; then
+    cd "$PROJECT_DIR" && nohup bash vm/run_training.sh --workers 8 --hours 24 \
+        > /tmp/training_autoresume.log 2>&1 &
+    action="RELAUNCHED (autorun: training was down)"
 fi
 
 echo "$nowts UTC | java=$java trainer=$trainer run=$run games=$games trainer_age=${tage}m wedged=$wedged | $action" >> "$HEARTBEAT"
