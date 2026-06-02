@@ -2,7 +2,7 @@
 # AscensionAI Training Runner — launches N headless STS workers
 #
 # Usage:
-#   ./run_training.sh                     # 8 workers, 12 hours, 25 games/restart
+#   ./run_training.sh                     # 8 workers, 24 hours, 25 games/restart
 #   ./run_training.sh --workers 6 --hours 24 --restart-every 30
 #   ./run_training.sh --workers 10 --hours 8 --restart-every 40
 #
@@ -17,7 +17,7 @@ set -e
 
 # ─── Defaults ───────────────────────────────────────────────────────────────
 WORKERS=8
-HOURS=12
+HOURS=24
 RESTART_EVERY=25
 MODEL="models/ppo_sts.pt"
 ROLLOUT_DIR="rollouts_shared"
@@ -38,7 +38,7 @@ while [[ $# -gt 0 ]]; do
         -h|--help)
             echo "Usage: $0 [OPTIONS]"
             echo "  --workers N        Number of STS instances (default: 8)"
-            echo "  --hours N          Run duration in hours (default: 12)"
+            echo "  --hours N          Run duration in hours (default: 24)"
             echo "  --restart-every N  Games per worker before JVM restart (default: 25)"
             echo "  --model PATH       Model checkpoint path (default: models/ppo_sts.pt)"
             echo "  --no-trainer       Don't run the offline trainer (workers only)"
