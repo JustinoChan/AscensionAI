@@ -204,7 +204,7 @@ run_trainer() {
             --batch-games "$BATCH_GAMES" \
             --lr 1e-4 \
             --override-lr \
-            --auto-min-lr 3e-5 \
+            --auto-min-lr 6e-5 \
             --bc-coef 0.001 \
             --max-rollout-lag 9999 \
             --ent-coef 0.001 \
