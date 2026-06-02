@@ -1,7 +1,7 @@
 # AscensionAI Technical Writeup
 
-**Version:** 0.7.0
-**Document Date:** 2026-05-30
+**Version:** 0.8.0
+**Document Date:** 2026-06-02
 **Author:** Justin Chan
 **Repository:** https://github.com/JustinoChan/AscensionAI
 
@@ -9,7 +9,7 @@
 
 ## Abstract
 
-AscensionAI is a reinforcement learning system that trains an autonomous agent to play *Slay the Spire* (Ironclad) end-to-end against the live, modded game process. The system uses a structured 585-dimensional observation encoder (expanded from 530 with 19 monster power slots), a 134-action discrete action space with legal-action masking, dense reward shaping, behavior cloning warm-start, and Proximal Policy Optimization (PPO) fine-tuning. Training is parallelized across multiple live game instances feeding a central offline trainer over a checkpoint-tagged rollout protocol, with fixed-seed evaluation and dashboard artifacts used to separate real policy progress from run-to-run variance. As of 2026-05-23, the observation encoder covers all combat-relevant STS1 monster powers and the reward structure includes upgrade incentives, Guardian phase-aware shaping, and tuned elite bonuses. The system integrates with ModTheSpire, BaseMod, CommunicationMod, and a bundled SpireComm Python interface; it runs on Windows under a GUI control panel and, as of 2026-05-30, **headless on a GPU-less Linux cloud VM** for unattended training (see §19). This document describes the architecture, algorithmic choices, implementation, observed throughput, current limitations, and a phased roadmap.
+AscensionAI is a reinforcement learning system that trains an autonomous agent to play *Slay the Spire* (Ironclad) end-to-end against the live, modded game process. The system uses a structured 717-dimensional observation encoder (expanded from 585 with a 132-dim per-card deck count vector; 19 monster power slots), a 134-action discrete action space with legal-action masking, dense reward shaping, behavior cloning warm-start, and Proximal Policy Optimization (PPO) fine-tuning. Training is parallelized across multiple live game instances feeding a central offline trainer over a checkpoint-tagged rollout protocol, with fixed-seed evaluation and dashboard artifacts used to separate real policy progress from run-to-run variance. As of 2026-05-23, the observation encoder covers all combat-relevant STS1 monster powers and the reward structure includes upgrade incentives, Guardian phase-aware shaping, and tuned elite bonuses. The system integrates with ModTheSpire, BaseMod, CommunicationMod, and a bundled SpireComm Python interface; it runs on Windows under a GUI control panel and, as of 2026-05-30, **headless on a GPU-less Linux cloud VM** for unattended training (see §19). As of 2026-06-02, **deck-building is a learned skill** (Path 2, §20): the observation includes a per-card deck count vector, and card removal and upgrade selection moved from the heuristic to the RL policy with a potential-based deck-quality reward — and the cloud run is fully self-healing (continuous auto-resume + preemption auto-restart). This document describes the architecture, algorithmic choices, implementation, observed throughput, current limitations, and a phased roadmap.
 
 ---
 
@@ -18,7 +18,7 @@ AscensionAI is a reinforcement learning system that trains an autonomous agent t
 | Aspect | Status |
 |---|---|
 | Environment integration | Complete - live STS via CommunicationMod / SpireComm |
-| Observation encoder | Complete - 585-d vector across 11 feature blocks (19 monster power slots) |
+| Observation encoder | Complete - 717-d vector (585-d feature blocks + 132-d per-card deck count vector; 19 monster power slots) |
 | Action space | Complete - 134 discrete actions, legal-action masking |
 | Reward shaping | Complete - dense per-step, terminal, elite win bonus, HP-scaled floor advance, spawner priority, and boss-specific signals |
 | Behavior cloning | Complete - heuristic demos, supervised cross-entropy, resumable checkpointing |
@@ -29,13 +29,14 @@ AscensionAI is a reinforcement learning system that trains an autonomous agent t
 | Evaluation/reporting | Complete - deterministic seed sets, resumable eval logs, experiment reports, static dashboard |
 | Win-rate convergence | **Not yet demonstrated**; no recorded full victory in the published fixed-seed evals |
 | Cross-platform support | Windows GUI is primary; **headless Linux cloud path** added (GCP spot VM, no GPU) — see §19 |
-| Cloud deployment | Complete - one-shot installer + headless worker/trainer launcher on a GCP `c3-standard-22` spot VM |
+| Cloud deployment | Complete - one-shot installer + headless worker/trainer launcher on a GCP `c3-standard-22` spot VM; self-healing (continuous auto-resume + preemption auto-restart), see §19/§20 |
+| Learned deck-building | Complete (Path 2, §20) - 717-d per-card deck vector; card removal + upgrade RL-controlled; potential-based deck-quality reward; warm-transferred 585->717 |
 
 **Headline metrics (current state):**
 
-- Observation dimensionality: 585 (expanded from 530; 19 monster power slots per monster)
+- Observation dimensionality: 717 (585 feature blocks + 132-d per-card deck count vector; previously 585, 530)
 - Action space size: 134
-- Current offline PPO architecture: 585 -> 512 -> 256 -> 256 -> {134 logits + 1 value}, GELU, ~504K parameters
+- Current offline PPO architecture: 717 -> 512 -> 256 -> 256 -> {134 logits + 1 value}, GELU, ~571K parameters
 - Monster knowledge base: 66 monsters x 7 behavioral flags x 8-d identity embedding
 - Monster power encoding: 19 powers per monster (strength, vulnerable, weakened, artifact, ritual, curlup, thorns, angry, sharphide, modeshift, enrage, curiosity, intangible, invincible, timewarp, beatofdeath, malleable, lifelink, regenerate)
 - Training scale: 16,900+ PPO rollout games, 1,856+ update batches
@@ -66,6 +67,7 @@ AscensionAI is a reinforcement learning system that trains an autonomous agent t
 17. [Glossary](#17-glossary)
 18. [May 21, 2026 Current-System Addendum](#18-may-21-2026-current-system-addendum)
 19. [May 30, 2026 Headless Cloud Deployment Addendum](#19-may-30-2026-headless-cloud-deployment-addendum)
+20. [June 2, 2026 Learned Deck-Building Addendum](#20-june-2-2026-learned-deck-building-addendum)
 
 ---
 
@@ -885,6 +887,50 @@ Spot pricing is ~$0.19/hr for the `c3-standard-22`, so a 12-hour unattended run 
 
 ---
 
+## 20. June 2, 2026 Learned Deck-Building Addendum
+
+This addendum documents **Path 2**: making deck construction a *learned* skill. Diagnosis of the long Act-1-boss / Act-2 wall pointed at the deck itself — the agent could win Act 1 by brute force but never built a deck that scales, and it died in Act 2. Crucially, the policy *could not* learn deck-building for two structural reasons, independent of reward tuning:
+
+1. **It couldn't observe its deck.** The encoder only summarized the deck as a 20-d aggregate profile (type ratios, counts, a few key-card flags) — not the actual cards. You can't learn "cut a Strike, keep Demon Form" from aggregates.
+2. **It didn't control deck-building.** Card removal (purge grids) and card upgrades (smith grids) were chosen by a heuristic (`screen_handler.pick_grid_card` / `_pick_grid_upgrade`), not the RL policy.
+
+So reward shaping alone was the wrong lever — the gating constraints were **observation and control**.
+
+### 20.1 Observation: per-card deck count vector (585 → 717)
+
+Appended a 132-dim count vector over the full Ironclad-encounterable card pool (`game_data.CARD_ID_LIST`: starters, commons/uncommons/rares, colorless, statuses, curses), normalized by 5. Now the policy sees exactly which and how many of each card it holds, not just a profile. The block is appended **last** so warm-transfer keeps the existing 585 features aligned and zero-initializes the new inputs. New obs size: **717**; first-layer params grow ~67.6K (≈571K total).
+
+### 20.2 Control: removal & upgrade moved into the RL policy
+
+`auto_handle_screen` now returns `None` (delegates to the policy) for purge and upgrade grids instead of calling the heuristic, so those become real training decisions. The environment already supported it — `compute_action_mask` masks the grid choices legal and `flat_action_to_spire_action` maps a CHOOSE action to `ChooseAction(choice_index)` — plus a defensive mask fallback when `choice_list` is empty. The BC path keeps the heuristic (`heuristic_all`) so demos still teach sane removals.
+
+### 20.3 Reward: potential-based deck-quality shaping
+
+The flat per-removal (+0.2) and per-upgrade (+0.30) rewards were a liability once the RL controlled those screens — flat rewards would pay it to purge *good* cards. Replaced with potential-based shaping:
+
+```
+Phi(deck) = mean over cards of [ quality(card) * (1 + 0.3 * upgraded) ]
+reward    += 1.0 * (Phi_now - Phi_prev)
+```
+
+Using the existing per-card `quality` score (−4..+9). Because it's the *mean*, removing a below-average card raises Phi (rewarded) and removing an above-average card lowers it (penalized) — quality-weighted, context-dependent, and symmetric (potential-based shaping doesn't distort the optimal policy). Worked magnitudes: remove a curse +0.31, remove a Strike +0.13, remove Demon Form −0.27, draft junk −0.02, upgrade Demon Form +0.13, upgrade a Strike ≈+0.015. No deck-size floor — the game already bounds removals.
+
+### 20.4 Migration, BC anchor, and learning rate
+
+- **Warm transfer 585 → 717** on the main machine (behavior preserved: old model on `x` equals new model on `[x, zeros]` to float precision), checkpoint backed up; the trained model continues rather than restarting.
+- **Light BC anchor**: collected fresh 717-d heuristic demos (`vm/collect_bc.sh`, `behavior_clone --collect-only`, no net training) into `bc_demos_shared/`; the offline trainer loads them at a small `bc_coef` to keep the warm-transferred policy near sane removals while PPO + Phi refine it. Fixed a deadlock where a checkpoint `bc_coef=0` caused `set_bc_reference` to silently discard the anchor.
+- **`--override-lr`**: the zero-init deck-vector inputs learn slowly at the converged lr (2.37e-5), which `--auto-tune` always inherited from the checkpoint. Added an override (mirroring `--override-ent-coef`) to re-raise lr (1e-4, floored at 6e-5) so the new inputs/behaviors learn fast enough to actually test the hypothesis.
+
+### 20.5 Hands-off self-healing operation
+
+The cloud run is now continuous and self-recovering with no external session (it only stops when `logs/.autorun` is removed): a per-worker watchdog in `run_training.sh` (kill+relaunch a JVM whose log goes silent), a VM-side cron (`vm/monitor.sh`, `.autorun`-driven, 10-min heartbeat to `logs/monitor_heartbeat.log`) that relaunches training after any death/clean-end/reboot, and a Cloud Scheduler job that restarts the VM after spot preemption. A real preemption exposed two bugs since fixed: the BC-anchor `coef=0` deadlock (above) and a cron `pgrep -c || echo 0` that produced `"0\n0"` and disabled the relaunch test.
+
+### 20.6 Early signal
+
+The deck-vector inputs are integrating: their first-layer weight magnitude relative to the original inputs climbed from ~0.14 to ~0.35 over the first ~1.5 days. Behavior (avg floor ~13, Act 2 reach ~15–17%) has not yet broken from the pre-Path-2 baseline — expected, since the new inputs are still a junior partner and behavior change lags weight growth. A fresh fixed-seed eval will be published once the deck vector matures; if behavior still doesn't move at high weight strength, that will indicate deck-building alone is not the bottleneck.
+
+---
+
 ## Document History
 
 | Version | Date | Notes |
@@ -897,3 +943,4 @@ Spot pricing is ~$0.19/hr for the `c3-standard-22`, so a 12-hour unattended run 
 | 0.5.1 | 2026-05-22 | Updated reward weights table with current values, added elite win bonus and HP-scaled floor advance documentation, corrected heuristic vs RL decision boundary |
 | 0.6.0 | 2026-05-23 | Expanded observation encoder from 530-d to 585-d with 19 monster power slots (11 new STS1-verified powers). Added REST_UPGRADE_REWARD (+0.30), bumped ELITE_WIN_BONUS to +4.0, added GUARDIAN_OPEN_DMG_BONUS (+0.03). Fixed warm_load() to zero-initialize extra capacity. Added --warm-resume/--net-arch/--activation to train_ppo.py. 16,900+ training games, 1,856+ PPO updates. |
 | 0.7.0 | 2026-05-30 | Added §19 Headless Cloud Deployment addendum: GCP `c3-standard-22` spot VM, one-shot `vm/install.sh` installer, headless worker/trainer launcher. Documented the nine headless bring-up challenges (per-worker Xvfb + software GL, per-worker JVM tmpdir, Java 8 pin, OpenAL path, CommunicationMod READY-before-import, 2 GB heap + restart cadence, PID worker IDs, spot preemption recovery) and CPU-bound throughput/sizing (~90+ games/hr on 8 workers). |
+| 0.8.0 | 2026-06-02 | Added §20 Learned Deck-Building addendum (Path 2): observation 585→717 with a 132-d per-card deck count vector; card removal + upgrade moved from heuristic to RL policy; potential-based deck-quality reward replacing the flat per-removal/per-upgrade rewards; warm transfer 585→717; light BC anchor (`vm/collect_bc.sh`) + `--override-lr`; self-healing cloud ops (`.autorun` cron + heartbeat, Cloud Scheduler preemption auto-restart, per-worker watchdog). Updated abstract, executive summary, and headline metrics to 717-d / ~571K params. |

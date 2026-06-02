@@ -111,8 +111,22 @@ The cloud path keeps the same file-queue architecture (per-game `.npz` rollouts 
 | Worker killed ~10 s after launch | CommunicationMod's READY handshake times out; `import torch` is slower than 10 s | Emit `ready` on stdout **before** any heavy import. |
 | Silent worker death after ~35 games | JVM heap (512 MB) OOMs over a long session | `-Xmx2048m` + restart every 25 games. |
 | Shared CommunicationMod config | The mod ignores `XDG_CONFIG_HOME`; all workers read one file | Default `--id` to PID so per-process artifacts stay isolated. |
-| Spot preemption | GCP reclaims the VM | `--instance-termination-action=STOP` preserves the disk; a watcher restarts training on the next boot. |
+| Spot preemption | GCP reclaims the VM | `--instance-termination-action=STOP` preserves the disk; recovery is automated (see *Hands-off self-healing operation*). |
 
 ### Throughput and sizing
 
-Each STS instance is CPU-bound at roughly 2 vCPU for the game loop plus ~0.7 vCPU for the Python policy/IO bridge — there is no effective frame limiter under software GL. On 22 vCPUs, 8 concurrent workers saturate the machine without thrashing and sustain ~90+ games/hour once heap-stable. Adding workers past that point only trades per-game speed for parallelism. Spot pricing (~$0.19/hr) makes a 12-hour unattended run cost a few dollars.
+Each STS instance is CPU-bound at roughly 2 vCPU for the game loop plus ~0.7 vCPU for the Python policy/IO bridge — there is no effective frame limiter under software GL. On 22 vCPUs, 8 concurrent workers saturate the machine without thrashing and sustain ~90+ games/hour once heap-stable. Adding workers past that point only trades per-game speed for parallelism. Spot pricing (~$0.19/hr) makes a 24-hour unattended run cost a few dollars.
+
+### Hands-off self-healing operation
+
+The cloud run is designed to train *continuously* and recover from failure with no human and no external session — it only stops when explicitly told to (by removing a `logs/.autorun` sentinel). Three layers, in increasing scope of failure:
+
+| Failure | Recovered by | Latency |
+|---|---|---|
+| A single worker wedges (JVM alive, Python commander dead) | Per-worker **watchdog** in `run_training.sh` — kills the JVM when its log goes silent, the loop relaunches it | ~2 min |
+| The whole run dies / a 24h chunk ends | VM-side **cron** (`vm/monitor.sh`, every 10 min) — relaunches training while `logs/.autorun` is set; also runs at boot, so it resumes after a reboot | ≤10 min |
+| The VM is preempted (powered off) | A **Cloud Scheduler** job calls the Compute API to start the instance; the cron then resumes training on boot | ~15–25 min |
+
+The cron writes a timestamped heartbeat to `logs/monitor_heartbeat.log` every 10 minutes, so the whole loop is auditable after the fact (`java`/`trainer` counts, games, wedge count, and any relaunch action) without a live session. The cron and Cloud Scheduler run entirely on Google's infrastructure, so resilience does not depend on a developer machine being online — an earlier design that relied on an interactive session left the VM dead for ~8 h after one preemption.
+
+Note that the agent now also *learns* deck-building (card removal and upgrade selection are RL-controlled and the policy observes its exact deck via a 717-d per-card vector), so the screen handler delegates those grid screens to the policy rather than a heuristic — see the [technical writeup](AscensionAI_Technical_Writeup.md#20-june-2-2026-learned-deck-building-addendum).

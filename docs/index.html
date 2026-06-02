@@ -256,12 +256,12 @@
   <main>
     <section class="section">
       <h2>Project Snapshot</h2>
-      <p class="lead">May 27, 2026: 19,400+ training games, 2,410+ PPO updates. 200-game eval shows 38.1% boss win rate (up from 21.7%), 20% Act 2 reach rate, and 8 runs past floor 30 including two Act 3 runs. HP-urgency heal reward added to fix pre-boss upgrade-over-heal decisions.</p>
+      <p class="lead">June 2, 2026: <strong>deck-building is now learned, not heuristic.</strong> The observation expanded to 717-d with a per-card deck count vector, and card removal + upgrade choices moved from the heuristic to the RL policy, paired with a potential-based deck-quality reward. The model was warm-transferred 585&rarr;717 (behavior preserved) and now trains continuously, hands-off, on a self-healing GCP spot VM. Last fixed-seed eval (pre-Path-2, 585-d): 38.1% boss WR, 20% Act 2 reach.</p>
       <div class="metric-grid">
         <div class="metric"><span>Action space</span><strong>134</strong></div>
-        <div class="metric"><span>Observation vector</span><strong>585</strong></div>
+        <div class="metric"><span>Observation vector</span><strong>717</strong></div>
         <div class="metric"><span>Eval boss win rate</span><strong>38.1%</strong></div>
-        <div class="metric"><span>PPO rollout games</span><strong>19,400+</strong></div>
+        <div class="metric"><span>PPO rollout games</span><strong>24,000+</strong></div>
       </div>
     </section>
 
@@ -277,6 +277,11 @@
           <h3>Architecture</h3>
           <p>Trainer/worker topology, checkpoint sync, stale rollout rejection, crash handling, and scaling points.</p>
           <a href="docs.html">Open docs</a>
+        </article>
+        <article class="card">
+          <h3>Learned Deck-Building</h3>
+          <p>717-d per-card deck vector lets the policy see its exact deck; card removal &amp; upgrade are now RL-controlled with a potential-based deck-quality reward, warm-transferred from the 585-d model.</p>
+          <a href="AscensionAI_Technical_Writeup.md#20-june-2-2026-learned-deck-building-addendum">Read Path 2 notes</a>
         </article>
         <article class="card">
           <h3>Headless Cloud Deployment</h3>
@@ -295,7 +300,7 @@
         </article>
         <article class="card">
           <h3>Technical Writeup</h3>
-          <p>v0.7 — headless cloud deployment (§19), HP-urgency heal reward, 19,400+ games, 38.1% boss WR eval, 585-d obs, 19 monster powers.</p>
+          <p>v0.8 — learned deck-building (§20): 717-d deck vector, RL-controlled removal/upgrade, deck-quality reward; headless cloud deployment (§19); 19 monster powers.</p>
           <a href="AscensionAI_Technical_Writeup.md">Read writeup</a> · <a href="AscensionAI_Technical_Writeup.pdf">PDF</a>
         </article>
         <article class="card">
@@ -324,7 +329,7 @@
 
     <section class="section">
       <h2>Current Results</h2>
-      <p class="lead">19,400+ PPO rollout games on the (512, 256, 256) GELU network. Latest 200-game eval: 38.1% boss WR, 20% Act 2 reach rate, best run floor 46. HP-urgency heal reward added alongside upgrade incentives, Guardian offensive-mode bonus, and elite bonus +4.0.</p>
+      <p class="lead">The last fixed-seed benchmark below was measured on the 585-d model (38.1% boss WR, 20% Act 2 reach, best floor 46). Current work (Path 2) makes deck-building learnable — 717-d per-card deck vector, RL-controlled removal/upgrade, and a deck-quality reward — and the warm-transferred 717-d model is training continuously on the spot VM. The deck-vector inputs are integrating steadily; a fresh fixed-seed eval will follow once they mature.</p>
       <div class="grid">
         <article class="card">
           <h3>PPO 22k checkpoint (latest)</h3>
@@ -346,7 +351,7 @@
   </main>
 
   <footer>
-    AscensionAI is a public portfolio project by Justin Chan. The live training stack depends on a local Slay the Spire install; this site hosts the docs, reports, dashboard, and public-safe media.
+    AscensionAI is a public portfolio project by Justin Chan. The training stack runs on a live Slay the Spire install (locally or headless on a self-healing GCP spot VM); this site hosts the docs, reports, dashboard, and public-safe media.
   </footer>
 </body>
 </html>

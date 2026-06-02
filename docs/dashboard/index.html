@@ -186,7 +186,7 @@
     <div class="toolbar">
       <label class="upload" for="csvInput">Load CSV files</label>
       <input id="csvInput" type="file" accept=".csv" multiple>
-      <span id="status" class="note">Using embedded May 27 public snapshot (19,400+ games). Load <code>training_stats.csv</code>, <code>bc_train_stats.csv</code>, and <code>eval_stats.csv</code> for live local charts.</span>
+      <span id="status" class="note">Embedded snapshot is the last fixed-seed benchmark on the 585-d model (May 27). As of June 2 the agent trains on the 717-d deck-vector model (Path 2 — learned deck-building); a fresh eval will be published once it matures. Load <code>training_stats.csv</code>, <code>bc_train_stats.csv</code>, and <code>eval_stats.csv</code> for live local charts.</span>
     </div>
 
     <section class="grid" id="cards"></section>
@@ -225,6 +225,18 @@
       <table>
         <thead><tr><th>Date</th><th>Area</th><th>Change</th><th>Impact</th></tr></thead>
         <tbody>
+          <tr>
+            <td><strong>Jun 2</strong></td>
+            <td><strong>Learned deck-building (Path 2)</strong></td>
+            <td>Expanded the observation to 717-d with a 132-dim per-card deck count vector (over the full Ironclad pool), so the policy sees its exact deck, not just a 20-d aggregate. Moved card removal (purge) and upgrade selection from the heuristic to the RL policy. Replaced the flat per-removal (+0.2) and per-upgrade (+0.30) rewards with potential-based deck-quality shaping: reward &Delta; of mean card quality (upgrades boosted), so it's quality-weighted and context-dependent. Warm-transferred 585&rarr;717 (behavior preserved, zero-init new inputs), with a light BC anchor (fresh 717-d heuristic demos) and an <code>--override-lr</code> escape hatch to re-raise lr for learning the new inputs.</td>
+            <td>Deck-building was previously unlearnable — the agent couldn't observe its deck or choose removals/upgrades. This makes it a learned skill, the key lever for the Act 2 wall. Deck-vector weights are integrating steadily (ratio 0.14&rarr;0.35 and climbing); behavior eval to follow.</td>
+          </tr>
+          <tr>
+            <td><strong>Jun 1</strong></td>
+            <td><strong>Hands-off spot resilience</strong></td>
+            <td>Made unattended spot training self-recovering and auditable: a VM-side cron (<code>vm/monitor.sh</code>, <code>.autorun</code>-driven) continuously relaunches training after any death/clean-end/reboot and writes a 10-min heartbeat log; a Cloud Scheduler job restarts the VM after preemption; <code>run_training.sh</code> gained a per-worker watchdog (kill+relaunch a JVM whose log goes silent). Also fixed a BC-anchor deadlock (a checkpoint <code>bc_coef=0</code> silently discarded the anchor) and a cron bug (<code>pgrep -c || echo 0</code> &rarr; <code>"0\n0"</code>) that disabled auto-resume.</td>
+            <td>Training now runs constantly in 24h chunks and recovers from preemption in ~15&ndash;25 min with no human or session — only stops when explicitly told to.</td>
+          </tr>
           <tr>
             <td><strong>May 30</strong></td>
             <td><strong>Headless cloud deployment</strong></td>
@@ -286,19 +298,21 @@
     <section class="table-panel">
       <h2>Heuristic vs RL Decision Boundary</h2>
       <p style="color:#5d6875; margin:0 0 12px;">
-        The RL policy controls all strategic decisions: combat, card rewards, rest sites, map pathing, boss relics, and events. The heuristic layer only handles shop purchases and mechanical screens (chests, grids, confirms) that have no strategic value. During behavior cloning and evaluation, a <code>heuristic_all</code> flag can override all screens back to heuristic control.
+        The RL policy now controls all strategic decisions, including deck-building: combat, card rewards, <strong>card removal (purge)</strong>, <strong>card upgrades</strong>, rest sites, map pathing, boss relics, and events. As of Path 2 (Jun 2) the policy also <em>observes</em> its exact deck via a 717-d per-card count vector. The heuristic layer only handles shop purchases and purely mechanical screens (chest open, confirms). During behavior cloning and evaluation, a <code>heuristic_all</code> flag can override all screens back to heuristic control.
       </p>
       <table>
         <thead><tr><th>Screen</th><th>Current Handler</th><th>Notes</th></tr></thead>
         <tbody>
           <tr><td>Combat (play card, use potion, end turn)</td><td>RL policy</td><td>Core gameplay loop</td></tr>
-          <tr><td>Card reward picks</td><td>RL policy</td><td>Heuristic fallback available via <code>heuristic_all</code></td></tr>
+          <tr><td>Card reward picks</td><td>RL policy</td><td>Sees full deck via the 717-d deck vector</td></tr>
+          <tr><td>Card removal / purge (grid)</td><td>RL policy</td><td><strong>New (Path 2)</strong> — was heuristic; deck-quality reward + BC anchor</td></tr>
+          <tr><td>Card upgrade / smith (grid)</td><td>RL policy</td><td><strong>New (Path 2)</strong> — was heuristic</td></tr>
           <tr><td>Rest site (rest vs smith)</td><td>RL policy</td><td>Heuristic fallback available via <code>heuristic_all</code></td></tr>
           <tr><td>Map pathing</td><td>RL policy</td><td>39-d map observation with 3-floor BFS lookahead</td></tr>
           <tr><td>Boss relic picks</td><td>RL policy</td><td>Heuristic fallback available via <code>heuristic_all</code></td></tr>
           <tr><td>Events</td><td>RL policy</td><td>Heuristic fallback for single-option events</td></tr>
           <tr><td>Shop purchases</td><td>Heuristic</td><td>Future: migrate to RL policy</td></tr>
-          <tr><td>Chest, grid, confirms</td><td>Heuristic (mechanical)</td><td>No strategic decision value</td></tr>
+          <tr><td>Chest open, confirms, match-and-keep</td><td>Heuristic (mechanical)</td><td>No strategic decision value</td></tr>
         </tbody>
       </table>
     </section>

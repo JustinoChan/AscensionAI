@@ -273,8 +273,20 @@
             <tr>
               <td><code>vm/run_training.sh</code></td>
               <td><span class="tag">headless launcher</span></td>
-              <td>Launches N headless STS workers + the offline trainer; per-worker Xvfb display and JVM tmpdir, 2&nbsp;GB heap, restart every 25 games.</td>
-              <td><code>./vm/run_training.sh --workers 8 --hours 12</code></td>
+              <td>Launches N headless STS workers + the offline trainer; per-worker Xvfb display and JVM tmpdir, 2&nbsp;GB heap, restart every 25 games, per-worker watchdog, lr override for new obs inputs.</td>
+              <td><code>./vm/run_training.sh --workers 8 --hours 24</code></td>
+            </tr>
+            <tr>
+              <td><code>vm/monitor.sh</code></td>
+              <td><span class="tag">self-healing cron</span></td>
+              <td>Runs from cron every 10 min: writes an auditable heartbeat and continuously relaunches training (while <code>logs/.autorun</code> is set) after any death, clean end, or reboot — session-independent.</td>
+              <td><code>*/10 * * * * vm/monitor.sh</code></td>
+            </tr>
+            <tr>
+              <td><code>vm/collect_bc.sh</code></td>
+              <td><span class="tag">BC anchor demos</span></td>
+              <td>Headless heuristic demo collector (no net training) — gathers fresh 717-d demos into <code>bc_demos_shared/</code> for the PPO BC anchor.</td>
+              <td><code>./vm/collect_bc.sh --workers 4 --minutes 30</code></td>
             </tr>
             <tr>
               <td><code>vm/run_eval.sh</code></td>
