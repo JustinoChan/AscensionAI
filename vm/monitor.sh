@@ -20,11 +20,15 @@ TRAINER_LOG="$PROJECT_DIR/logs/trainer.log"
 
 now=$(date +%s)
 nowts=$(date -u '+%Y-%m-%d %H:%M:%S')
-java=$(pgrep -xc java 2>/dev/null || echo 0)
-trainer=$(pgrep -fc '[t]rain_offline' 2>/dev/null || echo 0)
-run=$(pgrep -fc '[r]un_training.sh' 2>/dev/null || echo 0)
+# NOTE: `pgrep -c` already prints "0" on no match (and exits 1), so a `|| echo 0`
+# fallback would append a SECOND "0" -> "0\n0", which breaks the numeric -eq tests
+# below and silently disables the relaunch. Capture the count directly and default
+# only if the command produced nothing.
+java=$(pgrep -xc java 2>/dev/null); java=${java:-0}
+trainer=$(pgrep -fc '[t]rain_offline' 2>/dev/null); trainer=${trainer:-0}
+run=$(pgrep -fc '[r]un_training.sh' 2>/dev/null); run=${run:-0}
 games=$(( $(wc -l < "$PROJECT_DIR/logs/training_stats.csv" 2>/dev/null || echo 1) - 1 ))
-wedged=$(grep -hc WEDGED "$PROJECT_DIR"/logs/worker_*.log 2>/dev/null | paste -sd+ | bc 2>/dev/null || echo 0)
+wedged=$(grep -hc WEDGED "$PROJECT_DIR"/logs/worker_*.log 2>/dev/null | paste -sd+ | bc 2>/dev/null); wedged=${wedged:-0}
 
 # Minutes since the trainer last wrote — the freshest signal that PPO is alive.
 tage="na"
