@@ -206,6 +206,7 @@ run_trainer() {
             --override-lr \
             --auto-min-lr 6e-5 \
             --bc-coef 0.001 \
+            --auto-max-bc-coef 0.01 \
             --max-rollout-lag 9999 \
             --ent-coef 0.001 \
             --auto-tune \
