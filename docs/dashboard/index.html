@@ -186,7 +186,7 @@
     <div class="toolbar">
       <label class="upload" for="csvInput">Load CSV files</label>
       <input id="csvInput" type="file" accept=".csv" multiple>
-      <span id="status" class="note">Embedded snapshot is the last fixed-seed benchmark on the 585-d model (May 27). As of June 2 the agent trains on the 717-d deck-vector model (Path 2 — learned deck-building); a fresh eval will be published once it matures. Load <code>training_stats.csv</code>, <code>bc_train_stats.csv</code>, and <code>eval_stats.csv</code> for live local charts.</span>
+      <span id="status" class="note">Embedded snapshot is the last fixed-seed benchmark on the 585-d model (May 27). As of June 4 the agent trains continuously on the 717-d deck-vector model (Path 2 — learned deck-building); the deck inputs are integrating (weight-ratio ~0.59 of the original inputs and climbing) but a clean greedy eval is still pending at ratio ~0.70. Load <code>training_stats.csv</code>, <code>bc_train_stats.csv</code>, and <code>eval_stats.csv</code> for live local charts.</span>
     </div>
 
     <section class="grid" id="cards"></section>
@@ -225,6 +225,12 @@
       <table>
         <thead><tr><th>Date</th><th>Area</th><th>Change</th><th>Impact</th></tr></thead>
         <tbody>
+          <tr>
+            <td><strong>Jun 3&ndash;4</strong></td>
+            <td><strong>Deck-vector training &amp; tuning</strong></td>
+            <td>Tracked whether the new deck inputs are actually being learned via a custom diagnostic — the mean weight magnitude of the 132 new input columns vs the original 585 (ratio <strong>0.14 &rarr; 0.59</strong> and climbing). The zero-initialized deck inputs learned glacially at the checkpoint's converged lr (2.37e-5), so added an <code>--override-lr</code> flag and raised lr to 1e-4 (floored at 6e-5). At 6e-5 the policy ran hot (KL ~0.022, clip ~0.21) and the auto-tuner pushed the BC anchor to ~0.03 to stabilize it. Tried capping the anchor (<code>auto-max-bc-coef 0.01</code>) on the hypothesis it was over-anchoring to the heuristic — but training behavior then regressed (avg floor 12.9&rarr;12.0, Act 2 14%&rarr;10% over ~1,200 games), so reverted it: that ~0.03 anchor was <em>stabilizing</em> the hot policy near competent play, not capping its ceiling.</td>
+            <td>Honest status: the deck vector is integrating well (ratio 0.59 = over half the original inputs' strength), but the sampled training-game floor — noisy and depressed by exploration entropy — hasn't broken from baseline yet; behavior change lags weight growth. A <strong>greedy fixed-seed eval</strong> is planned at ratio ~0.70 (~2k more games) for a clean read vs the 585-d baseline (38.1% boss WR). Lesson: don't over-tune on a noisy sampled-floor signal.</td>
+          </tr>
           <tr>
             <td><strong>Jun 2</strong></td>
             <td><strong>Learned deck-building (Path 2)</strong></td>

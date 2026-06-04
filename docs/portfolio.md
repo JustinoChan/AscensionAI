@@ -25,7 +25,9 @@ The hardest part of Slay the Spire is building a deck that scales — and origin
 - **Control deck-building** — card removal (purge) and upgrade (smith) selection moved from the heuristic into the RL policy.
 - **Reward deck quality** — replaced the flat per-removal/per-upgrade rewards with potential-based shaping on mean card quality, so cutting junk and drafting/upgrading good cards is rewarded and cutting a key card is penalized, all context-dependent.
 
-The trained 585-d model was **warm-transferred to 717-d** (behavior preserved — new inputs zero-initialized), de-risked with a light BC anchor of fresh heuristic demos, and the learning rate was re-raised so the new inputs learn at a useful pace. The deck-vector inputs are integrating steadily; a fresh fixed-seed eval will follow.
+The trained 585-d model was **warm-transferred to 717-d** (behavior preserved — new inputs zero-initialized), de-risked with a light BC anchor of fresh heuristic demos, and the learning rate was re-raised so the new inputs learn at a useful pace.
+
+Progress is tracked with a **weight-ratio diagnostic** — the mean magnitude of the 132 new first-layer input columns vs the original 585. It has climbed from ~0.14 to **~0.59** (the deck inputs are now over half the strength of the inputs the model spent its whole prior life learning). Behavior hasn't broken from baseline yet, which is expected this early — and the tuning has been deliberately conservative: one BC-anchor change was tried, regressed training behavior, and was **reverted** (the noisy sampled training-floor is a poor thing to over-tune against; a clean greedy fixed-seed eval is planned once the ratio reaches ~0.70).
 
 ## Headless Cloud Deployment
 

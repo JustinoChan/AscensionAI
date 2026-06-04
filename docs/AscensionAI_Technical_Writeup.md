@@ -1,7 +1,7 @@
 # AscensionAI Technical Writeup
 
-**Version:** 0.8.0
-**Document Date:** 2026-06-02
+**Version:** 0.8.1
+**Document Date:** 2026-06-04
 **Author:** Justin Chan
 **Repository:** https://github.com/JustinoChan/AscensionAI
 
@@ -927,7 +927,16 @@ The cloud run is now continuous and self-recovering with no external session (it
 
 ### 20.6 Early signal
 
-The deck-vector inputs are integrating: their first-layer weight magnitude relative to the original inputs climbed from ~0.14 to ~0.35 over the first ~1.5 days. Behavior (avg floor ~13, Act 2 reach ~15–17%) has not yet broken from the pre-Path-2 baseline — expected, since the new inputs are still a junior partner and behavior change lags weight growth. A fresh fixed-seed eval will be published once the deck vector matures; if behavior still doesn't move at high weight strength, that will indicate deck-building alone is not the bottleneck.
+The deck-vector inputs are integrating. To check this directly — rather than waiting on noisy behavior metrics — we track a **weight-ratio diagnostic**: the mean absolute weight of the 132 new first-layer input columns divided by the mean of the original 585 columns. From a zero start it climbed ~0.14 → 0.35 → 0.51 → **~0.59** over the first ~3 days, i.e. the new inputs are now over half the strength of the inputs the model spent its whole prior life learning. Behavior (avg floor ~12–13, Act 2 reach ~10–17%) has not yet broken from the pre-Path-2 baseline — expected, since the new inputs are still a junior partner and behavior change lags weight growth.
+
+### 20.7 Training & tuning journey
+
+The Path 2 run is a controlled experiment, and the tuning was driven by the stats — including one reversal worth recording honestly:
+
+- **Learning rate.** The zero-initialized deck inputs learn glacially at the checkpoint's converged lr (2.37e-5), which `--auto-tune` always inherited. We added `--override-lr` and raised lr to 1e-4 floored at 6e-5. The weight-ratio diagnostic confirmed the inputs then grew faster, validating the lever.
+- **BC anchor (a wrong call, reverted).** At the 6e-5 floor the policy runs hot (KL ~0.022, clip ~0.21, entropy bonus auto-driven to ~0), and the auto-tuner pushed the BC anchor coefficient up to ~0.03 to stabilize it. Hypothesizing this over-anchored the policy to the heuristic (capping its ceiling), we capped `auto-max-bc-coef` at 0.01. Training behavior then **regressed** (avg floor 12.9 → 12.0, Act 2 14% → 10% over ~1,200 games), so we reverted: that ~0.03 anchor was *stabilizing* the hot policy near competent play, not capping it. The auto-tuner self-manages the anchor again.
+- **Signal quality.** A key caveat learned here: the *training-game* floor is measured under stochastic sampling at high entropy, so it is a noisy, downward-biased proxy for the greedy policy. Over-tuning against it is a trap. The clean measure is a **greedy fixed-seed eval**, planned at weight-ratio ~0.70 (~2,000 more games) for a real comparison against the 585-d baseline (38.1% boss WR). If behavior still doesn't move once the deck vector is near full strength (~0.85+), that is strong evidence deck-building alone is not the Act 2 bottleneck.
+- **Resilience, tested.** A real spot preemption exercised the self-healing path: Cloud Scheduler restarted the VM, but two latent bugs surfaced and were fixed — a BC-anchor deadlock (a checkpoint `bc_coef=0` silently discarded the anchor) and a cron bug (`pgrep -c || echo 0` yielding `"0\n0"`) that had disabled auto-resume. With both fixed, training now recovers from preemption in ~15–25 min unattended.
 
 ---
 
@@ -943,4 +952,5 @@ The deck-vector inputs are integrating: their first-layer weight magnitude relat
 | 0.5.1 | 2026-05-22 | Updated reward weights table with current values, added elite win bonus and HP-scaled floor advance documentation, corrected heuristic vs RL decision boundary |
 | 0.6.0 | 2026-05-23 | Expanded observation encoder from 530-d to 585-d with 19 monster power slots (11 new STS1-verified powers). Added REST_UPGRADE_REWARD (+0.30), bumped ELITE_WIN_BONUS to +4.0, added GUARDIAN_OPEN_DMG_BONUS (+0.03). Fixed warm_load() to zero-initialize extra capacity. Added --warm-resume/--net-arch/--activation to train_ppo.py. 16,900+ training games, 1,856+ PPO updates. |
 | 0.7.0 | 2026-05-30 | Added §19 Headless Cloud Deployment addendum: GCP `c3-standard-22` spot VM, one-shot `vm/install.sh` installer, headless worker/trainer launcher. Documented the nine headless bring-up challenges (per-worker Xvfb + software GL, per-worker JVM tmpdir, Java 8 pin, OpenAL path, CommunicationMod READY-before-import, 2 GB heap + restart cadence, PID worker IDs, spot preemption recovery) and CPU-bound throughput/sizing (~90+ games/hr on 8 workers). |
+| 0.8.1 | 2026-06-04 | Extended §20 with the deck-vector weight-ratio integration diagnostic (0.14→0.59) and a Training & tuning journey subsection (§20.7): --override-lr, the lr-floor raise, and the BC-anchor cap-then-revert (capping it regressed behavior, so the auto-tuned ~0.03 anchor was stabilizing, not over-anchoring), the noisy-sampled-floor caveat, the planned greedy eval at ratio ~0.70, and the spot-preemption resilience test that surfaced/fixed two bugs. Updated dashboard changelog + status. |
 | 0.8.0 | 2026-06-02 | Added §20 Learned Deck-Building addendum (Path 2): observation 585→717 with a 132-d per-card deck count vector; card removal + upgrade moved from heuristic to RL policy; potential-based deck-quality reward replacing the flat per-removal/per-upgrade rewards; warm transfer 585→717; light BC anchor (`vm/collect_bc.sh`) + `--override-lr`; self-healing cloud ops (`.autorun` cron + heartbeat, Cloud Scheduler preemption auto-restart, per-worker watchdog). Updated abstract, executive summary, and headline metrics to 717-d / ~571K params. |
