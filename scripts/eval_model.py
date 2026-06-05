@@ -67,6 +67,12 @@ _apply_spirecomm_patches(_real_stdout)
 os.makedirs(os.path.join(_root, "logs"), exist_ok=True)
 DEBUG_LOG = os.path.join(_root, "Eval", "eval_debug.log")
 EVAL_CSV = os.path.join(_root, "logs", "eval_stats.csv")
+
+# Greedy eval is deterministic, so if the policy's argmax maps to an action that
+# does not advance the game (common on GRID card-select event screens), it loops
+# forever on an unchanging state. Training escapes this by sampling; eval needs an
+# explicit breaker: after this many identical non-progressing states, force progress.
+STUCK_LIMIT = 12
 VERBOSE = os.environ.get("ASCENSION_VERBOSE", "0") == "1"
 
 _EVAL_COLUMNS = [
@@ -237,6 +243,8 @@ class EvalAgent:
         self._per_act_totals: dict[str, int] = {}
         self.fight_tracker = FightTracker(source="eval", worker="eval", log=log)
         self._current_seed = ""
+        self._sig = None
+        self._sig_count = 0
         self._preload_completed_summary(completed_rows)
 
     def _preload_completed_summary(self, rows: list[dict]) -> None:
@@ -322,6 +330,20 @@ class EvalAgent:
                 return Action("leave")
             return Action("state")
 
+        # Greedy stall breaker: if the visible state has not changed for many
+        # consecutive messages, the chosen action is a no-op (deterministic loop).
+        sig = (screen_name,
+               tuple(getattr(gs, "choice_list", []) or []),
+               int(getattr(gs, "floor", 0) or 0),
+               int(getattr(gs, "current_hp", 0) or 0))
+        if sig == self._sig:
+            self._sig_count += 1
+        else:
+            self._sig = sig
+            self._sig_count = 0
+        if self._sig_count >= STUCK_LIMIT:
+            return self._unstick(gs, screen_name)
+
         auto = auto_handle(gs, screen_name)
         if auto is not None:
             self.total_steps += 1
@@ -354,6 +376,30 @@ class EvalAgent:
                 f"action={_action_desc(spire_action)}")
         return spire_action
 
+    def _unstick(self, gs, screen_name: str) -> Action:
+        """Force progress when greedy play has stalled on a non-progressing state."""
+        self._sig_count = 0
+        choices = list(getattr(gs, "choice_list", []) or [])
+        log(f"UNSTICK: stalled on screen={screen_name} choices={choices[:8]} — escalating")
+        # 1. Full heuristic resolution (handles GRID purge/upgrade/event card-select).
+        forced = auto_handle_screen(gs, screen_name, heuristic_all=True)
+        if forced is not None:
+            return forced
+        # 2. Random legal action to break determinism.
+        try:
+            mask = compute_action_mask(gs)
+            legal = np.where(mask)[0]
+            if len(legal) > 0:
+                return flat_action_to_spire_action(int(np.random.choice(legal)), gs)
+        except Exception as e:
+            log(f"UNSTICK random-legal failed: {e}")
+        # 3. Last resort.
+        if bool(getattr(gs, "proceed_available", False)):
+            return Action("proceed")
+        if bool(getattr(gs, "cancel_available", False)):
+            return Action("leave")
+        return Action("state")
+
     def _log_top_actions(self, gs, obs: np.ndarray, mask: np.ndarray) -> None:
         if self.trainer is None:
             return
@@ -376,6 +422,8 @@ class EvalAgent:
 
     def _end_game(self, final_gs, victory: bool) -> None:
         self.games_played += 1
+        self._sig = None
+        self._sig_count = 0
         floor = int(getattr(final_gs, "floor", 0) or 0)
         fight_stats = self.fight_tracker.finish_game(
             final_gs, game=self.games_played, victory=victory

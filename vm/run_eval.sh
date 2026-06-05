@@ -84,7 +84,8 @@ echo ""
 # For single instance, just run directly
 if [ "$INSTANCES" -eq 1 ]; then
     INSTANCE_DIR="$PROJECT_DIR/instances/eval_1"
-    CONFIG_DIR="$INSTANCE_DIR/config/ModTheSpire"
+    # CommunicationMod ignores XDG_CONFIG_HOME on Linux, so write to the real ~/.config.
+    CONFIG_DIR="$HOME/.config/ModTheSpire"
     mkdir -p "$CONFIG_DIR/CommunicationMod"
     mkdir -p "$CONFIG_DIR/SuperFastMode"
 
@@ -109,10 +110,10 @@ EOF
         # Large heap: a long eval runs many games per JVM and 512m OOMs after
         # ~35 games (silently restarting mid-run). 8 GB gives ample margin
         # for a full 200-game eval; the VM has 86 GB RAM.
-        XDG_CONFIG_HOME="$INSTANCE_DIR/config" \
-            java -Xmx8192m -Xms512m \
+        java -Xmx8192m -Xms512m \
             -Dorg.lwjgl.openal.libname=/usr/lib/x86_64-linux-gnu/libopenal.so.1 \
             -Dorg.lwjgl.opengl.Display.allowSoftwareOpenGL=true \
+            -Djava.io.tmpdir=/tmp/sts_eval \
             -jar ModTheSpire.jar \
             --skip-launcher \
             --mods basemod,CommunicationMod,superfastmode \
