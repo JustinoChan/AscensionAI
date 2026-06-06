@@ -400,14 +400,24 @@ DEFEAT_FLOOR_OFFSET = 0.25
 MAX_HP_GAIN_REWARD = 0.10
 REST_HEAL_PER_HP = 0.025
 
-# Deck-quality potential shaping (Phi). Phi(deck) = mean card quality, with an
-# upgrade boost. Rewarding its per-step change teaches the RL to cut junk, draft
-# above its current average, and upgrade impactful cards — and penalizes the
-# reverse — all quality-weighted and context-dependent (the mean makes the same
-# card pay differently depending on the rest of the deck). Replaces the old flat
-# per-removal and per-upgrade rewards now that the RL controls those screens.
-DECK_QUALITY_COEF = 1.0       # lambda: scale on the Phi change each step
-UPGRADE_QUALITY_BONUS = 0.3   # u: an upgraded card counts as quality*(1+u)
+# Deck-quality reward. Phi(deck) = mean card quality with an upgrade boost.
+#
+# OPTION B EXPERIMENT (2026-06): the original shaping was potential-based,
+# reward += 1.0 * (Phi(s') - Phi(s)). A 200-game greedy eval found the 717-d
+# deck-vector model statistically identical to the 585-d baseline, and an
+# ablation proved the model DOES read the deck (zeroing the deck-vec flips 30%
+# of removal/upgrade picks, randomizing it 80%) — it just makes heuristic-quality
+# choices. Two reasons it never beat baseline: (1) potential-based shaping is
+# policy-invariant *by design* (Ng et al. 1999) and telescopes to Phi_final -
+# Phi_init, so it cannot push toward a *better* deck, only a deck-conditional
+# one; (2) it was ~2% of the reward. This replaces it with a DIRECT, asymmetric,
+# capped reward: gains are amplified and losses penalized less (breaks
+# policy-invariance), giving a real incentive to improve the deck, while a
+# per-episode cap stops the agent farming deck quality instead of winning.
+DECK_QUALITY_GAIN_COEF = 5.0   # amplified reward on per-step Phi increases
+DECK_QUALITY_LOSS_COEF = 2.0   # milder penalty on Phi decreases (asymmetric -> non-invariant)
+DECK_REWARD_EPISODE_CAP = 8.0  # cap cumulative deck gain per run so it can't dominate winning
+UPGRADE_QUALITY_BONUS = 0.3    # u: an upgraded card counts as quality*(1+u)
 
 
 def _deck_potential(deck) -> float:
@@ -485,6 +495,7 @@ class RewardTracker:
         self._boss_max_hp = 0
         self._in_elite_fight = False
         self.last_deck_potential = 0.0
+        self.deck_reward_total = 0.0
 
     def _enemy_stats(self, gs: Any) -> Tuple[Optional[int], int]:
         total_hp = 0
@@ -526,6 +537,7 @@ class RewardTracker:
         self._boss_max_hp = 0
         self._in_elite_fight = False
         self.last_deck_potential = _deck_potential(getattr(gs, "deck", []) or [])
+        self.deck_reward_total = 0.0
         if self.last_in_combat:
             self.last_enemy_hp, self.last_alive = self._enemy_stats(gs)
             self._last_priority_hp = self._priority_hp_map(gs)
@@ -552,10 +564,20 @@ class RewardTracker:
         reward += (gold - self.last_gold) * 0.01
         reward += (relic_count - self.last_relics) * 1.0
         reward += max(0, int(getattr(gs, "max_hp", 0) or 0) - self.last_max_hp) * MAX_HP_GAIN_REWARD
-        # Deck-quality potential shaping: reward Phi rising (good removals,
-        # drafts, upgrades) and penalize it falling (cutting a bomb, taking junk).
+        # Direct, asymmetric, capped deck-quality reward (Option B). Reward Phi
+        # rising (good removals/drafts/upgrades) with an amplified gain coef, and
+        # penalize it falling at a smaller coef so the net signal is non-invariant
+        # and pushes toward a *better* deck. Cap cumulative gain per run so the
+        # agent can't farm deck quality in place of winning.
         deck_potential = _deck_potential(getattr(gs, "deck", []) or [])
-        reward += DECK_QUALITY_COEF * (deck_potential - self.last_deck_potential)
+        d_phi = deck_potential - self.last_deck_potential
+        if d_phi >= 0.0:
+            gain = min(DECK_QUALITY_GAIN_COEF * d_phi,
+                       max(0.0, DECK_REWARD_EPISODE_CAP - self.deck_reward_total))
+            self.deck_reward_total += gain
+            reward += gain
+        else:
+            reward += DECK_QUALITY_LOSS_COEF * d_phi
         self.last_deck_potential = deck_potential
 
         if floor_num > self.last_floor:

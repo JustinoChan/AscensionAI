@@ -548,6 +548,16 @@ def main():
                 continue
             try:
                 bc_obs, bc_actions, bc_masks = load_bc_demo(bc_demo_path)
+                # Option B: exempt GRID (removal/upgrade) screens from the anchor
+                # so the policy can diverge from the heuristic's deck-building
+                # choices instead of being pulled back toward them.
+                from obs_encoder import PLAYER_STATE_DIM as _PS, _SCREEN_IDX as _SI
+                _grid_col = _PS + _SI["GRID"]
+                _keep = bc_obs[:, _grid_col] <= 0.5
+                _n_drop = int(bc_obs.shape[0] - int(_keep.sum()))
+                bc_obs, bc_actions, bc_masks = bc_obs[_keep], bc_actions[_keep], bc_masks[_keep]
+                log(f"Option B: dropped {_n_drop} GRID-screen BC demos "
+                    f"({len(bc_actions)} non-GRID anchor samples remain)")
                 anchor_coef = args.bc_coef
                 loaded_bc_coef = getattr(trainer, "_loaded_bc_coef", None)
                 # Only inherit the checkpoint's tuned coef if it is POSITIVE. A
