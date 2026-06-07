@@ -17,6 +17,15 @@ _ROOT = os.path.dirname(_SCRIPTS)
 _LOG_DIR = os.path.join(_ROOT, "logs")
 _FIGHT_CSV = os.path.join(_LOG_DIR, "fight_stats.csv")
 _LEGACY_ELITE_CSV = os.path.join(_LOG_DIR, "elite_stats.csv")
+# Per-fight combat instrumentation (burst-vs-attrition diagnosis for the Act 2
+# pivot): covers normal/elite/boss fights, separate file so the elite/boss
+# summary and fight_stats.csv are untouched.
+_FIGHT_DETAIL_CSV = os.path.join(_LOG_DIR, "fight_detail.csv")
+_DETAIL_COLUMNS = [
+    "timestamp", "source", "worker", "game", "floor", "act",
+    "fight_type", "monsters", "hp_before", "hp_after", "max_hp", "won",
+    "turns", "steps", "damage_taken", "max_hit", "block_gained",
+]
 
 _FIGHT_COLUMNS = [
     "timestamp", "source", "worker", "game", "floor", "act",
@@ -41,6 +50,8 @@ def _room_fight_type(room_type: str) -> str | None:
         return "boss"
     if "Elite" in room_type:
         return "elite"
+    if "Monster" in room_type:
+        return "normal"
     return None
 
 
@@ -94,6 +105,36 @@ class FightTracker:
         self.bosses_fought = 0
         self.bosses_won = 0
         self._per_act: dict[int, dict[str, int]] = {}
+        self._fight_reset(0)
+
+    def _fight_reset(self, hp: int) -> None:
+        """Reset the per-fight burst/attrition accumulators."""
+        self._last_hp = int(hp)
+        self._dmg_taken = 0
+        self._max_hit = 0
+        self._turns = 0
+        self._steps = 0
+        self._last_block = 0
+        self._block_gained = 0
+
+    def _fight_step(self, gs: Any) -> None:
+        """Accumulate per-step combat signals while a fight is active."""
+        self._steps += 1
+        hp = int(getattr(gs, "current_hp", 0) or 0)
+        drop = self._last_hp - hp
+        if drop > 0:
+            self._dmg_taken += drop
+            if drop > self._max_hit:
+                self._max_hit = drop
+        self._last_hp = hp
+        turn = int(getattr(gs, "turn", 0) or 0)
+        if turn > self._turns:
+            self._turns = turn
+        player = getattr(gs, "player", None)
+        block = int(getattr(player, "block", 0) or 0) if player is not None else 0
+        if block > self._last_block:
+            self._block_gained += block - self._last_block
+        self._last_block = block
 
     def _act_bucket(self, act: int) -> dict[str, int]:
         if act not in self._per_act:
@@ -136,10 +177,15 @@ class FightTracker:
             self.act = int(getattr(gs, "act", 0) or 0)
             self.hp_before = int(getattr(gs, "current_hp", 0) or 0)
             self.monsters = _living_monster_names(gs)
-            self._log(
-                f"{fight_type.upper()} FIGHT started: {self.monsters} "
-                f"floor={self.floor} hp={self.hp_before}"
-            )
+            self._fight_reset(self.hp_before)
+            if fight_type != "normal":
+                self._log(
+                    f"{fight_type.upper()} FIGHT started: {self.monsters} "
+                    f"floor={self.floor} hp={self.hp_before}"
+                )
+
+        if self.active_type is not None and in_combat:
+            self._fight_step(gs)
 
         if self.active_type is not None and (terminal or not in_combat):
             ended_by = "terminal" if terminal else "post_combat"
@@ -195,17 +241,30 @@ class FightTracker:
             "ended_by": ended_by,
         }
 
+        detail = dict(row)
+        detail.update({
+            "turns": self._turns,
+            "steps": self._steps,
+            "damage_taken": self._dmg_taken,
+            "max_hit": self._max_hit,
+            "block_gained": self._block_gained,
+        })
         try:
-            _append_csv(_FIGHT_CSV, _FIGHT_COLUMNS, row)
-            _append_csv(_LEGACY_ELITE_CSV, _LEGACY_COLUMNS, row)
+            # Elite/boss keep their existing summary CSVs untouched; every fight
+            # (incl. normal hallway) gets a detail row for burst/attrition analysis.
+            if self.active_type in ("elite", "boss"):
+                _append_csv(_FIGHT_CSV, _FIGHT_COLUMNS, row)
+                _append_csv(_LEGACY_ELITE_CSV, _LEGACY_COLUMNS, row)
+            _append_csv(_FIGHT_DETAIL_CSV, _DETAIL_COLUMNS, detail)
         except Exception as e:
             self._log(f"fight csv append failed: {e}")
 
-        self._log(
-            f"{str(self.active_type).upper()} FIGHT ended: won={won} "
-            f"hp={self.hp_before}->{hp_after} screen={screen} "
-            f"ended_by={ended_by} ({self.monsters})"
-        )
+        if self.active_type != "normal":
+            self._log(
+                f"{str(self.active_type).upper()} FIGHT ended: won={won} "
+                f"hp={self.hp_before}->{hp_after} screen={screen} "
+                f"ended_by={ended_by} ({self.monsters})"
+            )
         self.active_type = None
 
     def _log(self, msg: str) -> None:
