@@ -398,6 +398,18 @@ VICTORY_REWARD = 60.0
 DEFEAT_PENALTY = 25.0
 DEFEAT_FLOOR_OFFSET = 0.25
 MAX_HP_GAIN_REWARD = 0.10
+
+# --- Defensive combat shaping (Act 2 burst-death fix) ---
+# fight_detail.csv showed losses are BURST, not attrition: short fights where one
+# hit takes 45-75% of HP and the loser under-blocks (block/damage ~0.8 vs ~1.8 in
+# wins). So: (1) a super-linear surcharge makes one big unblocked hit hurt far more
+# than several small ones, and (2) a reward for block that covers a telegraphed
+# incoming hit, paid only up to the incoming damage so over-blocking earns nothing
+# (anti-turtle). Both are bounded.
+BURST_HP_PENALTY = 0.30        # surcharge coef on (hp_lost/max_hp)^2 * max_hp
+BURST_HP_CAP = 5.0             # cap the per-step burst surcharge
+BLOCK_REWARD_COEF = 0.04       # reward per point of useful (threat-covering) block
+BLOCK_REWARD_STEP_CAP = 2.0    # cap useful-block reward per step
 REST_HEAL_PER_HP = 0.025
 
 # Deck-quality potential shaping (Phi). Phi(deck) = mean card quality, with an
@@ -436,6 +448,21 @@ BIG_HIT_THRESHOLD = 20
 BIG_HIT_EXTRA_PENALTY = 0.10
 
 _RETALIATION_POWERS = frozenset({"thorns", "sharphide"})
+
+
+def _incoming_damage(gs: Any) -> int:
+    """Total telegraphed attack damage from living monsters this turn."""
+    total = 0
+    for m in living_monsters(getattr(gs, "monsters", []) or []):
+        if "ATTACK" not in str(getattr(m, "intent", "") or "").upper():
+            continue
+        dmg = int(getattr(m, "move_adjusted_damage", 0) or 0)
+        if dmg <= 0:
+            dmg = int(getattr(m, "move_base_damage", 0) or 0)
+        hits = int(getattr(m, "move_hits", 0) or 0) or 1
+        if dmg > 0:
+            total += dmg * hits
+    return total
 
 
 def _get_boss(gs: Any) -> Any:
@@ -485,6 +512,7 @@ class RewardTracker:
         self._boss_max_hp = 0
         self._in_elite_fight = False
         self.last_deck_potential = 0.0
+        self.last_block = 0
 
     def _enemy_stats(self, gs: Any) -> Tuple[Optional[int], int]:
         total_hp = 0
@@ -526,6 +554,7 @@ class RewardTracker:
         self._boss_max_hp = 0
         self._in_elite_fight = False
         self.last_deck_potential = _deck_potential(getattr(gs, "deck", []) or [])
+        self.last_block = 0
         if self.last_in_combat:
             self.last_enemy_hp, self.last_alive = self._enemy_stats(gs)
             self._last_priority_hp = self._priority_hp_map(gs)
@@ -587,6 +616,24 @@ class RewardTracker:
         if in_combat:
             hp_lost = max(0, self.last_hp - hp)
             reward -= hp_lost * HP_LOSS_PENALTY
+            # Super-linear surcharge: one big unblocked hit hurts far more than
+            # several small ones (targets the burst deaths). Bounded by BURST_HP_CAP.
+            if hp_lost > 0:
+                mhp = max(1, int(getattr(gs, "max_hp", 1) or 1))
+                frac = hp_lost / mhp
+                reward -= min(BURST_HP_CAP, BURST_HP_PENALTY * (frac * frac) * mhp)
+            # Reward EFFECTIVE block: block generated to cover a telegraphed
+            # incoming hit, counted only up to the incoming damage so over-blocking
+            # or blocking when safe earns nothing (anti-turtle, bounded per step).
+            player = getattr(gs, "player", None)
+            block_now = int(getattr(player, "block", 0) or 0) if player is not None else 0
+            block_gain = block_now - self.last_block
+            if block_gain > 0:
+                remaining_threat = max(0, _incoming_damage(gs) - self.last_block)
+                useful = min(block_gain, remaining_threat)
+                if useful > 0:
+                    reward += min(BLOCK_REWARD_STEP_CAP, BLOCK_REWARD_COEF * useful)
+            self.last_block = block_now
             e_hp, alive = self._enemy_stats(gs)
             if e_hp is not None and self.last_enemy_hp is not None:
                 reward += max(0, self.last_enemy_hp - e_hp) * ENEMY_DAMAGE_REWARD
@@ -701,6 +748,7 @@ class RewardTracker:
             self._boss_fight_start_hp = 0
             self._boss_last_hp = 0
             self._boss_max_hp = 0
+            self.last_block = 0
 
         return reward
 
