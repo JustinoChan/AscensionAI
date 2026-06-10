@@ -34,6 +34,19 @@ wedged=$(grep -hc WEDGED "$PROJECT_DIR"/logs/worker_*.log 2>/dev/null | paste -s
 tage="na"
 [ -f "$TRAINER_LOG" ] && tage=$(( (now - $(stat -c %Y "$TRAINER_LOG")) / 60 ))
 
+# Cap oversized logs so unbounded worker JVM stdout can't refill the disk. The
+# 30GB disk filled once (8 worker logs at ~2GB each) and silently killed training
+# for ~1.5 days. Keep the last 20MB of any log over 200MB; workers append with
+# O_APPEND so their next write goes to the new end — the wedge-watchdog's mtime
+# liveness signal is preserved.
+for f in "$PROJECT_DIR"/logs/*.log; do
+    [ -f "$f" ] || continue
+    sz=$(stat -c %s "$f" 2>/dev/null || echo 0)
+    if [ "$sz" -gt 209715200 ]; then
+        tail -c 20971520 "$f" > "$f.cap" 2>/dev/null && cat "$f.cap" > "$f" && rm -f "$f.cap"
+    fi
+done
+
 action="ok"
 # Master switch: while logs/.autorun exists (and training isn't intentionally
 # stopped), keep training running continuously — relaunch whenever it's down,
