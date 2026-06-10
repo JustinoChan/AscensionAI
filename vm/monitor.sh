@@ -47,6 +47,13 @@ for f in "$PROJECT_DIR"/logs/*.log; do
     fi
 done
 
+# Compact the per-fight detail log: roll old rows into per-group aggregates and
+# keep only recent detail, so it stays bounded (the script self-guards on size).
+fd="$PROJECT_DIR/logs/fight_detail.csv"
+if [ -f "$fd" ] && [ "$(wc -l < "$fd" 2>/dev/null || echo 0)" -gt 45000 ]; then
+    python3 "$PROJECT_DIR/scripts/compact_fight_detail.py" >> "$PROJECT_DIR/logs/compact.log" 2>&1 || true
+fi
+
 action="ok"
 # Master switch: while logs/.autorun exists (and training isn't intentionally
 # stopped), keep training running continuously — relaunch whenever it's down,
