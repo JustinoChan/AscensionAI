@@ -687,8 +687,10 @@ def main():
                         help="Path to model checkpoint to load")
     parser.add_argument("--out", type=str, default="rollouts_shared",
                         help="Directory for shared transition files")
-    parser.add_argument("--id", type=str, default=str(os.getpid()),
-                        help="Worker ID (for logging and filenames; defaults to PID)")
+    parser.add_argument("--id", type=str,
+                        default=os.environ.get("ASCENSION_WORKER_ID", str(os.getpid())),
+                        help="Worker ID for logging/filenames; defaults to "
+                             "$ASCENSION_WORKER_ID (set per-worker by run_training.sh) then PID")
     parser.add_argument("--reload-every", type=int, default=5,
                         help="Reload model every N games")
     parser.add_argument("--games", type=int, default=0,

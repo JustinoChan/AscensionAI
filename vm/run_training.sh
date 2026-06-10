@@ -134,16 +134,18 @@ EOF
 launch_worker() {
     local id=$1
     local log_file="$PROJECT_DIR/logs/worker_${id}.log"
+    local hb_file="$PROJECT_DIR/logs/worker_${id}_heartbeat.txt"
     local tmpdir="/tmp/sts_worker_${id}"
     local display_num=$((99 + id))
-    local stale_limit=120   # seconds with no log output => worker is wedged
-    local boot_grace=150    # seconds to let the JVM boot before watching
+    local stale_limit=120   # seconds with no heartbeat => worker is wedged
+    local boot_grace=240    # seconds to let the JVM boot + first heartbeat land
     mkdir -p "$tmpdir"
 
     # Each worker gets its own Xvfb — small resolution reduces software rendering cost
     Xvfb :$display_num -screen 0 320x240x16 -ac +extension GLX +extension RANDR &>/dev/null &
     local xvfb_pid=$!
     export DISPLAY=:$display_num
+    export ASCENSION_WORKER_ID=$id   # inherited by the JVM -> python worker (stable id)
     sleep 1
 
     while [ $(date +%s) -lt $END_TIME ] && [ ! -f "$STOP_FILE" ]; do
@@ -157,9 +159,10 @@ launch_worker() {
             -jar ModTheSpire.jar \
             --skip-launcher \
             --mods basemod,CommunicationMod,superfastmode \
-            >> "$log_file" 2>&1 &
+            > >(grep --line-buffered -vE 'Sending message:|Received message:' >> "$log_file") 2>&1 &
         local java_pid=$!
         local launch_ts=$(date +%s)
+        touch "$hb_file"   # exists immediately; boot_grace covers until python writes it
 
         # Supervise the JVM: relaunch on exit, or kill+relaunch if it wedges.
         while kill -0 "$java_pid" 2>/dev/null; do
@@ -172,9 +175,9 @@ launch_worker() {
             fi
             local now=$(date +%s)
             [ $((now - launch_ts)) -lt $boot_grace ] && continue
-            local mtime=$(stat -c %Y "$log_file" 2>/dev/null || echo "$now")
+            local mtime=$(stat -c %Y "$hb_file" 2>/dev/null || echo "$now")
             if [ $((now - mtime)) -gt $stale_limit ]; then
-                echo "[$(date '+%H:%M:%S')] Worker $id: WEDGED ($((now - mtime))s no log output) — killing JVM to relaunch"
+                echo "[$(date '+%H:%M:%S')] Worker $id: WEDGED ($((now - mtime))s no heartbeat) — killing JVM to relaunch"
                 kill -9 "$java_pid" 2>/dev/null || true
                 break
             fi
