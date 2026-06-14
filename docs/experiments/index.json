@@ -352,6 +352,32 @@
         "ppo_minus_heuristic_average_floor": -1.12
       },
       "notes": "Network upgraded from (256,256) Tanh to (512,256,256) GELU via warm transfer. HP-urgency heal reward added. Boss conversion jumped from 21.7% to 38.1%, nearly matching heuristic (39.0%). Average reward flipped positive (+9.60 vs -0.95 at 12k). 8 runs reached floor 30+ including two Act 3 runs (floors 42 and 46). Best eval to date."
+    },
+    {
+      "run_id": "sim_variants_A_M_20260614",
+      "report": "009_simulator_variants.md",
+      "model_path": "headless sts_lightspeed (sts_gym fork): search-combat + deck-override",
+      "training_mode": "headless_simulator_variant_series",
+      "worker_count": 12,
+      "hyperparameters": {
+        "environment": "sts_gym (sts_lightspeed fork), Ironclad full-run",
+        "observation_dim": 1200,
+        "action_dim": 128,
+        "method": "process-separated PPO; staged one-lever variants; 1-ply replay search; 48-fixed-seed greedy eval"
+      },
+      "key_results": {
+        "plateau_eval_floor": 14.7,
+        "greedy_boss_winrate_percent": 44,
+        "search_boss_winrate_percent": "75-88",
+        "search_combat_full_run_avg_floor": 26.35,
+        "search_combat_act2_reach_percent": 83.3,
+        "search_combat_act3_reach_percent": 14.6,
+        "search_combat_max_floor": 50,
+        "deck_override_wins_of_48": 3,
+        "deck_override_avg_floor": 23.3,
+        "capacity_probe_per_state_agreement_percent": 70
+      },
+      "notes": "Variant series A-M on the headless simulator (Jun 10-14). Controls ruled out exploration (varA), capacity (varB), reward/deck shaping (varC/D/E); an observation-corruption bug had left early runs deck-blind. A fight-curriculum gym (varF/H/I/J) showed model-free PPO cannot escape the combat local optimum (fight win rates frozen at 72/94/56/44, explained variance ~0), while a value-replay buffer (varJ) fixed value learning without moving the policy. Train-time 1-ply search (varK) plays combat at boss 75-88%; a full-run eval that changed ONLY combat decisions drove avg floor 14.71->26.35, Act-2 27->83%, Act-3 0->14.6%, max floor 33->50 -- combat execution was the universal plateau. A search-free combat policy could not be trained to search level (distillation varK, DAgger varL, value-bootstrap varM, and an offline capacity sweep all capped; per-state agreement plateaus ~70% regardless of size). Deck-hygiene overrides layered on search-combat produced the project's first wins (3/48). See report for per-variant reasoning and stats."
     }
   ]
 }

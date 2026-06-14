@@ -83,6 +83,11 @@
   <main>
     <section class="grid">
       <article class="card highlight">
+        <h2>009 Simulator Era &mdash; Variants A&ndash;M &amp; First Wins</h2>
+        <p>Headless-sim variant series (Jun 10&ndash;14). Combat was the wall: 1-ply search nearly doubled run depth (floor 14.7&rarr;26.4, Act 3 reached), and deck hygiene on top produced the project's first 3 wins.</p>
+        <button class="btn" data-report="009_simulator_variants.md">View Report</button>
+      </article>
+      <article class="card">
         <h2>008 PPO 19k + HP-Urgency Heal</h2>
         <p>19,400+ games, network upgrade to (512,256,256) GELU, HP-urgency heal reward. 200-game eval: 38.1% boss WR, 20% Act 2 reach.</p>
         <button class="btn" data-report="008_ppo_19k_hp_urgency.md">View Report</button>
@@ -135,7 +140,10 @@
             <tr><td>BC checkpoint 150-game eval</td><td>150</td><td>12.81</td><td>-0.55</td><td>30.6%</td><td>12.0%</td><td>Playable warm start below heuristic.</td></tr>
             <tr><td>PPO 5k (200-game eval)</td><td>200</td><td>15.44</td><td>4.03</td><td>31.1%</td><td>20.0%</td><td>Peak PPO pre-shaping. Within 0.34 floors of heuristic.</td></tr>
             <tr><td>PPO 12k (200-game eval)</td><td>200</td><td>14.83</td><td>-0.95</td><td>21.7%</td><td>13.5%</td><td>Exploration valley post-BC-decay. 49.5% deaths on floor 16.</td></tr>
-            <tr style="background:#f0f9f4;"><td><strong>PPO 19k (200-game eval)</strong></td><td>200</td><td>14.66</td><td><strong>9.60</strong></td><td><strong>38.1%</strong></td><td><strong>20.0%</strong></td><td>Network upgrade + HP-urgency heal. Boss WR nearly matches heuristic. 8 runs floor 30+.</td></tr>
+            <tr><td>PPO 19k (200-game eval)</td><td>200</td><td>14.66</td><td>9.60</td><td>38.1%</td><td>20.0%</td><td>Live-era peak. Network upgrade + HP-urgency heal; boss WR nearly matches heuristic.</td></tr>
+            <tr><td>Sim plateau (varB, headless)</td><td>150k</td><td>~14.7</td><td>&mdash;</td><td>&mdash;</td><td>~26%</td><td>Headless-sim era. Plateau confirmed not capacity/entropy (and pre-fix deck-blind).</td></tr>
+            <tr style="background:#f0f9f4;"><td><strong>Sim + search combat (48-seed full run)</strong></td><td>48</td><td><strong>26.35</strong></td><td>&mdash;</td><td>&mdash;</td><td><strong>83.3%</strong></td><td><strong>1-ply search at combat decisions. Act 3 reached (14.6%), max floor 50 &mdash; combat was the wall.</strong></td></tr>
+            <tr style="background:#f0f9f4;"><td><strong>Sim + search + deck override (48-seed)</strong></td><td>48</td><td>23.3</td><td>&mdash;</td><td>&mdash;</td><td>~73%</td><td><strong>First wins in project history: 3/48.</strong> Deck hygiene layered on search-combat.</td></tr>
           </tbody>
         </table>
       </div>
