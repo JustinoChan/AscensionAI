@@ -378,6 +378,32 @@
         "capacity_probe_per_state_agreement_percent": 70
       },
       "notes": "Variant series A-M on the headless simulator (Jun 10-14). Controls ruled out exploration (varA), capacity (varB), reward/deck shaping (varC/D/E); an observation-corruption bug had left early runs deck-blind. A fight-curriculum gym (varF/H/I/J) showed model-free PPO cannot escape the combat local optimum (fight win rates frozen at 72/94/56/44, explained variance ~0), while a value-replay buffer (varJ) fixed value learning without moving the policy. Train-time 1-ply search (varK) plays combat at boss 75-88%; a full-run eval that changed ONLY combat decisions drove avg floor 14.71->26.35, Act-2 27->83%, Act-3 0->14.6%, max floor 33->50 -- combat execution was the universal plateau. A search-free combat policy could not be trained to search level (distillation varK, DAgger varL, value-bootstrap varM, and an offline capacity sweep all capped; per-state agreement plateaus ~70% regardless of size). Deck-hygiene overrides layered on search-combat produced the project's first wins (3/48). See report for per-variant reasoning and stats."
+    },
+    {
+      "run_id": "mainline_v2_20260615",
+      "report": "010_first_winning_agent.md",
+      "model_path": "policy_varN.npz (combat) + deck-hygiene/role/smith macro (headless sts_lightspeed)",
+      "training_mode": "search_combat_plus_diagnosed_macro_stack",
+      "worker_count": 12,
+      "hyperparameters": {
+        "combat": "1-ply replay search, rollout teacher, net policy_varN.npz (Act-1 + harvested Act-2/3)",
+        "macro": "deck-hygiene + AoE/draw role scorer + conservative boss-aware smith",
+        "toggles": "GATE_ELITES=0 RELIC_BUY=0 ROLE_SCORE=1 SMITH=1",
+        "eval_seeds": 150
+      },
+      "evaluation": {
+        "games": 150,
+        "average_floor": 24.9,
+        "wins": 7,
+        "win_rate_percent": 4.7
+      },
+      "stage_progression": {
+        "baseline_floor": 14.7,
+        "search_combat_floor": 26.4,
+        "deck_hygiene_floor_wins": "23.6 / 5",
+        "mainline_v2_floor_wins": "24.9 / 7"
+      },
+      "notes": "First winning agent in project history (0 wins prior across ~21,700 live games + the entire sim variant series). Built by a diagnose-first stack of macro levers on search-combat: deck hygiene (first wins), varN combat retrain on harvested Act-2/3 fights (Act-2 elite 59->67%), narrow AoE/draw role scorer (Act-2 AoE-zero 42->8%), conservative boss-aware smith (Act-2 upgrades 0.9->1.9, no HP cost). Ruled out by diagnostic: starter-purge, relic-buying, elite-gating, naive smithing. Each diagnosed lever stacked; macro now at ceiling. Next phase = stronger combat/search. See 010 report."
     }
   ]
 }
