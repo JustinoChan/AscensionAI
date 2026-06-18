@@ -404,6 +404,36 @@
         "mainline_v2_floor_wins": "24.9 / 7"
       },
       "notes": "First winning agent in project history (0 wins prior across ~21,700 live games + the entire sim variant series). Built by a diagnose-first stack of macro levers on search-combat: deck hygiene (first wins), varN combat retrain on harvested Act-2/3 fights (Act-2 elite 59->67%), narrow AoE/draw role scorer (Act-2 AoE-zero 42->8%), conservative boss-aware smith (Act-2 upgrades 0.9->1.9, no HP cost). Ruled out by diagnostic: starter-purge, relic-buying, elite-gating, naive smithing. Each diagnosed lever stacked; macro now at ceiling. Next phase = stronger combat/search. See 010 report."
+    },
+    {
+      "run_id": "mainline_v3_20260617",
+      "report": "011_tempo_targeted_smithing.md",
+      "model_path": "policy_varN.npz (combat) + deck-hygiene/role/smith macro + tempo-targeted smith (headless sts_lightspeed)",
+      "training_mode": "search_combat_plus_diagnosed_macro_stack",
+      "worker_count": 12,
+      "hyperparameters": {
+        "combat": "1-ply replay search, rollout teacher, net policy_varN.npz",
+        "macro": "deck-hygiene + AoE/draw role scorer + conservative smith + tempo-targeted smith upgrades",
+        "toggles": "GATE_ELITES=0 RELIC_BUY=0 ROLE_SCORE=1 SMITH=1 SMITH_TARGET=1",
+        "eval_seeds": 150
+      },
+      "evaluation": {
+        "games": 150,
+        "average_floor": 26.06,
+        "wins": 9,
+        "win_rate_percent": 6.0
+      },
+      "ab_vs_mainline_v2": {
+        "upg_tempo_at_act2_entry": "0.31 -> 1.57",
+        "average_floor": "24.87 -> 26.06",
+        "wins": "7 -> 9",
+        "act1_deaths": "32 -> 28",
+        "reached_act2": "118 -> 122",
+        "boss_entry_hp_frac": "0.885 -> 0.881",
+        "act2_monster_deaths": "58 -> 65",
+        "act2_monster_per_fight_winrate": "0.902 -> 0.896"
+      },
+      "notes": "Diagnose-first phase that began targeting Act-2 monster deaths with surgical deeper search, then redirected twice. Recon: 88% of those deaths are 'lost on arrival' (entry HP median 28%), so death-turn search is futile. Deck-deficit pinpoint: losing decks are NOT damage-deficient (equal damage, more scaling/powers than decks that cleared Act 2) -- the only monotonic success-correlate is upgrades (winners 2.7 vs losers 1.8-1.0). A 450-event audit found the conservative smith upgraded a basic Strike/Defend 97% of the time. Fix = tempo-targeted smithing: same frequency + HP gates, but upgrade the highest-tempo card (premium attack > attack > block > AoE > draw/energy > scaling/power > filler) instead of the first card in deck order. A/B (only SMITH_TARGET differs): floor 24.87->26.06 (+1.19, largest single lever), wins 7->9, Act-1 deaths 32->28, boss-entry HP unchanged (no cost). Missed its named gate -- Act-2 monster deaths rose 58->65 -- but per-fight win% stayed flat (90.2->89.6): exposure (more runs reach Act 2), not a combat regression. Deployed as mainline_v3. Remaining wall = HP-attrition entering Act-2 monster chains (next phase). See 011 report."
     }
   ]
 }
