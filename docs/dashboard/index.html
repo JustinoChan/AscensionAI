@@ -179,17 +179,44 @@
 
   <header class="dashboard-header">
     <h1>AscensionAI Results Dashboard</h1>
-    <p>Static, hostable viewer for BC, PPO, and fixed-seed evaluation artifacts. It ships with an embedded public snapshot and can also parse local CSV exports from <code>logs/</code>.</p>
+    <p>Tracks AscensionAI from the live-game PPO era to the current headless-simulator agent. The headline reflects the deployed <strong>mainline_v3</strong> (search-combat + a diagnosed macro stack on the <code>sts_lightspeed</code> simulator). The charts and tables further down are the <strong>historical live-game PPO training era</strong> (through ~19.5k games), which plateaued at ~14.7 floor and motivated the June&nbsp;10 pivot to the simulator. Load local CSV exports to chart your own runs.</p>
   </header>
 
   <main>
     <div class="toolbar">
       <label class="upload" for="csvInput">Load CSV files</label>
       <input id="csvInput" type="file" accept=".csv" multiple>
-      <span id="status" class="note">Embedded snapshot is the last fixed-seed benchmark on the 585-d model (May 27). As of June 4 the agent trains continuously on the 717-d deck-vector model (Path 2 — learned deck-building); the deck inputs are integrating (weight-ratio ~0.59 of the original inputs and climbing) but a clean greedy eval is still pending at ratio ~0.70. Load <code>training_stats.csv</code>, <code>bc_train_stats.csv</code>, and <code>eval_stats.csv</code> for live local charts.</span>
+      <span id="status" class="note">Current deployed agent (Jun 17) = <strong>mainline_v3</strong> on the headless <code>sts_lightspeed</code> simulator: 1-ply replay-search combat + a diagnose-first macro stack (deck hygiene, AoE/draw role scorer, conservative + tempo-targeted smith) &mdash; <strong>avg floor 26.1, 9 wins / 150 fixed seeds (6.0%)</strong>. The cards above summarize it; the stage-progression panel shows how it was built. The charts and the Fixed-Seed / Run-Metadata tables below are the <strong>historical live-game PPO era</strong> (585-d &rarr; 717-d models, May&ndash;June, plateaued at ~14.7 floor / 0 wins) kept for the record. Load <code>training_stats.csv</code>, <code>bc_train_stats.csv</code>, and <code>eval_stats.csv</code> to chart local live-game runs.</span>
     </div>
 
     <section class="grid" id="cards"></section>
+
+    <section class="table-panel">
+      <h2>Current Agent &mdash; mainline_v3 (headless simulator)</h2>
+      <p style="color:#5d6875; margin:0 0 12px;">
+        The deployed agent plays on the headless <code>sts_lightspeed</code> simulator: <strong>combat by 1-ply replay search</strong> (each candidate action rolled to the end of the fight) layered with a <strong>diagnose-first macro stack</strong> for non-combat decisions. It was built one attributable lever at a time, each A/B-tested at 150 fixed seeds. Full reasoning in the <a href="../experiments/">Experiments</a> reports (009&ndash;011).
+      </p>
+      <table>
+        <thead><tr><th>Stage</th><th>Eval</th><th>Avg floor</th><th>Wins</th><th>What changed</th></tr></thead>
+        <tbody>
+          <tr><td>Live-game PPO plateau</td><td>200</td><td>14.7</td><td>0</td><td>The universal wall &mdash; ~21,700 games, 0 wins (charted below).</td></tr>
+          <tr><td>+ search combat</td><td>48</td><td>26.4</td><td>0</td><td>1-ply search at combat decisions only &mdash; combat <em>was</em> the wall (Act-3 reached, max floor 50).</td></tr>
+          <tr><td>+ deck hygiene</td><td>150</td><td>23.6</td><td>5</td><td>Remove basics / skip filler / suppress shop bloat &mdash; project's first wins.</td></tr>
+          <tr><td>mainline_v2 (+varN combat, +AoE/draw scorer, +conservative smith)</td><td>150</td><td>24.9</td><td>7</td><td>First winning agent; Act-2/3 combat retrain + role gap-filler + HP-safe smithing.</td></tr>
+          <tr style="background:#d4edda;"><td><strong>mainline_v3 (+tempo-targeted smith)</strong></td><td>150</td><td><strong>26.1</strong></td><td><strong>9</strong></td><td><strong>Upgrade the highest-tempo card (Bash+ etc.) instead of a Strike</strong> &mdash; biggest single-lever floor gain, no HP cost (6.0% win rate).</td></tr>
+        </tbody>
+      </table>
+      <p style="color:#5d6875; margin:12px 0 0; font-size:14px;">
+        Remaining wall (next phase): entering Act-2 monster chains too hurt (~28% median HP) &mdash; an HP-attrition / path-sequencing problem, localized by elimination since deck tempo improved and per-fight combat stayed flat. See the Changelog below and report 011.
+      </p>
+    </section>
+
+    <section>
+      <h2 style="margin:18px 0 4px; font-size:18px;">Historical &mdash; Live-Game PPO Training (May&ndash;June 2026, pre-pivot)</h2>
+      <p style="color:#5d6875; margin:0 0 12px; font-size:14px;">
+        The charts and the two tables that follow are the original live-game RL era over CommunicationMod, which plateaued at ~14.7 floor with 0 wins after ~19.5k games and motivated the June&nbsp;10 pivot to the simulator. Kept for the project record; they do <em>not</em> describe the current agent above.
+      </p>
+    </section>
 
     <section class="chart-grid">
       <div class="chart">
@@ -211,12 +238,12 @@
     </section>
 
     <section class="table-panel">
-      <h2>Fixed-Seed Comparison</h2>
+      <h2>Fixed-Seed Comparison (live-game PPO era)</h2>
       <table id="comparisonTable"></table>
     </section>
 
     <section class="table-panel">
-      <h2>Run Metadata</h2>
+      <h2>Run Metadata (live-game PPO era)</h2>
       <table id="metadataTable"></table>
     </section>
 
@@ -374,23 +401,21 @@
     </section>
 
     <section class="table-panel">
-      <h2>Heuristic vs RL Decision Boundary</h2>
+      <h2>Decision Architecture &mdash; mainline_v3</h2>
       <p style="color:#5d6875; margin:0 0 12px;">
-        The RL policy now controls all strategic decisions, including deck-building: combat, card rewards, <strong>card removal (purge)</strong>, <strong>card upgrades</strong>, rest sites, map pathing, boss relics, and events. As of Path 2 (Jun 2) the policy also <em>observes</em> its exact deck via a 717-d per-card count vector. The heuristic layer only handles shop purchases and purely mechanical screens (chest open, confirms). During behavior cloning and evaluation, a <code>heuristic_all</code> flag can override all screens back to heuristic control.
+        The deployed simulator agent is a hybrid. <strong>Combat is played by 1-ply replay search</strong> (each legal action rolled to the end of the fight, best score taken). <strong>Non-combat decisions default to a trained policy</strong> (the from-scratch simulator PPO net, <code>policy_varE</code>) with narrow, <strong>diagnosed macro overrides</strong> only on the screens where measurement found a specific deficiency &mdash; each override gated and reversible via an env toggle. This supersedes the live-game 717-d RL deck-builder shown in the historical era above (that agent never won).
       </p>
       <table>
-        <thead><tr><th>Screen</th><th>Current Handler</th><th>Notes</th></tr></thead>
+        <thead><tr><th>Decision</th><th>Handler</th><th>Notes</th></tr></thead>
         <tbody>
-          <tr><td>Combat (play card, use potion, end turn)</td><td>RL policy</td><td>Core gameplay loop</td></tr>
-          <tr><td>Card reward picks</td><td>RL policy</td><td>Sees full deck via the 717-d deck vector</td></tr>
-          <tr><td>Card removal / purge (grid)</td><td>RL policy</td><td><strong>New (Path 2)</strong> — was heuristic; deck-quality reward + BC anchor</td></tr>
-          <tr><td>Card upgrade / smith (grid)</td><td>RL policy</td><td><strong>New (Path 2)</strong> — was heuristic</td></tr>
-          <tr><td>Rest site (rest vs smith)</td><td>RL policy</td><td>Heuristic fallback available via <code>heuristic_all</code></td></tr>
-          <tr><td>Map pathing</td><td>RL policy</td><td>39-d map observation with 3-floor BFS lookahead</td></tr>
-          <tr><td>Boss relic picks</td><td>RL policy</td><td>Heuristic fallback available via <code>heuristic_all</code></td></tr>
-          <tr><td>Events</td><td>RL policy</td><td>Heuristic fallback for single-option events</td></tr>
-          <tr><td>Shop purchases</td><td>Heuristic</td><td>Future: migrate to RL policy</td></tr>
-          <tr><td>Chest open, confirms, match-and-keep</td><td>Heuristic (mechanical)</td><td>No strategic decision value</td></tr>
+          <tr><td>Combat (play card / end turn)</td><td>1-ply replay search</td><td>Rollout teacher over net <code>policy_varN</code> (Act-1 + harvested Act-2/3); boss 75&ndash;88% vs 44% feed-forward</td></tr>
+          <tr><td>Card reward take / skip</td><td>Macro override + trained policy</td><td>Premium-only hygiene + AoE/draw role gap-filler (<code>ROLE_SCORE</code>); defers to the policy otherwise</td></tr>
+          <tr><td>Card removal (grid)</td><td>Macro override</td><td>Remove basic Strikes/Defends once the deck is developed</td></tr>
+          <tr><td>Rest vs smith</td><td>Macro override (conservative smith)</td><td>Smith only at HP&nbsp;&ge;&nbsp;85% (&ge;&nbsp;95% pre-boss), else rest (<code>SMITH</code>) &mdash; no HP cost</td></tr>
+          <tr style="background:#d4edda;"><td><strong>Smith target (which card)</strong></td><td><strong>Macro override (tempo scorer)</strong></td><td><strong>New (v3):</strong> upgrade highest-tempo card &mdash; premium attack&nbsp;&gt;&nbsp;block&nbsp;&gt;&nbsp;AoE&nbsp;&gt;&nbsp;&hellip; (<code>SMITH_TARGET</code>); was the first card in deck order = a Strike</td></tr>
+          <tr><td>Shop</td><td>Macro override</td><td>One card removal, suppress filler card-buys; relic-buying off (diagnosed neutral at power)</td></tr>
+          <tr><td>Map pathing</td><td>Trained policy (<code>varE</code>)</td><td>Elite/path gating was diagnosed a no-op (boss-entry HP already ~88%); left to the policy</td></tr>
+          <tr><td>Boss relics / events</td><td>Trained policy (<code>varE</code>)</td><td>No measured deficiency &mdash; no override</td></tr>
         </tbody>
       </table>
     </section>
@@ -579,6 +604,20 @@
       ]
     };
 
+    // Current deployed agent (headless-simulator era). The hero cards reflect
+    // this; the snapshot above is the historical live-game PPO era.
+    const CURRENT = {
+      agent: "mainline_v3",
+      era: "headless sts_lightspeed sim",
+      evalSeeds: 150,
+      avgFloor: 26.06,
+      wins: 9,
+      winPct: 6.0,
+      act2ReachPct: 81.3,
+      combat: "1-ply replay search",
+      updated: "2026-06-17"
+    };
+
     let state = structuredClone(snapshot);
 
     function number(value, fallback = 0) {
@@ -647,23 +686,18 @@
     function pct(n, d) { return d ? (100 * n / d) : 0; }
     function fmt(n, digits = 2) { return Number(n).toFixed(digits); }
 
+    // Hero cards = the current deployed agent (mainline_v3), independent of the
+    // historical live-PPO snapshot/CSV data charted below.
     function renderCards() {
-      const latestBc = state.bc.at(-1) || {};
-      const ppoGames = state.training.length;
-      const avgFloor = avg(state.training, "floor");
-      const avgReward = avg(state.training, "reward");
-      const latestPpo = state.ppo.at(-1) || {};
-      const bestEval = [...state.comparison].sort((a, b) => b.avg_floor - a.avg_floor)[0] || {};
-      const latestEval = state.comparison.at(-1) || {};
       const cards = [
-        ["BC val accuracy", `${fmt(number(latestBc.val_acc), 2)}%`, `epoch ${latestBc.epoch || "n/a"}`],
-        ["Recent PPO avg floor", fmt(avgFloor), `${ppoGames} displayed rollout games; ${state.meta.ppoGames || ppoGames} total`],
-        ["Recent PPO avg reward", fmt(avgReward), "shaped reward"],
-        ["Latest PPO KL", fmt(number(latestPpo.kl), 5), `clip ${fmt(number(latestPpo.clip), 3)}`],
-        ["Latest eval boss WR", `${fmt(number(latestEval.boss ? (100 * parseInt(latestEval.boss) / parseInt(latestEval.boss.split("/")[1])) : 0), 1)}%`, `${latestEval.boss || "n/a"} (${latestEval.label || "n/a"})`],
-        ["Workers", String(state.meta.workers || "n/a"), `${state.meta.ppoUpdates || "n/a"} PPO updates; stale ${state.meta.staleRollouts}`],
-        ["Commit", state.meta.commit, state.meta.date],
-        ["Seed file", state.meta.seedFile, "deterministic eval"]
+        ["Deployed agent", CURRENT.agent, CURRENT.era],
+        ["Avg floor", fmt(CURRENT.avgFloor), `${CURRENT.evalSeeds} fixed seeds &middot; &uarr; from ~14.7 plateau`],
+        ["Wins", `${CURRENT.wins} / ${CURRENT.evalSeeds}`, `${fmt(CURRENT.winPct, 1)}% &mdash; first winning agents`],
+        ["Act-2 reach", `${fmt(CURRENT.act2ReachPct, 0)}%`, "vs ~27% before search-combat"],
+        ["Combat", CURRENT.combat, "boss 75&ndash;88% vs 44% feed-forward"],
+        ["Method", "diagnose-first", "one lever, 150-seed A/B"],
+        ["Sim throughput", "~17k games/hr", "~190&times; the live game"],
+        ["Updated", CURRENT.updated, "live-PPO history charted below"]
       ];
       document.getElementById("cards").innerHTML = cards.map(([label, value, sub]) => `
         <article class="card">

@@ -243,8 +243,8 @@
 
   <section class="hero">
     <div class="hero-content">
-      <h1>Distributed reinforcement learning for Slay the Spire</h1>
-      <p>AscensionAI wraps a live desktop game in a training system with behavior cloning, PPO fine-tuning, action masking, parallel rollout workers, checkpoint-aware offline updates, deterministic evaluation, and public experiment reporting.</p>
+      <h1>Reinforcement learning for Slay the Spire</h1>
+      <p>AscensionAI is a from-scratch RL system for Ironclad that went from a live-game PPO plateau to the project's first <em>winning</em> agents on a headless C++ simulator &mdash; 1-ply replay-search combat plus a diagnose-first macro stack, every change A/B-tested at 150 fixed seeds.</p>
       <div class="hero-actions">
         <a class="button primary" href="dashboard/">Open Dashboard</a>
         <a class="button" href="scripts.html">Read Script Guide</a>
@@ -256,12 +256,12 @@
   <main>
     <section class="section">
       <h2>Project Snapshot</h2>
-      <p class="lead">June 4, 2026: <strong>deck-building is now learned, not heuristic.</strong> The observation expanded to 717-d with a per-card deck count vector, and card removal + upgrade choices moved from the heuristic to the RL policy, paired with a potential-based deck-quality reward. The model was warm-transferred 585&rarr;717 (behavior preserved) and trains continuously, hands-off, on a self-healing GCP spot VM. The deck inputs are integrating (first-layer weight-ratio ~0.59 of the original inputs and climbing); a clean greedy eval is pending at ~0.70. Last fixed-seed benchmark (pre-Path-2, 585-d): 38.1% boss WR, 20% Act 2 reach.</p>
+      <p class="lead">June 17, 2026: the deployed agent is <strong>mainline_v3</strong> on the headless <code>sts_lightspeed</code> simulator &mdash; <strong>1-ply replay-search combat plus a diagnose-first macro stack</strong> &mdash; averaging <strong>floor 26.1 with 9 wins / 150 fixed seeds (6.0%)</strong>, the project's first winning agents. This followed a June&nbsp;10 pivot off the throughput-starved live game, which had plateaued at ~14.7 floor and <strong>0 wins across ~21,700 games</strong>. A controlled variant series then showed combat <em>execution</em> &mdash; not reward, capacity, or deck-building &mdash; was the universal wall: holding everything else fixed and playing combat with search alone drove average floor 14.7&rarr;26.4. Wins followed from a stacked, individually A/B-tested set of non-combat levers.</p>
       <div class="metric-grid">
-        <div class="metric"><span>Observation vector</span><strong>717</strong></div>
-        <div class="metric"><span>Deck-vec integration</span><strong>~0.59</strong></div>
-        <div class="metric"><span>Eval boss win rate (585-d)</span><strong>38.1%</strong></div>
-        <div class="metric"><span>PPO rollout games</span><strong>27,000+</strong></div>
+        <div class="metric"><span>Avg floor (150 seeds)</span><strong>26.1</strong></div>
+        <div class="metric"><span>Wins / 150</span><strong>9 &middot; 6.0%</strong></div>
+        <div class="metric"><span>Combat boss WR (search)</span><strong>75&ndash;88%</strong></div>
+        <div class="metric"><span>Sim throughput</span><strong>~17k/hr</strong></div>
       </div>
     </section>
 
@@ -279,14 +279,14 @@
           <a href="docs.html">Open docs</a>
         </article>
         <article class="card">
-          <h3>Learned Deck-Building</h3>
-          <p>717-d per-card deck vector lets the policy see its exact deck; card removal &amp; upgrade are now RL-controlled with a potential-based deck-quality reward, warm-transferred from the 585-d model.</p>
-          <a href="AscensionAI_Technical_Writeup.md#20-june-2-2026-learned-deck-building-addendum">Read Path 2 notes</a>
+          <h3>Search-Combat Breakthrough</h3>
+          <p>A 1-ply replay search plays combat far better than any learned feed-forward policy could (boss 75&ndash;88% vs 44%). Holding drafting/pathing fixed and replacing only combat decisions nearly doubled run depth &mdash; combat was the universal wall.</p>
+          <a href="experiments/009_simulator_variants.md">Read the variant series</a>
         </article>
         <article class="card">
-          <h3>Headless Cloud Deployment</h3>
-          <p>The worker/trainer stack runs headless on a GPU-less GCP spot VM via Xvfb: one-shot installer, per-worker displays, Java 8, and spot preemption recovery.</p>
-          <a href="architecture.md#headless-cloud-deployment-gcp">Read deployment notes</a>
+          <h3>Headless Simulator Pivot</h3>
+          <p>Training moved off the ~90-games/hour live game onto the <code>sts_lightspeed</code> C++ sim (~17k games/hr) via a process-separated worker/trainer stack, demoting the live game to a transfer-eval oracle.</p>
+          <a href="experiments/009_simulator_variants.md">Read the pivot</a>
         </article>
         <article class="card">
           <h3>Experiments</h3>
@@ -300,7 +300,7 @@
         </article>
         <article class="card">
           <h3>Technical Writeup</h3>
-          <p>v0.8.1 — learned deck-building (§20): 717-d deck vector, RL removal/upgrade, deck-quality reward; the weight-ratio integration diagnostic + stats-driven tuning journey (§20.7); headless cloud deployment (§19).</p>
+          <p>Full architecture of the live-game RL system: BC warm-start, PPO fine-tuning, action masking, parallel rollouts, and headless cloud deployment. The later headless-simulator era (search-combat &rarr; mainline_v3) is documented in the Experiments reports 009&ndash;011.</p>
           <a href="AscensionAI_Technical_Writeup.md">Read writeup</a> · <a href="AscensionAI_Technical_Writeup.pdf">PDF</a>
         </article>
         <article class="card">
@@ -316,7 +316,7 @@
       <div class="media-row">
         <img src="assets/worker_launch_demo.gif" alt="Animated diagram showing rollout workers producing files, an offline trainer updating a checkpoint, and workers reloading the model.">
         <div>
-          <p class="lead">AscensionAI runs as a local distributed training loop: live game workers write checkpoint-tagged rollout files, the offline trainer consumes fresh batches, saves an updated checkpoint, and workers reload the policy for the next collection cycle.</p>
+          <p class="lead">AscensionAI trains as a distributed worker/trainer loop: rollout workers write checkpoint-tagged data, an offline trainer consumes fresh batches, saves an updated checkpoint, and workers reload the policy for the next cycle. The animation shows the live-game version; the headless simulator uses the same process-separated pattern at ~190&times; the throughput.</p>
           <div class="doc-list">
             <a class="doc-link" href="docs.html">Docs hub <span>all project docs</span></a>
             <a class="doc-link" href="demo_assets.md">Demo assets <span>public-safe media</span></a>
@@ -329,29 +329,29 @@
 
     <section class="section">
       <h2>Current Results</h2>
-      <p class="lead">The last fixed-seed benchmark below was measured on the 585-d model (38.1% boss WR, 20% Act 2 reach, best floor 46). Current work (Path 2) makes deck-building learnable — 717-d per-card deck vector, RL-controlled removal/upgrade, deck-quality reward — and the warm-transferred 717-d model is training continuously on the spot VM. Honest status: the deck inputs are integrating well (weight-ratio ~0.59 and climbing), but the noisy sampled training-floor hasn't broken from baseline yet — behavior change lags weight growth. A clean greedy fixed-seed eval is planned at ratio ~0.70 for the real read.</p>
+      <p class="lead">Across 150 fixed seeds, the deployed <strong>mainline_v3</strong> averages floor 26.1 with 9 wins (6.0%) &mdash; the project's first agents to <em>complete</em> runs, after 0 wins across ~21,700 live games and the entire simulator variant series. Each win came from a diagnosed, individually A/B-tested lever stacked on search-combat. The live-game PPO peak below is kept as the historical baseline the pivot left behind.</p>
       <div class="grid">
         <article class="card">
-          <h3>PPO 22k checkpoint (latest)</h3>
-          <p>200 eval games: 14.7 avg floor, 38.1% boss WR, 69.6% elite WR, 20% Act 2 reach. 8 runs past floor 30, best floor 46. Boss WR nearly doubled from prior eval.</p>
-          <a href="experiments/007_ppo_12k_boss_shaping.md">View report</a>
+          <h3>mainline_v3 (current)</h3>
+          <p>150 fixed seeds: <strong>26.1 avg floor, 9 wins (6.0%)</strong>. Tempo-targeted smithing &mdash; upgrade the highest-impact card, not a Strike &mdash; for the biggest single-lever floor gain, at no HP cost.</p>
+          <a href="experiments/011_tempo_targeted_smithing.md">View report</a>
         </article>
         <article class="card">
-          <h3>PPO 12k checkpoint (prior)</h3>
-          <p>200 eval games: 14.83 avg floor, 21.7% boss WR. Boss reward shaping for all bosses, BC anchor auto-tuned. Before heal reward fix.</p>
-          <a href="experiments/007_ppo_12k_boss_shaping.md">View report</a>
+          <h3>mainline_v2 (first winning agent)</h3>
+          <p>150 fixed seeds: 24.9 avg floor, 7 wins (4.7%). Search-combat + deck hygiene + AoE/draw role scorer + conservative smith &mdash; the project's first wins.</p>
+          <a href="experiments/010_first_winning_agent.md">View report</a>
         </article>
         <article class="card">
-          <h3>Heuristic baseline</h3>
-          <p>150 eval games: 15.78 average floor, 39% boss conversion, 26.0% Act 2 reach rate.</p>
-          <a href="experiments/003_fixed_seed_eval.md">View evaluation</a>
+          <h3>Live-game PPO (historical peak)</h3>
+          <p>200 eval games: 14.66 avg floor, 38.1% boss WR, 0 wins. The throughput-starved live-game plateau that motivated the headless-simulator pivot.</p>
+          <a href="experiments/008_ppo_19k_hp_urgency.md">View report</a>
         </article>
       </div>
     </section>
   </main>
 
   <footer>
-    AscensionAI is a public portfolio project by Justin Chan. The training stack runs on a live Slay the Spire install (locally or headless on a self-healing GCP spot VM); this site hosts the docs, reports, dashboard, and public-safe media.
+    AscensionAI is a public portfolio project by Justin Chan. Training now runs on a headless Slay the Spire C++ simulator (<code>sts_lightspeed</code>) on a self-healing GCP spot VM, with a live install kept as a transfer-eval oracle; this site hosts the docs, reports, dashboard, and public-safe media.
   </footer>
 </body>
 </html>
