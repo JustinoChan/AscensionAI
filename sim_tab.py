@@ -98,6 +98,39 @@ class SimExperimentsTab:
         self.queue_inner.pack(fill="x")
         self._queue_rows: dict[str, dict] = {}
 
+        # job queue (overnight chain + jobq)
+        jq = ttk.LabelFrame(f, text="  Job queue  (overnight chain + jobq; runs one job at a time in WSL)  ", padding=6)
+        jq.pack(fill="x", pady=(8, 0))
+        cols = ("src", "name", "state", "note")
+        self.jq_tree = ttk.Treeview(jq, columns=cols, show="headings", height=7)
+        for c, w in zip(cols, (90, 430, 80, 360)):
+            self.jq_tree.heading(c, text=c)
+            self.jq_tree.column(c, width=w, stretch=(c in ("name", "note")))
+        for stt, col in STATE_COLOR.items():
+            self.jq_tree.tag_configure(stt, foreground=col)
+        self.jq_tree.tag_configure("cancelled", foreground="#9e9e9e")
+        self.jq_tree.tag_configure("skipped", foreground="#9e9e9e")
+        self.jq_tree.tag_configure("todo", foreground="#9e9e9e")
+        self.jq_tree.pack(fill="x")
+        jb = ttk.Frame(jq)
+        jb.pack(fill="x", pady=(4, 0))
+        self.jq_preset = tk.StringVar(value="eval150_vs_K64")
+        self.jq_preset_box = ttk.Combobox(jb, textvariable=self.jq_preset, width=16, state="readonly",
+                                          values=["eval150", "eval150_vs_K64", "holdout150"])
+        self.jq_preset_box.pack(side="left")
+        ttk.Label(jb, text="arm:").pack(side="left", padx=(6, 0))
+        self.jq_arm = tk.StringVar(value="my_arm")
+        ttk.Entry(jb, textvariable=self.jq_arm, width=18).pack(side="left")
+        ttk.Label(jb, text="env:").pack(side="left", padx=(6, 0))
+        self.jq_env = tk.StringVar(value="HONEST=1 HONEST_CPP=1 HONEST_K=64")
+        ttk.Entry(jb, textvariable=self.jq_env, width=46).pack(side="left")
+        ttk.Button(jb, text="Append", command=self._jq_add).pack(side="left", padx=(6, 0))
+        for txt, act in (("Cancel", "cancel"), ("▲", "up"), ("▼", "down"), ("Retry", "retry")):
+            ttk.Button(jb, text=txt, width=7 if len(txt) > 2 else 3,
+                       command=lambda a=act: self._jq_act(a)).pack(side="left", padx=(4, 0))
+        self._jq_events_n = None
+        self._jq_ids = {}
+
         # per-run table
         runs = ttk.LabelFrame(f, text="  Runs  (click a row to tail its log; newest at the bottom)  ", padding=6)
         runs.pack(fill="x", pady=(8, 0))
@@ -310,6 +343,16 @@ class SimExperimentsTab:
                     self._q.put(("err", (p.stderr or "run_status failed").strip()[-200:]))
             except Exception as e:  # noqa: BLE001
                 self._q.put(("err", str(e)[-200:]))
+            try:
+                since = self._jq_events_n if self._jq_events_n is not None else -1
+                p = _wsl("cd ~/sts && python3 jobq.py dash %d" % max(0, since), timeout=30)
+                if p.returncode == 0 and p.stdout.strip():
+                    d = json.loads(p.stdout)
+                    if since < 0:            # first poll: don't replay old events as notifications
+                        d["events"] = []
+                    self._q.put(("jobq", d))
+            except Exception:  # noqa: BLE001
+                pass
             name = self._selected
             r = self._run(name) if name else None
             if r and r.get("log"):
@@ -330,6 +373,8 @@ class SimExperimentsTab:
                     self._apply(val)
                 elif kind == "err":
                     self.conn_var.set("WSL error: %s" % val)
+                elif kind == "jobq":
+                    self._apply_jobq(val)
                 elif kind == "log":
                     if self._selected is not None:
                         self._set_log(val)
@@ -342,6 +387,52 @@ class SimExperimentsTab:
             pass
         if not self._stop.is_set():
             self.frame.after(300, self._drain)
+
+    # ------------------------------------------------------------ job queue
+    def _apply_jobq(self, d):
+        sel = self.jq_tree.selection()
+        sel_key = self.jq_tree.item(sel[0], "values")[1] if sel else None
+        self.jq_tree.delete(*self.jq_tree.get_children())
+        self._jq_ids = {}
+        for j in d.get("overnight", []):
+            iid = self.jq_tree.insert("", "end", values=("overnight", j["name"], j["state"], j.get("note", "")),
+                                      tags=(j["state"],))
+            self._jq_ids[iid] = None
+        for j in d.get("jobs", []):
+            iid = self.jq_tree.insert("", "end", values=("jobq #%d" % j["id"], j["name"], j["state"],
+                                                         ("rc %s" % j["rc"]) if "rc" in j else j["cmd"][:80]),
+                                      tags=(j["state"],))
+            self._jq_ids[iid] = j["id"]
+            if sel_key == j["name"]:
+                self.jq_tree.selection_set(iid)
+        if d.get("presets"):
+            self.jq_preset_box.configure(values=d["presets"])
+        for ev in d.get("events", []):
+            if ev["state"] in ("done", "failed"):
+                _toast("AscensionAI job %s" % ev["state"], ev["name"])
+        self._jq_events_n = d.get("events_n", self._jq_events_n)
+
+    def _jq_selected_id(self):
+        sel = self.jq_tree.selection()
+        return self._jq_ids.get(sel[0]) if sel else None
+
+    def _jq_add(self):
+        arm, env, pre = self.jq_arm.get().strip(), self.jq_env.get().strip(), self.jq_preset.get()
+        if not arm or not env or " " in arm:
+            messagebox.showinfo("Append job", "Give an arm name (no spaces) and an env string.")
+            return
+        if not messagebox.askyesno("Append job", "Append to the job queue?\n\n%s  %s\n%s" % (pre, arm, env)):
+            return
+        self._bg("append job", "python3 jobq.py add-preset %s %s %s && ./overnight_watchdog.sh && python3 jobq.py list"
+                 % (_shq(pre), _shq(arm), _shq(env)))
+
+    def _jq_act(self, act):
+        jid = self._jq_selected_id()
+        if jid is None:
+            messagebox.showinfo("Job queue", "Select a jobq job first (overnight-chain jobs are fixed).")
+            return
+        cmd = "move %d %s" % (jid, act) if act in ("up", "down") else "%s %d" % (act, jid)
+        self._bg("job queue: %s" % cmd, "python3 jobq.py %s" % cmd)
 
     # ----------------------------------------------------------- actions
     def _launch(self):
@@ -453,6 +544,29 @@ def _bar_style(state):
 
 def _shq(s):
     return "'" + str(s).replace("'", "'\\''") + "'"
+
+
+_TOAST_PS = r"""
+$ErrorActionPreference='SilentlyContinue'
+[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
+$x = New-Object Windows.Data.Xml.Dom.XmlDocument
+$x.LoadXml("<toast><visual><binding template='ToastGeneric'><text>$env:T_TITLE</text><text>$env:T_MSG</text></binding></visual></toast>")
+$app = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe'
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($app).Show([Windows.UI.Notifications.ToastNotification]::new($x))
+"""
+
+
+def _toast(title, msg):
+    """Windows toast via the built-in WinRT API (nothing to install); silent no-op on failure."""
+    import os
+    clean = lambda s: str(s).replace("<", "(").replace(">", ")").replace("&", "+").replace('"', "'")[:200]
+    env = dict(os.environ, T_TITLE=clean(title), T_MSG=clean(msg))
+    try:
+        subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", _TOAST_PS],
+                         env=env, creationflags=_NOWIN)
+    except Exception:  # noqa: BLE001
+        pass
 
 
 if __name__ == "__main__":      # standalone: python sim_tab.py
