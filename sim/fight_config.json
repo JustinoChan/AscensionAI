@@ -1,0 +1,9 @@
+{
+  "tier_weights": {"MONSTER": 0.45, "ELITE": 0.30, "BOSS": 0.25},
+  "loss_oversample": 3.0,
+  "encounter_reroll_prob": 0.30,
+  "reroll_pools": {
+    "ELITE": ["GREMLIN_NOB", "LAGAVULIN", "THREE_SENTRIES"],
+    "BOSS": ["SLIME_BOSS", "THE_GUARDIAN", "HEXAGHOST"]
+  }
+}

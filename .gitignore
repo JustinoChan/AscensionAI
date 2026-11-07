@@ -65,3 +65,7 @@ temp/
 
 # Local docs
 roadmap.md
+
+# VM export archive (kept locally, too large for git)
+/2026-07-06.zip
+

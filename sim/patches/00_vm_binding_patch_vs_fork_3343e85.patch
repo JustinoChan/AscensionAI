@@ -1,0 +1,80 @@
+diff --git a/bindings/bindings-util.cpp b/bindings/bindings-util.cpp
+index f7b5307..c92538b 100644
+--- a/bindings/bindings-util.cpp
++++ b/bindings/bindings-util.cpp
+@@ -25,7 +25,9 @@ namespace sts {
+     }
+ 
+     int NNInterface::getCardIdx(CardId id, int upgradeCount) const {
+-        int rawIdx = cardEncodeMap[static_cast<int>(id)];
++        int _ci = static_cast<int>(id);
++        if (_ci < 0 || _ci >= static_cast<int>(cardEncodeMap.size())) return 0; // OOB-read guard
++        int rawIdx = cardEncodeMap[_ci];
+         if (rawIdx == -1) {
+             // std::cerr << "attempted to get encoding idx for invalid card: " << static_cast<int>(id) << std::endl;
+             return 0; // fallback to index 0 instead of crashing
+@@ -35,7 +37,7 @@ namespace sts {
+         if (upgradeCount > 0) {
+             idx += 1;
+         }
+-
++        if (idx < 0 || idx >= 220) return 0; // region-bounds guard (each card region is 220 wide)
+         return idx;
+     }
+ 
+@@ -56,8 +58,12 @@ namespace sts {
+ 
+         offset = 9; // Reset to match our defined layout if needed, but here it's fine
+ 
+-        int bossEncodeIdx = offset + bossEncodeMap.at(gc.boss);
+-        ret[bossEncodeIdx] = 1;
++        // robustness: gc.boss can be INVALID/unset early in a run; skip the
++        // boss one-hot instead of throwing (mirrors getCardIdx fallback).
++        auto bossIt = bossEncodeMap.find(gc.boss);
++        if (bossIt != bossEncodeMap.end()) {
++            ret[offset + bossIt->second] = 1;
++        }
+         offset += 10; // offset = 19
+ 
+         for (auto c : gc.deck.cards) {
+diff --git a/bindings/slaythespire.cpp b/bindings/slaythespire.cpp
+index abab71b..6b94780 100644
+--- a/bindings/slaythespire.cpp
++++ b/bindings/slaythespire.cpp
+@@ -119,14 +119,26 @@ PYBIND11_MODULE(slaythespire, m) {
+         .def_readwrite("max_hp", &Player::maxHp)
+         .def_readwrite("gold", &Player::gold)
+         .def_readwrite("energy", &Player::energy)
+-        .def_readwrite("block", &Player::block);
++        .def_readwrite("block", &Player::block)
++        .def("vulnerable", [](const Player &p){ return p.getStatusRuntime(PlayerStatus::VULNERABLE); })
++        .def("weak", [](const Player &p){ return p.getStatusRuntime(PlayerStatus::WEAK); })
++        .def("strength", [](const Player &p){ return p.getStatusRuntime(PlayerStatus::STRENGTH); });
+ 
+     pybind11::class_<Monster> monster(m, "Monster");
+     monster.def_readwrite("cur_hp", &Monster::curHp)
+         .def_readwrite("max_hp", &Monster::maxHp)
+         .def_readwrite("block", &Monster::block)
+         .def_readwrite("id", &Monster::id)
+-        .def("is_alive", &Monster::isAlive);
++        .def("is_alive", &Monster::isAlive)
++        .def("is_attacking", &Monster::isAttacking)
++        .def("intent_base_damage", [](const Monster &mon, const BattleContext &bc) {
++            if (!mon.isAttacking()) return std::make_pair(0, 0);
++            auto di = mon.getMoveBaseDamage(bc);
++            return std::make_pair(di.damage, di.attackCount);
++        })
++        .def("vulnerable", [](const Monster &mon){ return mon.getStatusInternal(MonsterStatus::VULNERABLE); })
++        .def("weak", [](const Monster &mon){ return mon.getStatusInternal(MonsterStatus::WEAK); })
++        .def("strength", [](const Monster &mon){ return mon.getStatusInternal(MonsterStatus::STRENGTH); });
+ 
+     pybind11::class_<MonsterGroup> monsterGroup(m, "MonsterGroup");
+     monsterGroup.def_readwrite("monsters_alive", &MonsterGroup::monstersAlive)
+@@ -142,6 +154,7 @@ PYBIND11_MODULE(slaythespire, m) {
+     pybind11::class_<BattleContext> battleContext(m, "BattleContext");
+     battleContext.def(pybind11::init<>())
+         .def("init", pybind11::overload_cast<const GameContext &>(&BattleContext::init))
++        .def("init", pybind11::overload_cast<const GameContext &, MonsterEncounter>(&BattleContext::init))
+         .def("exit_battle", &BattleContext::exitBattle)
+         .def("get_possible_actions", &search::Action::getAllActionsInState)
+         .def_readwrite("outcome", &BattleContext::outcome)

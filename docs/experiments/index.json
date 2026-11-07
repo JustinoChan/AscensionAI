@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "snapshot_date": "2026-05-27",
+  "snapshot_date": "2026-11-06",
   "commit": "f5d6790",
-  "notes": "Public summary generated from local logs and checkpoints. Raw logs, rollouts, and model files stay gitignored.",
+  "notes": "Public summary generated from local logs and checkpoints. Raw logs, rollouts, and model files stay gitignored. Runs from mainline_v2/v3 and the sim-era search used replay search that read the true seed; they carry search_honesty='clairvoyant'. Honest runs (014+) sample hidden information instead.",
   "runs": [
     {
       "run_id": "bc_baseline_20260512",
@@ -322,7 +322,7 @@
       "training_metrics": {
         "ppo_update_rows": 2429,
         "total_update_transitions": 2800000,
-        "last_500_average_floor": 14.40,
+        "last_500_average_floor": 14.4,
         "latest_approx_kl": 0.00455722,
         "latest_clip_fraction": 0.072049,
         "latest_normalized_entropy": 0.178639,
@@ -333,7 +333,7 @@
         "games": 200,
         "average_floor": 14.66,
         "best_floor": 46,
-        "average_reward": 9.60,
+        "average_reward": 9.6,
         "win_rate_percent": 0.0,
         "act2_reach_rate_percent": 20.0,
         "floor20_rate_percent": 19.5,
@@ -377,7 +377,8 @@
         "deck_override_avg_floor": 23.3,
         "capacity_probe_per_state_agreement_percent": 70
       },
-      "notes": "Variant series A-M on the headless simulator (Jun 10-14). Controls ruled out exploration (varA), capacity (varB), reward/deck shaping (varC/D/E); an observation-corruption bug had left early runs deck-blind. A fight-curriculum gym (varF/H/I/J) showed model-free PPO cannot escape the combat local optimum (fight win rates frozen at 72/94/56/44, explained variance ~0), while a value-replay buffer (varJ) fixed value learning without moving the policy. Train-time 1-ply search (varK) plays combat at boss 75-88%; a full-run eval that changed ONLY combat decisions drove avg floor 14.71->26.35, Act-2 27->83%, Act-3 0->14.6%, max floor 33->50 -- combat execution was the universal plateau. A search-free combat policy could not be trained to search level (distillation varK, DAgger varL, value-bootstrap varM, and an offline capacity sweep all capped; per-state agreement plateaus ~70% regardless of size). Deck-hygiene overrides layered on search-combat produced the project's first wins (3/48). See report for per-variant reasoning and stats."
+      "notes": "Variant series A-M on the headless simulator (Jun 10-14). Controls ruled out exploration (varA), capacity (varB), reward/deck shaping (varC/D/E); an observation-corruption bug had left early runs deck-blind. A fight-curriculum gym (varF/H/I/J) showed model-free PPO cannot escape the combat local optimum (fight win rates frozen at 72/94/56/44, explained variance ~0), while a value-replay buffer (varJ) fixed value learning without moving the policy. Train-time 1-ply search (varK) plays combat at boss 75-88%; a full-run eval that changed ONLY combat decisions drove avg floor 14.71->26.35, Act-2 27->83%, Act-3 0->14.6%, max floor 33->50 -- combat execution was the universal plateau. A search-free combat policy could not be trained to search level (distillation varK, DAgger varL, value-bootstrap varM, and an offline capacity sweep all capped; per-state agreement plateaus ~70% regardless of size). Deck-hygiene overrides layered on search-combat produced the project's first wins (3/48). See report for per-variant reasoning and stats.",
+      "search_honesty": "clairvoyant"
     },
     {
       "run_id": "mainline_v2_20260615",
@@ -403,7 +404,8 @@
         "deck_hygiene_floor_wins": "23.6 / 5",
         "mainline_v2_floor_wins": "24.9 / 7"
       },
-      "notes": "First winning agent in project history (0 wins prior across ~21,700 live games + the entire sim variant series). Built by a diagnose-first stack of macro levers on search-combat: deck hygiene (first wins), varN combat retrain on harvested Act-2/3 fights (Act-2 elite 59->67%), narrow AoE/draw role scorer (Act-2 AoE-zero 42->8%), conservative boss-aware smith (Act-2 upgrades 0.9->1.9, no HP cost). Ruled out by diagnostic: starter-purge, relic-buying, elite-gating, naive smithing. Each diagnosed lever stacked; macro now at ceiling. Next phase = stronger combat/search. See 010 report."
+      "notes": "First winning agent in project history (0 wins prior across ~21,700 live games + the entire sim variant series). Built by a diagnose-first stack of macro levers on search-combat: deck hygiene (first wins), varN combat retrain on harvested Act-2/3 fights (Act-2 elite 59->67%), narrow AoE/draw role scorer (Act-2 AoE-zero 42->8%), conservative boss-aware smith (Act-2 upgrades 0.9->1.9, no HP cost). Ruled out by diagnostic: starter-purge, relic-buying, elite-gating, naive smithing. Each diagnosed lever stacked; macro now at ceiling. Next phase = stronger combat/search. See 010 report.",
+      "search_honesty": "clairvoyant"
     },
     {
       "run_id": "mainline_v3_20260617",
@@ -433,7 +435,92 @@
         "act2_monster_deaths": "58 -> 65",
         "act2_monster_per_fight_winrate": "0.902 -> 0.896"
       },
-      "notes": "Diagnose-first phase that began targeting Act-2 monster deaths with surgical deeper search, then redirected twice. Recon: 88% of those deaths are 'lost on arrival' (entry HP median 28%), so death-turn search is futile. Deck-deficit pinpoint: losing decks are NOT damage-deficient (equal damage, more scaling/powers than decks that cleared Act 2) -- the only monotonic success-correlate is upgrades (winners 2.7 vs losers 1.8-1.0). A 450-event audit found the conservative smith upgraded a basic Strike/Defend 97% of the time. Fix = tempo-targeted smithing: same frequency + HP gates, but upgrade the highest-tempo card (premium attack > attack > block > AoE > draw/energy > scaling/power > filler) instead of the first card in deck order. A/B (only SMITH_TARGET differs): floor 24.87->26.06 (+1.19, largest single lever), wins 7->9, Act-1 deaths 32->28, boss-entry HP unchanged (no cost). Missed its named gate -- Act-2 monster deaths rose 58->65 -- but per-fight win% stayed flat (90.2->89.6): exposure (more runs reach Act 2), not a combat regression. Deployed as mainline_v3. Remaining wall = HP-attrition entering Act-2 monster chains (next phase). See 011 report."
+      "notes": "Diagnose-first phase that began targeting Act-2 monster deaths with surgical deeper search, then redirected twice. Recon: 88% of those deaths are 'lost on arrival' (entry HP median 28%), so death-turn search is futile. Deck-deficit pinpoint: losing decks are NOT damage-deficient (equal damage, more scaling/powers than decks that cleared Act 2) -- the only monotonic success-correlate is upgrades (winners 2.7 vs losers 1.8-1.0). A 450-event audit found the conservative smith upgraded a basic Strike/Defend 97% of the time. Fix = tempo-targeted smithing: same frequency + HP gates, but upgrade the highest-tempo card (premium attack > attack > block > AoE > draw/energy > scaling/power > filler) instead of the first card in deck order. A/B (only SMITH_TARGET differs): floor 24.87->26.06 (+1.19, largest single lever), wins 7->9, Act-1 deaths 32->28, boss-entry HP unchanged (no cost). Missed its named gate -- Act-2 monster deaths rose 58->65 -- but per-fight win% stayed flat (90.2->89.6): exposure (more runs reach Act 2), not a combat regression. Deployed as mainline_v3. Remaining wall = HP-attrition entering Act-2 monster chains (next phase). See 011 report.",
+      "search_honesty": "clairvoyant"
+    },
+    {
+      "run_id": "honest_search_20261106",
+      "report": "014_honest_search.md",
+      "search_honesty": "honest",
+      "model_path": "policy_varN.npz (combat) + policy_varE.npz (non-combat) + mainline_v3 macro stack",
+      "training_mode": "honest_search_eval",
+      "hyperparameters": {
+        "combat": "1-ply search, K determinized worlds per candidate (GameContext/BattleContext copy+determinize)",
+        "eval_seeds": 150
+      },
+      "evaluation": {
+        "games": 150,
+        "arms": {
+          "honest_K1": {
+            "average_floor": 17.05,
+            "wins": 0
+          },
+          "honest_K4": {
+            "average_floor": 21.13,
+            "wins": 1
+          },
+          "honest_K8": {
+            "average_floor": 22.41,
+            "wins": 1
+          },
+          "honest_K4_macro": {
+            "average_floor": 21.21,
+            "wins": 2
+          },
+          "honest_draft_teacher_K4_50_seeds": {
+            "average_floor": 22.42,
+            "wins": 0,
+            "games": 50
+          },
+          "clairvoyant_reference_mainline_v3": {
+            "average_floor": 26.06,
+            "wins": 9
+          },
+          "clairvoyant_reference_draft_teacher": {
+            "average_floor": 37.79,
+            "wins": 44
+          }
+        }
+      },
+      "notes": "Search may sample hidden information, never read it. Clairvoyance was worth ~4-9 floors and most wins; the honest baseline is K=8: 1 win, floor 22.41."
+    },
+    {
+      "run_id": "cpp_search_20261106",
+      "report": "015_cpp_search.md",
+      "search_honesty": "honest",
+      "model_path": "policy_varN.npz in C++ (CombatNet) + mainline_v3 macro stack",
+      "training_mode": "honest_native_search_eval",
+      "hyperparameters": {
+        "combat": "native batched AVX2 C++ rollouts (bit-identical to Python), ensemble MCTS, adaptive K",
+        "eval_seeds": 150
+      },
+      "evaluation": {
+        "games": 150,
+        "arms": {
+          "cpp_1ply_K8": {
+            "average_floor": 22.41,
+            "wins": 1,
+            "wall_secs": 187
+          },
+          "cpp_1ply_K32": {
+            "average_floor": 24.4,
+            "wins": 5
+          },
+          "adaptive_8_32_64": {
+            "average_floor": 24.18,
+            "wins": 4
+          },
+          "mcts_16x1000": {
+            "average_floor": 20.87,
+            "wins": 3
+          },
+          "hybrid_1ply_act1_mcts_act2plus": {
+            "average_floor": 24.26,
+            "wins": 5
+          }
+        }
+      },
+      "notes": "Phase 2 in progress. K=32 vs K=8 on the same seeds: +1.99 floors (bootstrap 95% CI +0.84..+3.12), wins 1 -> 5 (McNemar p=0.125)."
     }
   ]
 }

@@ -211,6 +211,22 @@
       font-size: 13px;
       font-weight: 400;
     }
+    .tag { display: inline-block; border-radius: 4px; padding: 0 6px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+    .tag.cv { background: #fdf0d2; color: var(--amber); }
+    .tag.hon { background: #dcf0e2; color: var(--green); }
+    .roadmap { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+    .phase { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
+    .phase h3 { margin: 0 0 6px; font-size: 15px; }
+    .phase p { margin: 0; color: var(--muted); font-size: 14px; }
+    .phase .st { float: right; font-size: 12px; font-weight: 700; }
+    .phase.done .st { color: var(--green); } .phase.now .st { color: var(--blue); } .phase.next .st { color: var(--muted); }
+    .phase.now { border-color: var(--blue); }
+    .table-wrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+    table.runs { border-collapse: collapse; width: 100%; font-size: 14px; }
+    table.runs th, table.runs td { padding: 7px 10px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+    table.runs td.num, table.runs th.num { text-align: right; }
+    table.runs tr.best td { background: #eef8f1; font-weight: 700; }
+    @media (max-width: 860px) { .roadmap { grid-template-columns: 1fr; } }
     footer {
       border-top: 1px solid var(--line);
       padding: 24px 28px 34px;
@@ -244,7 +260,7 @@
   <section class="hero">
     <div class="hero-content">
       <h1>Reinforcement learning for Slay the Spire</h1>
-      <p>AscensionAI is a from-scratch RL system for Ironclad that went from a live-game PPO plateau to the project's first <em>winning</em> agents on a headless C++ simulator &mdash; 1-ply replay-search combat plus a diagnose-first macro stack, every change A/B-tested at 150 fixed seeds.</p>
+      <p>AscensionAI is a from-scratch RL/search system for Ironclad on a headless C++ simulator. Its search now plays <strong>honestly</strong> &mdash; it samples what a player can't see instead of reading the seed &mdash; and the current best honest agent wins <strong>5 / 150</strong> fixed seeds (floor 24.4). Every change is A/B-tested on the same 150 seeds.</p>
       <div class="hero-actions">
         <a class="button primary" href="dashboard/">Open Dashboard</a>
         <a class="button" href="scripts.html">Read Script Guide</a>
@@ -256,13 +272,42 @@
   <main>
     <section class="section">
       <h2>Project Snapshot</h2>
-      <p class="lead">June 17, 2026: the deployed agent is <strong>mainline_v3</strong> on the headless <code>sts_lightspeed</code> simulator &mdash; <strong>1-ply replay-search combat plus a diagnose-first macro stack</strong> &mdash; averaging <strong>floor 26.1 with 9 wins / 150 fixed seeds (6.0%)</strong>, the project's first winning agents. This followed a June&nbsp;10 pivot off the throughput-starved live game, which had plateaued at ~14.7 floor and <strong>0 wins across ~21,700 games</strong>. A controlled variant series then showed combat <em>execution</em> &mdash; not reward, capacity, or deck-building &mdash; was the universal wall: holding everything else fixed and playing combat with search alone drove average floor 14.7&rarr;26.4. Wins followed from a stacked, individually A/B-tested set of non-combat levers.</p>
+      <p class="lead">November 2026: an audit found that every earlier search result &mdash; including mainline_v3's 9 wins and the draft teacher's 44 &mdash; came from search that <strong>replayed the true seed</strong>, so its rollouts knew the real draw order, enemy rolls and future rewards. Those numbers are now labelled <span class="tag cv">clairvoyant (seed-peeking)</span>. The search was rebuilt to <strong>sample hidden information instead of reading it</strong> (exact C++ state copies + determinization), which dropped the agent to <strong>1 win / floor 22.4</strong> &mdash; the honest baseline. A native batched C++ rollout engine (bit-identical to the Python search, ~11&times; faster per run) then made far more samples affordable: <strong>K=32 sampled worlds per decision reaches 5 wins / floor 24.4</strong>, the current best honest result.</p>
       <div class="metric-grid">
-        <div class="metric"><span>Avg floor (150 seeds)</span><strong>26.1</strong></div>
-        <div class="metric"><span>Wins / 150</span><strong>9 &middot; 6.0%</strong></div>
-        <div class="metric"><span>Combat boss WR (search)</span><strong>75&ndash;88%</strong></div>
-        <div class="metric"><span>Sim throughput</span><strong>~17k/hr</strong></div>
+        <div class="metric"><span>Best honest (K=32, 150 seeds)</span><strong>5 wins &middot; 24.4</strong></div>
+        <div class="metric"><span>Honest baseline (K=8)</span><strong>1 win &middot; 22.4</strong></div>
+        <div class="metric"><span>Clairvoyant mainline_v3 (reference)</span><strong>9 wins &middot; 26.1</strong></div>
+        <div class="metric"><span>150-seed eval, honest K=8</span><strong>35 min &rarr; 3 min</strong></div>
       </div>
+    </section>
+
+    <section class="section">
+      <h2>Roadmap</h2>
+      <p class="lead">Honest search is now the project's standard: any search may sample hidden information, never read it. Each phase ends in a 150-seed gate against the previous honest baseline.</p>
+      <div class="roadmap">
+        <div class="phase done"><span class="st">done</span><h3>Phase 0 &mdash; Reproduce</h3><p>Rebuilt the sim on a WSL2 laptop (no sudo); mainline_v3 reproduced byte-for-byte on all 150 seeds.</p></div>
+        <div class="phase done"><span class="st">done</span><h3>Phase 1 &mdash; Honest search</h3><p>C++ <code>copy()</code>/<code>determinize()</code>; honest 1-ply combat and draft teacher. Baseline: 1 win, floor 22.4 (<a href="experiments/014_honest_search.md">014</a>).</p></div>
+        <div class="phase now"><span class="st">in progress</span><h3>Phase 2 &mdash; Native C++ search</h3><p>Batched AVX2 rollouts (bit-identical, ~37&times;/rollout), ensemble MCTS, adaptive samples, potion conservation. Best so far K=32: 5 wins, floor 24.4.</p></div>
+        <div class="phase next"><span class="st">next</span><h3>Phases 3&ndash;7</h3><p>Stronger honest combat (learned value / deeper search where it matters), honest relabelling of drafting data, then macro and full-run training on honest targets.</p></div>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Honest Sim Runs</h2>
+      <p class="lead">Every 150-seed run from the results ledger (<a href="experiments/sim_runs.json">sim_runs.json</a>). Same seeds for every row. Rows marked <span class="tag cv">clairvoyant</span> replayed the true seed and are references, not achievable play.</p>
+      <div class="table-wrap"><table class="runs" id="simRuns"><thead><tr><th>Run</th><th class="num">Wins</th><th class="num">Avg floor</th><th class="num">Act 2 / 3</th><th class="num">s / seed</th><th>Setting</th></tr></thead><tbody><tr><td colspan="6">loading&hellip;</td></tr></tbody></table></div>
+      <script>
+        fetch("experiments/sim_runs.json").then(r => r.json()).then(d => {
+          const runs = d.runs.filter(r => r.seeds >= 150 || r.clairvoyant);
+          const best = runs.filter(r => !r.clairvoyant).reduce((a, b) => (!a || b.avg_floor > a.avg_floor) ? b : a, null);
+          const esc = s => String(s == null ? "" : s).replace(/[&<>]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;"}[c]));
+          document.querySelector("#simRuns tbody").innerHTML = runs.map(r =>
+            `<tr class="${r === best ? "best" : ""}"><td>${esc(r.name)} ${r.clairvoyant ? '<span class="tag cv">clairvoyant</span>' : '<span class="tag hon">honest</span>'}</td>` +
+            `<td class="num">${r.wins}/${r.seeds}</td><td class="num">${r.avg_floor.toFixed(2)}</td>` +
+            `<td class="num">${r.reached_act2} / ${r.reached_act3}</td><td class="num">${r.secs_per_seed_mean ?? "&ndash;"}</td>` +
+            `<td>${esc(r.description)}</td></tr>`).join("");
+        }).catch(() => { document.querySelector("#simRuns tbody").innerHTML = '<tr><td colspan="6">sim_runs.json not available</td></tr>'; });
+      </script>
     </section>
 
     <section class="section">
@@ -279,8 +324,8 @@
           <a href="docs.html">Open docs</a>
         </article>
         <article class="card">
-          <h3>Search-Combat Breakthrough</h3>
-          <p>A 1-ply replay search plays combat far better than any learned feed-forward policy could (boss 75&ndash;88% vs 44%). Holding drafting/pathing fixed and replacing only combat decisions nearly doubled run depth &mdash; combat was the universal wall.</p>
+          <h3>Search-Combat Breakthrough <span class="tag cv">clairvoyant</span></h3>
+          <p>A 1-ply replay search plays combat far better than any learned feed-forward policy could (boss 75&ndash;88% vs 44%) &mdash; later found to be partly seed-peeking (see 014). Holding drafting/pathing fixed and replacing only combat decisions nearly doubled run depth &mdash; combat was the universal wall.</p>
           <a href="experiments/009_simulator_variants.md">Read the variant series</a>
         </article>
         <article class="card">
@@ -329,16 +374,26 @@
 
     <section class="section">
       <h2>Current Results</h2>
-      <p class="lead">Across 150 fixed seeds, the deployed <strong>mainline_v3</strong> averages floor 26.1 with 9 wins (6.0%) &mdash; the project's first agents to <em>complete</em> runs, after 0 wins across ~21,700 live games and the entire simulator variant series. Each win came from a diagnosed, individually A/B-tested lever stacked on search-combat. The live-game PPO peak below is kept as the historical baseline the pivot left behind.</p>
+      <p class="lead">The current best <strong>honest</strong> agent is mainline_v3's macro stack with honest combat search at K=32 sampled worlds per decision: <strong>5 wins / 150, floor 24.4</strong>. The earlier mainline results are kept below as <span class="tag cv">clairvoyant (seed-peeking)</span> references; their macro levers (deck hygiene, role scorer, tempo smithing) carry over unchanged.</p>
       <div class="grid">
         <article class="card">
-          <h3>mainline_v3 (current)</h3>
-          <p>150 fixed seeds: <strong>26.1 avg floor, 9 wins (6.0%)</strong>. Tempo-targeted smithing &mdash; upgrade the highest-impact card, not a Strike &mdash; for the biggest single-lever floor gain, at no HP cost.</p>
+          <h3>Honest K=32 (current best) <span class="tag hon">honest</span></h3>
+          <p>150 fixed seeds: <strong>24.4 avg floor, 5 wins</strong>, vs the honest K=8 baseline 22.4 / 1 (paired floor gain +2.0, 95% CI +0.8&ndash;+3.1). Native batched C++ rollouts make 32 samples per decision cheap.</p>
+          <a href="experiments/015_cpp_search.md">View report</a>
+        </article>
+        <article class="card">
+          <h3>Honest search (014) <span class="tag hon">honest</span></h3>
+          <p>Removing seed-peeking costs ~4&ndash;9 floors: mainline_v3 drops to 17.1 (K=1) &rarr; 22.4 (K=8). The clairvoyant draft teacher's 44/150 falls to 0/50 when made honest.</p>
+          <a href="experiments/014_honest_search.md">View report</a>
+        </article>
+        <article class="card">
+          <h3>mainline_v3 <span class="tag cv">clairvoyant</span></h3>
+          <p>150 fixed seeds: 26.1 avg floor, 9 wins (6.0%) &mdash; with replay search that read the true seed. Tempo-targeted smithing was its biggest single macro lever, at no HP cost.</p>
           <a href="experiments/011_tempo_targeted_smithing.md">View report</a>
         </article>
         <article class="card">
-          <h3>mainline_v2 (first winning agent)</h3>
-          <p>150 fixed seeds: 24.9 avg floor, 7 wins (4.7%). Search-combat + deck hygiene + AoE/draw role scorer + conservative smith &mdash; the project's first wins.</p>
+          <h3>mainline_v2 <span class="tag cv">clairvoyant</span></h3>
+          <p>150 fixed seeds: 24.9 avg floor, 7 wins (4.7%). Search-combat + deck hygiene + AoE/draw role scorer + conservative smith.</p>
           <a href="experiments/010_first_winning_agent.md">View report</a>
         </article>
         <article class="card">
@@ -351,7 +406,7 @@
   </main>
 
   <footer>
-    AscensionAI is a public portfolio project by Justin Chan. Training now runs on a headless Slay the Spire C++ simulator (<code>sts_lightspeed</code>) on a self-healing GCP spot VM, with a live install kept as a transfer-eval oracle; this site hosts the docs, reports, dashboard, and public-safe media.
+    AscensionAI is a public portfolio project by Justin Chan. Experiments run on a headless Slay the Spire C++ simulator (<code>sts_lightspeed</code>) under WSL2 on a local workstation (the GCP VM was retired in July 2026), with a live install kept as a transfer-eval oracle; the sim code is in <a href="https://github.com/JustinoChan/AscensionAI/tree/main/sim">sim/</a>. This site hosts the docs, reports, dashboard, and public-safe media.
   </footer>
 </body>
 </html>

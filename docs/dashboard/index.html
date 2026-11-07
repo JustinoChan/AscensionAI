@@ -179,20 +179,37 @@
 
   <header class="dashboard-header">
     <h1>AscensionAI Results Dashboard</h1>
-    <p>Tracks AscensionAI from the live-game PPO era to the current headless-simulator agent. The headline reflects the deployed <strong>mainline_v3</strong> (search-combat + a diagnosed macro stack on the <code>sts_lightspeed</code> simulator). The charts and tables further down are the <strong>historical live-game PPO training era</strong> (through ~19.5k games), which plateaued at ~14.7 floor and motivated the June&nbsp;10 pivot to the simulator. Load local CSV exports to chart your own runs.</p>
+    <p>Tracks AscensionAI from the live-game PPO era to the current headless-simulator agent. The headline reflects the best <strong>honest</strong> agent (search samples hidden information instead of reading the seed; see <a href="../experiments/014_honest_search.md">014</a>). Earlier search results, including mainline_v3, are kept as <strong>clairvoyant (seed-peeking)</strong> references. The charts and tables further down are the <strong>historical live-game PPO training era</strong> (through ~19.5k games), which plateaued at ~14.7 floor and motivated the June&nbsp;10 pivot to the simulator. Load local CSV exports to chart your own runs.</p>
   </header>
 
   <main>
     <div class="toolbar">
       <label class="upload" for="csvInput">Load CSV files</label>
       <input id="csvInput" type="file" accept=".csv" multiple>
-      <span id="status" class="note">Current deployed agent (Jun 17) = <strong>mainline_v3</strong> on the headless <code>sts_lightspeed</code> simulator: 1-ply replay-search combat + a diagnose-first macro stack (deck hygiene, AoE/draw role scorer, conservative + tempo-targeted smith) &mdash; <strong>avg floor 26.1, 9 wins / 150 fixed seeds (6.0%)</strong>. The cards above summarize it; the stage-progression panel shows how it was built. The charts and the Fixed-Seed / Run-Metadata tables below are the <strong>historical live-game PPO era</strong> (585-d &rarr; 717-d models, May&ndash;June, plateaued at ~14.7 floor / 0 wins) kept for the record. Load <code>training_stats.csv</code>, <code>bc_train_stats.csv</code>, and <code>eval_stats.csv</code> to chart local live-game runs.</span>
+      <span id="status" class="note">Best honest agent (Nov 6) = mainline_v3's macro stack with <strong>honest combat search, K=32 sampled worlds per decision</strong> &mdash; <strong>avg floor 24.4, 5 wins / 150 fixed seeds</strong> (honest baseline K=8: 22.4 / 1). The Honest Sim Runs table lists every 150-seed run; the mainline stage panel below is the clairvoyant (seed-peeking) history. The charts and the Fixed-Seed / Run-Metadata tables below are the <strong>historical live-game PPO era</strong> (585-d &rarr; 717-d models, May&ndash;June, plateaued at ~14.7 floor / 0 wins) kept for the record. Load <code>training_stats.csv</code>, <code>bc_train_stats.csv</code>, and <code>eval_stats.csv</code> to chart local live-game runs.</span>
     </div>
 
     <section class="grid" id="cards"></section>
 
     <section class="table-panel">
-      <h2>Current Agent &mdash; mainline_v3 (headless simulator)</h2>
+      <h2>Honest Sim Runs (150 fixed seeds)</h2>
+      <p style="color:#5d6875; margin:0 0 12px;">From the results ledger (<a href="../experiments/sim_runs.json">sim_runs.json</a>); every row uses the same seeds. <em>Clairvoyant</em> rows replayed the true seed and are references only.</p>
+      <table id="honestRuns"><thead><tr><th>Run</th><th>Wins</th><th>Avg floor</th><th>Act 2 / 3</th><th>s / seed</th><th>Setting</th></tr></thead><tbody><tr><td colspan="6">loading&hellip;</td></tr></tbody></table>
+      <script>
+        fetch("../experiments/sim_runs.json").then(r => r.json()).then(d => {
+          const esc = s => String(s == null ? "" : s).replace(/[&<>]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;"}[c]));
+          const runs = d.runs.filter(r => r.seeds >= 150 || r.clairvoyant);
+          const best = runs.filter(r => !r.clairvoyant).reduce((a, b) => (!a || b.avg_floor > a.avg_floor) ? b : a, null);
+          document.querySelector("#honestRuns tbody").innerHTML = runs.map(r =>
+            `<tr${r === best ? ' style="background:#d4edda;font-weight:700"' : (r.clairvoyant ? ' style="background:#fdf6e3"' : "")}>` +
+            `<td>${esc(r.name)}${r.clairvoyant ? " (clairvoyant)" : ""}</td><td>${r.wins}</td><td>${r.avg_floor.toFixed(2)}</td>` +
+            `<td>${r.reached_act2} / ${r.reached_act3}</td><td>${r.secs_per_seed_mean ?? "&ndash;"}</td><td>${esc(r.description)}</td></tr>`).join("");
+        }).catch(() => { document.querySelector("#honestRuns tbody").innerHTML = '<tr><td colspan="6">sim_runs.json not available</td></tr>'; });
+      </script>
+    </section>
+
+    <section class="table-panel">
+      <h2>mainline_v3 build history &mdash; clairvoyant (seed-peeking) search</h2>
       <p style="color:#5d6875; margin:0 0 12px;">
         The deployed agent plays on the headless <code>sts_lightspeed</code> simulator: <strong>combat by 1-ply replay search</strong> (each candidate action rolled to the end of the fight) layered with a <strong>diagnose-first macro stack</strong> for non-combat decisions. It was built one attributable lever at a time, each A/B-tested at 150 fixed seeds. Full reasoning in the <a href="../experiments/">Experiments</a> reports (009&ndash;011).
       </p>
@@ -607,15 +624,15 @@
     // Current deployed agent (headless-simulator era). The hero cards reflect
     // this; the snapshot above is the historical live-game PPO era.
     const CURRENT = {
-      agent: "mainline_v3",
-      era: "headless sts_lightspeed sim",
+      agent: "honest K=32",
+      era: "honest search &middot; headless sim",
       evalSeeds: 150,
-      avgFloor: 26.06,
-      wins: 9,
-      winPct: 6.0,
-      act2ReachPct: 81.3,
-      combat: "1-ply replay search",
-      updated: "2026-06-17"
+      avgFloor: 24.40,
+      wins: 5,
+      winPct: 3.3,
+      act2ReachPct: 76.7,
+      combat: "1-ply, 32 sampled worlds",
+      updated: "2026-11-06"
     };
 
     let state = structuredClone(snapshot);
@@ -690,13 +707,13 @@
     // historical live-PPO snapshot/CSV data charted below.
     function renderCards() {
       const cards = [
-        ["Deployed agent", CURRENT.agent, CURRENT.era],
-        ["Avg floor", fmt(CURRENT.avgFloor), `${CURRENT.evalSeeds} fixed seeds &middot; &uarr; from ~14.7 plateau`],
-        ["Wins", `${CURRENT.wins} / ${CURRENT.evalSeeds}`, `${fmt(CURRENT.winPct, 1)}% &mdash; first winning agents`],
-        ["Act-2 reach", `${fmt(CURRENT.act2ReachPct, 0)}%`, "vs ~27% before search-combat"],
-        ["Combat", CURRENT.combat, "boss 75&ndash;88% vs 44% feed-forward"],
-        ["Method", "diagnose-first", "one lever, 150-seed A/B"],
-        ["Sim throughput", "~17k games/hr", "~190&times; the live game"],
+        ["Best honest agent", CURRENT.agent, CURRENT.era],
+        ["Avg floor", fmt(CURRENT.avgFloor), `${CURRENT.evalSeeds} fixed seeds &middot; honest baseline 22.41`],
+        ["Wins", `${CURRENT.wins} / ${CURRENT.evalSeeds}`, `${fmt(CURRENT.winPct, 1)}% &middot; honest baseline 1 / 150`],
+        ["Act-2 reach", `${fmt(CURRENT.act2ReachPct, 0)}%`, "honest baseline 68%"],
+        ["Combat", CURRENT.combat, "samples hidden info, never reads it"],
+        ["Clairvoyant ref", "9 / 150 &middot; 26.06", "mainline_v3 with seed-peeking search"],
+        ["Search engine", "native C++", "batched AVX2, bit-identical to Python"],
         ["Updated", CURRENT.updated, "live-PPO history charted below"]
       ];
       document.getElementById("cards").innerHTML = cards.map(([label, value, sub]) => `

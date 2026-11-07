@@ -1,0 +1,671 @@
+diff --git .gitignore .gitignore
+index 3162eac..b793909 100644
+--- .gitignore
++++ .gitignore
+@@ -1,9 +1,18 @@
+-/cmake-build-*/
+-/files/
+-/.idea/
++.venv/
+ build/
++*.egg-info/
+ __pycache__/
+ *.pyc
+ *.so
+-*.egg-info/
+-gym_sts_lightspeed.egg-info/
++sim_logs/
++ab_out_*/
++*.nohup
++# large data: excluded (backed up in vm_archive zip)
++*.jsonl
++*.npz
++*.bak
++*.act1.bak
++# deployed models + small draft-value nets are tracked
++!policy_varN.npz
++!policy_varE.npz
++!draft_v*.npz
+diff --git bindings/slaythespire.cpp bindings/slaythespire.cpp
+index 6b94780..9b9acc2 100644
+--- bindings/slaythespire.cpp
++++ bindings/slaythespire.cpp
+@@ -6,6 +6,9 @@
+ #include <pybind11/stl.h>
+ #include <pybind11/stl_bind.h>
+ #include <pybind11/functional.h>
++#include <pybind11/numpy.h>
++#include <random>
++#include <cmath>
+ 
+ #include <sstream>
+ #include <algorithm>
+@@ -28,6 +31,474 @@
+ 
+ using namespace sts;
+ 
++// ---------------------------------------------------------------------------
++// HONEST search support: exact copies + determinization of hidden information.
++// copy()            -> independent deep copy (GameContext also deep-copies Map,
++//                      which is held by shared_ptr and mutated in place on act
++//                      transitions).
++// determinize(s)    -> on a copy, resample everything the player cannot see,
++//                      keeping all visible state unchanged.
++// ---------------------------------------------------------------------------
++namespace sts { namespace honest {
++
++static inline std::uint64_t splitmix64(std::uint64_t &x) {
++    std::uint64_t z = (x += 0x9E3779B97F4A7C15ULL);
++    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
++    z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
++    return z ^ (z >> 31);
++}
++
++static inline void reseed(Random &r, std::uint64_t &st, bool keepCounter=true) {
++    const int c = r.counter;
++    r = Random(splitmix64(st));
++    if (keepCounter) { r.setCounter(c); }
++}
++
++static GameContext copyGame(const GameContext &gc) {
++    GameContext c(gc);
++    if (gc.map) { c.map = std::make_shared<Map>(*gc.map); }
++    return c;
++}
++
++static void determinizeGame(GameContext &gc, std::uint64_t s) {
++    std::uint64_t st = s ^ 0xA5A5A5A55A5A5A5AULL;
++    // Per-floor / per-battle RNGs and future-act maps+bosses are all derived
++    // from gc.seed, so the hidden seed itself is replaced.
++    gc.seed = splitmix64(st);
++    reseed(gc.aiRng, st);        reseed(gc.cardRandomRng, st);
++    reseed(gc.cardRng, st);      reseed(gc.eventRng, st);
++    reseed(gc.mathUtilRng, st);  reseed(gc.merchantRng, st);
++    reseed(gc.miscRng, st);      reseed(gc.monsterHpRng, st);
++    reseed(gc.monsterRng, st);   reseed(gc.neowRng, st);
++    reseed(gc.potionRng, st);    reseed(gc.relicRng, st);
++    reseed(gc.shuffleRng, st);   reseed(gc.treasureRng, st);
++
++    // Pre-generated hidden queues: keep the already-consumed prefix, resample
++    // the unseen remainder with the same generators/constraints the game uses.
++    if (gc.act >= 1 && gc.act <= 3) {
++        const int a = gc.act - 1;
++        const int weakN = gc.act == 1 ? 3 : 2;
++        const int off = std::min<int>(gc.monsterListOffset, gc.monsterList.size());
++        const int oldSize = gc.monsterList.size();
++        if (off < oldSize) {
++            fixed_list<MonsterEncounter, 16> prefix;
++            for (int i = 0; i < off; ++i) { prefix.push_back(gc.monsterList[i]); }
++            gc.monsterList = prefix;
++            const bool fullGen = oldSize == weakN + 13;
++            if (fullGen) {
++                const int remWeak = weakN - off;
++                if (remWeak > 0) {
++                    gc.populateMonsterList(MonsterEncounterPool::weakEnemies[a], MonsterEncounterPool::weakWeights[a],
++                                           MonsterEncounterPool::weakCount[a], remWeak);
++                }
++                if (off <= weakN && !gc.monsterList.empty()) {
++                    gc.populateFirstStrongEnemy(MonsterEncounterPool::strongEnemies[a], MonsterEncounterPool::strongWeights[a],
++                                                MonsterEncounterPool::strongCount[a]);
++                }
++            }
++            const int remStrong = oldSize - static_cast<int>(gc.monsterList.size());
++            if (remStrong > 0) {
++                gc.populateMonsterList(MonsterEncounterPool::strongEnemies[a], MonsterEncounterPool::strongWeights[a],
++                                       MonsterEncounterPool::strongCount[a], remStrong);
++            }
++        }
++        const int eoff = std::min<int>(gc.eliteMonsterListOffset, gc.eliteMonsterList.size());
++        const int eSize = gc.eliteMonsterList.size();
++        if (eoff < eSize) {
++            fixed_list<MonsterEncounter, 10> eprefix;
++            for (int i = 0; i < eoff; ++i) { eprefix.push_back(gc.eliteMonsterList[i]); }
++            gc.eliteMonsterList = eprefix;
++            while (static_cast<int>(gc.eliteMonsterList.size()) < eSize) {
++                float roll = gc.monsterRng.random();
++                int idx = roll < 1.0f/3 ? 0 : (roll < 2.0f/3 ? 1 : 2);
++                auto toAdd = MonsterEncounterPool::elites[a][idx];
++                if (gc.eliteMonsterList.empty() || toAdd != gc.eliteMonsterList.back()) {
++                    gc.eliteMonsterList.push_back(toAdd);
++                }
++            }
++        }
++    }
++    // Relic pools are consumed in order (front for rewards, back for shops):
++    // their order is hidden, so reshuffle the remaining pools.
++    java::Collections::shuffle(gc.commonRelicPool.begin(), gc.commonRelicPool.end(), java::Random(gc.relicRng.nextLong()));
++    java::Collections::shuffle(gc.uncommonRelicPool.begin(), gc.uncommonRelicPool.end(), java::Random(gc.relicRng.nextLong()));
++    java::Collections::shuffle(gc.rareRelicPool.begin(), gc.rareRelicPool.end(), java::Random(gc.relicRng.nextLong()));
++    java::Collections::shuffle(gc.shopRelicPool.begin(), gc.shopRelicPool.end(), java::Random(gc.relicRng.nextLong()));
++    java::Collections::shuffle(gc.bossRelicPool.begin(), gc.bossRelicPool.end(), java::Random(gc.relicRng.nextLong()));
++    // Event/shrine lists are sampled through eventRng (reseeded above); their
++    // membership is public game knowledge, so they are left as-is.
++}
++
++static void determinizeBattle(BattleContext &bc, std::uint64_t s) {
++    std::uint64_t st = s ^ 0x3C3C3C3CC3C3C3C3ULL;
++    bc.seed = splitmix64(st);
++    reseed(bc.aiRng, st);        reseed(bc.cardRandomRng, st);
++    reseed(bc.miscRng, st);      reseed(bc.monsterHpRng, st);
++    reseed(bc.potionRng, st);    reseed(bc.shuffleRng, st);
++    // Draw-pile order is hidden: Fisher-Yates over the current draw pile.
++    auto &dp = bc.cards.drawPile;
++    const int n = dp.size();
++    for (int i = n - 1; i > 0; --i) {
++        int j = static_cast<int>(splitmix64(st) % static_cast<std::uint64_t>(i + 1));
++        std::swap(dp[i], dp[j]);
++    }
++}
++
++}} // namespace sts::honest
++
++// honest_rollout
++// ---------------------------------------------------------------------------
++// Native honest rollouts (Phase 2). Mirrors honest.py _hload + _hrollout_q:
++//   copy(gc) -> determinize(det); copy(bc) -> determinize(det*PHI+1);
++//   play candidate, then a policy to battle end; score = discounted dense
++//   reward (player HP delta + 0.5 * enemy HP dealt) + terminal +-50.
++// Policies: 0 = varN combat MLP greedy (obs1200/maxima ++ combat_block(35)),
++//           1 = uniform random legal action.
++// ---------------------------------------------------------------------------
++namespace sts { namespace honest {
++
++static inline float gelu_f(float x) {
++    return 0.5f * x * (1.0f + std::tanh(0.7978845608f * (x + 0.044715f * x * x * x)));
++}
++
++struct CombatNet {
++    int in = 0;
++    std::vector<int> dims;                      // out dims of each layer (3 hidden + pi)
++    std::vector<std::vector<float>> W, b;       // row-major [out][in]
++    std::vector<float> maxima;                  // 1200, already max(.,1)
++
++    int greedy(const std::vector<float> &x, int nlegal) const {
++        std::vector<float> h(x), nh;
++        for (std::size_t l = 0; l < W.size(); ++l) {
++            const int o = dims[l], i = static_cast<int>(h.size());
++            nh.assign(o, 0.0f);
++            const float *w = W[l].data();
++            for (int r = 0; r < o; ++r) {
++                float s = 0.0f;
++                const float *wr = w + static_cast<std::size_t>(r) * i;
++                for (int c = 0; c < i; ++c) s += wr[c] * h[c];
++                s += b[l][r];
++                nh[r] = (l + 1 < W.size()) ? gelu_f(s) : s;
++            }
++            h.swap(nh);
++        }
++        int best = 0; float bv = -1e30f;
++        const int n = std::min(nlegal, static_cast<int>(h.size()));
++        for (int a = 0; a < n; ++a) if (h[a] > bv) { bv = h[a]; best = a; }
++        if (n <= 0) best = 0;
++        return best;
++    }
++};
++
++static int adjPerHit(int base, int str, int weak, int vuln) {
++    double d = base + str;
++    if (weak > 0) d = static_cast<int>(d * 0.75);
++    if (vuln > 0) d = static_cast<int>(d * 1.5);
++    return std::max(0, static_cast<int>(d));
++}
++
++static void buildCombatBlock(const BattleContext &bc, float *cb);
++
++// Python parity: FightEnv._get_observation falls back to the LAST good obs when
++// getObservation throws; combat_block returns all zeros on any exception.
++static void buildObs(const CombatNet &net, const GameContext &gc, const BattleContext &bc, std::vector<float> &x,
++                     std::vector<float> *lastObs = nullptr) {
++    x.assign(1235, 0.0f);
++    try {
++        auto o = NNInterface::getInstance()->getObservation(gc, &bc);
++        for (int i = 0; i < 1200; ++i) x[i] = static_cast<float>(o[i]) / net.maxima[i];
++        if (lastObs) lastObs->assign(x.begin(), x.begin() + 1200);
++    } catch (const std::exception &) {
++        if (lastObs && lastObs->size() == 1200) std::copy(lastObs->begin(), lastObs->end(), x.begin());
++    }
++    float *cb = x.data() + 1200;
++    try {
++        buildCombatBlock(bc, cb);
++    } catch (const std::exception &) {
++        std::fill(cb, cb + 35, 0.0f);
++    }
++}
++
++static void buildCombatBlock(const BattleContext &bc, float *cb) {
++    const auto &p = bc.player;
++    const int pv = p.getStatusRuntime(PlayerStatus::VULNERABLE);
++    const int pw = p.getStatusRuntime(PlayerStatus::WEAK);
++    const int ps = p.getStatusRuntime(PlayerStatus::STRENGTH);
++    int totalRaw = 0;
++    const int nm = std::min(5, static_cast<int>(bc.monsters.monsterCount));
++    for (int e = 0; e < nm; ++e) {
++        const Monster &m = bc.monsters.arr[e];
++        if (!m.isAlive()) continue;
++        int base = 0, hits = 0;
++        if (m.isAttacking()) { auto di = m.getMoveBaseDamage(bc); base = di.damage; hits = di.attackCount; }
++        const int es = m.getStatusInternal(MonsterStatus::STRENGTH);
++        const int ew = m.getStatusInternal(MonsterStatus::WEAK);
++        const int ev = m.getStatusInternal(MonsterStatus::VULNERABLE);
++        const int te = adjPerHit(base, es, ew, pv) * hits;
++        totalRaw += te;
++        const int bb = e * 6;
++        cb[bb + 0] = m.isAttacking() ? 1.0f : 0.0f;
++        cb[bb + 1] = static_cast<float>(std::min(te / 40.0, 2.0));
++        cb[bb + 2] = static_cast<float>(hits / 8.0);
++        cb[bb + 3] = static_cast<float>(ev / 10.0);
++        cb[bb + 4] = static_cast<float>(ew / 10.0);
++        cb[bb + 5] = static_cast<float>(es / 10.0);
++    }
++    cb[30] = static_cast<float>(pv / 10.0);
++    cb[31] = static_cast<float>(pw / 10.0);
++    cb[32] = static_cast<float>(ps / 10.0);
++    cb[33] = static_cast<float>(std::min(totalRaw / 40.0, 2.0));
++    cb[34] = static_cast<float>(std::min(std::max(0, totalRaw - p.block) / 40.0, 2.0));
++}
++
++static int enemyHp(const BattleContext &bc) {
++    int s = 0;
++    for (int i = 0; i < bc.monsters.monsterCount; ++i) {
++        const auto &m = bc.monsters.arr[i];
++        if (m.isAlive()) s += m.curHp;
++    }
++    return s;
++}
++
++// one rollout from (gc0, bc0) on sampled world `det` (det==0 and exact==true -> no determinization)
++static double rolloutOne(const GameContext &gc0, const BattleContext &bc0, int cand, std::uint64_t det, bool exact,
++                         const CombatNet *net, int policy, double gamma, int cap, std::uint64_t *steps_out) {
++    GameContext g = copyGame(gc0);
++    BattleContext bc(bc0);
++    if (!exact) {
++        determinizeGame(g, det);
++        determinizeBattle(bc, det * 0x9E3779B97F4A7C15ULL + 1ULL);
++    }
++    std::mt19937_64 rng(det ^ 0xD1B54A32D192ED03ULL);
++    bool inCombat = true;
++    int lastHp = bc.player.curHp;
++    int lastEnemy = enemyHp(bc);
++    double G = 0.0, disc = 1.0;
++    std::vector<float> x;
++    auto stepFn = [&](int idx, bool &done, double &tb) -> double {
++        double r = 0.0;
++        auto acts = search::Action::getAllActionsInState(bc);
++        if (acts.empty()) { done = false; tb = 0.0; return 0.0; }
++        if (idx >= static_cast<int>(acts.size())) { r = -1.0; idx = 0; }
++        acts[idx].execute(bc);
++        if (bc.outcome != Outcome::UNDECIDED) {
++            bc.exitBattle(g);
++            inCombat = false;
++        }
++        const int cur = inCombat ? bc.player.curHp : g.curHp;
++        r += cur - lastHp;
++        lastHp = cur;
++        const int eh = inCombat ? enemyHp(bc) : lastEnemy;
++        r += std::max(0, lastEnemy - eh) * 0.5;
++        lastEnemy = eh;
++        if (!inCombat) { done = true; tb = (g.outcome == GameOutcome::PLAYER_LOSS) ? -50.0 : 50.0; }
++        else { done = false; tb = 0.0; }
++        return r;
++    };
++    bool done; double tb;
++    double r = stepFn(cand, done, tb);
++    G += disc * (r + tb);
++    disc *= gamma;
++    int steps = 0;
++    while (!done && steps < cap) {
++        auto acts = search::Action::getAllActionsInState(bc);
++        int n = static_cast<int>(acts.size());
++        if (n == 0) break;
++        int a;
++        if (policy == 0 && net) { buildObs(*net, g, bc, x); a = net->greedy(x, std::min(n, 128)); }
++        else { a = static_cast<int>(rng() % static_cast<std::uint64_t>(n)); }
++        r = stepFn(a, done, tb);
++        G += disc * (r + tb);
++        disc *= gamma;
++        ++steps;
++    }
++    if (steps_out) *steps_out += steps + 1;
++    return G;
++}
++
++}} // namespace sts::honest
++
++
++// honest_batch
++// ---------------------------------------------------------------------------
++// Batched native rollouts: all (candidate x sample) rollouts advance in
++// lockstep so each net layer streams its weights once per step for the whole
++// batch; dot products use AVX2/FMA when the CPU has it (function-level target,
++// so the simulator itself is compiled exactly as before).
++// ---------------------------------------------------------------------------
++#include <immintrin.h>
++namespace sts { namespace honest {
++
++__attribute__((target("avx2,fma")))
++static float dot_avx2(const float *a, const float *b, int n) {
++    __m256 s0 = _mm256_setzero_ps(), s1 = _mm256_setzero_ps();
++    int i = 0;
++    for (; i + 16 <= n; i += 16) {
++        s0 = _mm256_fmadd_ps(_mm256_loadu_ps(a + i), _mm256_loadu_ps(b + i), s0);
++        s1 = _mm256_fmadd_ps(_mm256_loadu_ps(a + i + 8), _mm256_loadu_ps(b + i + 8), s1);
++    }
++    for (; i + 8 <= n; i += 8) s0 = _mm256_fmadd_ps(_mm256_loadu_ps(a + i), _mm256_loadu_ps(b + i), s0);
++    s0 = _mm256_add_ps(s0, s1);
++    __m128 lo = _mm256_castps256_ps128(s0), hi = _mm256_extractf128_ps(s0, 1);
++    lo = _mm_add_ps(lo, hi);
++    lo = _mm_hadd_ps(lo, lo); lo = _mm_hadd_ps(lo, lo);
++    float s = _mm_cvtss_f32(lo);
++    for (; i < n; ++i) s += a[i] * b[i];
++    return s;
++}
++static float dot_scalar(const float *a, const float *b, int n) {
++    float s0 = 0, s1 = 0, s2 = 0, s3 = 0; int i = 0;
++    for (; i + 4 <= n; i += 4) { s0 += a[i]*b[i]; s1 += a[i+1]*b[i+1]; s2 += a[i+2]*b[i+2]; s3 += a[i+3]*b[i+3]; }
++    for (; i < n; ++i) s0 += a[i] * b[i];
++    return (s0 + s1) + (s2 + s3);
++}
++static const bool g_has_avx2 = __builtin_cpu_supports("avx2") && __builtin_cpu_supports("fma");
++static inline float dotf(const float *a, const float *b, int n) { return g_has_avx2 ? dot_avx2(a, b, n) : dot_scalar(a, b, n); }
++
++// X: nb rows of width net.in (row-major). Returns argmax over the first nlegal[j] logits per row.
++static void greedyBatch(const CombatNet &net, std::vector<float> &X, int nb, const std::vector<int> &nlegal, std::vector<int> &out) {
++    std::vector<float> H = X, NH;
++    int width = net.in;
++    for (std::size_t l = 0; l < net.W.size(); ++l) {
++        const int o = net.dims[l];
++        NH.assign(static_cast<std::size_t>(nb) * o, 0.0f);
++        const bool last = l + 1 == net.W.size();
++        for (int r = 0; r < o; ++r) {
++            const float *wr = net.W[l].data() + static_cast<std::size_t>(r) * width;
++            const float br = net.b[l][r];
++            for (int j = 0; j < nb; ++j) {
++                float s = dotf(wr, H.data() + static_cast<std::size_t>(j) * width, width) + br;
++                NH[static_cast<std::size_t>(j) * o + r] = last ? s : gelu_f(s);
++            }
++        }
++        H.swap(NH);
++        width = o;
++    }
++    out.assign(nb, 0);
++    for (int j = 0; j < nb; ++j) {
++        const float *h = H.data() + static_cast<std::size_t>(j) * width;
++        const int n = std::min(nlegal[j], width);
++        int best = 0; float bv = -1e30f;
++        for (int a = 0; a < n; ++a) if (h[a] > bv) { bv = h[a]; best = a; }
++        out[j] = best;
++    }
++}
++
++struct RState {
++    GameContext g; BattleContext bc;
++    bool inCombat = true, done = false;
++    int lastHp = 0, lastEnemy = 0, steps = 0;
++    double G = 0.0, disc = 1.0;
++    std::mt19937_64 rng;
++    std::vector<float> lastObs;     // FightEnv._last parity (normalized obs1200)
++};
++
++static double stepR(RState &s, int idx, double gamma) {
++    double r = 0.0, tb = 0.0;
++    auto acts = search::Action::getAllActionsInState(s.bc);
++    if (acts.empty()) { s.done = true; return 0.0; }       // python: zero rewards until cap
++    if (idx >= static_cast<int>(acts.size())) { r = -1.0; idx = 0; }
++    acts[idx].execute(s.bc);
++    if (s.bc.outcome != Outcome::UNDECIDED) { s.bc.exitBattle(s.g); s.inCombat = false; }
++    const int cur = s.inCombat ? s.bc.player.curHp : s.g.curHp;
++    r += cur - s.lastHp; s.lastHp = cur;
++    const int eh = s.inCombat ? enemyHp(s.bc) : s.lastEnemy;
++    r += std::max(0, s.lastEnemy - eh) * 0.5; s.lastEnemy = eh;
++    if (!s.inCombat) { s.done = true; tb = (s.g.outcome == GameOutcome::PLAYER_LOSS) ? -50.0 : 50.0; }
++    s.G += s.disc * (r + tb);
++    s.disc *= gamma;
++    return r;
++}
++
++// scores[c][k]; same semantics as rolloutOne
++static std::vector<std::vector<double>> rolloutBatch(const GameContext &gc0, const BattleContext &bc0,
++        const std::vector<int> &cands, const std::vector<std::uint64_t> &dets, bool exact,
++        const CombatNet *net, int policy, double gamma, int cap, std::uint64_t *steps_out,
++        const std::vector<int> &rootLast = {}) {
++    const int C = cands.size(), K = dets.size();
++    std::vector<float> last0;
++    if (net && rootLast.size() == 1200) {
++        last0.resize(1200);
++        for (int i = 0; i < 1200; ++i) last0[i] = static_cast<float>(rootLast[i]) / net->maxima[i];
++    }
++    std::vector<RState> st(static_cast<std::size_t>(C) * K);
++    for (int c = 0; c < C; ++c) for (int k = 0; k < K; ++k) {
++        RState &s = st[static_cast<std::size_t>(c) * K + k];
++        s.g = copyGame(gc0); s.bc = bc0;
++        if (!exact) { determinizeGame(s.g, dets[k]); determinizeBattle(s.bc, dets[k] * 0x9E3779B97F4A7C15ULL + 1ULL); }
++        s.rng.seed(dets[k] ^ 0xD1B54A32D192ED03ULL ^ (static_cast<std::uint64_t>(c) << 32));
++        s.lastHp = s.bc.player.curHp; s.lastEnemy = enemyHp(s.bc);
++        s.lastObs = last0;
++        stepR(s, cands[c], gamma);
++        if (steps_out) ++*steps_out;
++    }
++    std::vector<int> act_idx, nleg, choice;
++    std::vector<float> X, x;
++    for (int t = 0; t < cap; ++t) {
++        act_idx.clear(); nleg.clear();
++        for (int i = 0; i < static_cast<int>(st.size()); ++i) {
++            RState &s = st[i];
++            if (s.done) continue;
++            int n = static_cast<int>(search::Action::getAllActionsInState(s.bc).size());
++            if (n == 0) { s.done = true; continue; }
++            act_idx.push_back(i); nleg.push_back(std::min(n, 128));
++        }
++        if (act_idx.empty()) break;
++        const int nb = act_idx.size();
++        if (policy == 0 && net) {
++            X.assign(static_cast<std::size_t>(nb) * net->in, 0.0f);
++            for (int j = 0; j < nb; ++j) {
++                RState &s = st[act_idx[j]];
++                buildObs(*net, s.g, s.bc, x, &s.lastObs);
++                std::copy(x.begin(), x.end(), X.begin() + static_cast<std::size_t>(j) * net->in);
++            }
++            greedyBatch(*net, X, nb, nleg, choice);
++        } else {
++            choice.resize(nb);
++            for (int j = 0; j < nb; ++j) choice[j] = static_cast<int>(st[act_idx[j]].rng() % static_cast<std::uint64_t>(nleg[j]));
++        }
++        for (int j = 0; j < nb; ++j) stepR(st[act_idx[j]], choice[j], gamma);
++        if (steps_out) *steps_out += nb;
++    }
++    std::vector<std::vector<double>> out(C, std::vector<double>(K));
++    for (int c = 0; c < C; ++c) for (int k = 0; k < K; ++k) out[c][k] = st[static_cast<std::size_t>(c) * K + k].G;
++    return out;
++}
++
++}} // namespace sts::honest
++
++// honest_mcts
++// ---------------------------------------------------------------------------
++// Honest MCTS (Phase 2 step 3): ensemble of BattleScumSearcher2 trees, each on
++// its own determinized copy of the root battle (root sampling / PIMC with a
++// full tree per sample). Root actions are identical across samples (the hand,
++// potions and targets are visible), so root statistics are summed by action.
++// ---------------------------------------------------------------------------
++#include "sim/search/BattleScumSearcher2.h"
++namespace sts { namespace honest {
++
++struct MctsRootStat { std::uint32_t bits; std::int64_t visits; double value_sum; };
++
++static std::vector<MctsRootStat> mctsEnsemble(const BattleContext &bc0, const std::vector<std::uint64_t> &dets,
++                                              std::int64_t simsPerTree, bool exact) {
++    std::vector<MctsRootStat> agg;
++    for (std::size_t k = 0; k < dets.size(); ++k) {
++        BattleContext bc(bc0);
++        if (!exact) determinizeBattle(bc, dets[k] * 0x9E3779B97F4A7C15ULL + 1ULL);
++        search::BattleScumSearcher2 s(bc);
++        s.randGen.seed(static_cast<unsigned>(dets[k] ^ (dets[k] >> 32)));
++        s.search(simsPerTree);
++        for (const auto &e : s.root.edges) {
++            auto it = std::find_if(agg.begin(), agg.end(), [&](const MctsRootStat &m) { return m.bits == e.action.bits; });
++            if (it == agg.end()) agg.push_back({e.action.bits, e.node.simulationCount, e.node.evaluationSum});
++            else { it->visits += e.node.simulationCount; it->value_sum += e.node.evaluationSum; }
++        }
++    }
++    return agg;
++}
++
++}} // namespace sts::honest
++
+ PYBIND11_MODULE(slaythespire, m) {
+     m.doc() = "pybind11 example plugin"; // optional module docstring
+     m.def("play", &sts::py::play, "play Slay the Spire Console");
+@@ -51,6 +522,10 @@ PYBIND11_MODULE(slaythespire, m) {
+ 
+     pybind11::class_<GameContext> gameContext(m, "GameContext");
+     gameContext.def(pybind11::init<CharacterClass, std::uint64_t, int>())
++        .def("copy", [](const GameContext &gc) { return sts::honest::copyGame(gc); },
++             "independent deep copy (incl. map) -- exact, no hidden info changed")
++        .def("determinize", [](GameContext &gc, std::uint64_t s) { sts::honest::determinizeGame(gc, s); },
++             "IN PLACE: resample all hidden info (seed, RNGs, unseen monster/elite queues, relic pool order); visible state unchanged")
+         .def("pick_reward_card", &sts::py::pickRewardCard, "choose to obtain the card at the specified index in the card reward list")
+         .def("skip_reward_cards", &sts::py::skipRewardCards, "choose to skip the card reward (increases max_hp by 2 with singing bowl)")
+         .def("get_card_reward", &sts::py::getCardReward, "return the current card reward list")
+@@ -156,6 +631,9 @@ PYBIND11_MODULE(slaythespire, m) {
+         .def("init", pybind11::overload_cast<const GameContext &>(&BattleContext::init))
+         .def("init", pybind11::overload_cast<const GameContext &, MonsterEncounter>(&BattleContext::init))
+         .def("exit_battle", &BattleContext::exitBattle)
++        .def("copy", [](const BattleContext &bc) { return BattleContext(bc); }, "independent exact copy")
++        .def("determinize", [](BattleContext &bc, std::uint64_t s) { sts::honest::determinizeBattle(bc, s); },
++             "IN PLACE: reseed all battle RNGs and reshuffle the draw pile; hand/intents/HP/statuses unchanged")
+         .def("get_possible_actions", &search::Action::getAllActionsInState)
+         .def_readwrite("outcome", &BattleContext::outcome)
+         .def_readwrite("input_state", &BattleContext::inputState)
+@@ -165,6 +643,79 @@ PYBIND11_MODULE(slaythespire, m) {
+         .def_readwrite("player", &BattleContext::player)
+         .def_readwrite("monsters", &BattleContext::monsters);
+ 
++
++    // ---- native honest rollouts (Phase 2) ----
++    pybind11::class_<sts::honest::CombatNet>(m, "CombatNet")
++        .def(pybind11::init([](std::vector<pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast>> Ws,
++                               std::vector<pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast>> bs,
++                               pybind11::array_t<float, pybind11::array::c_style | pybind11::array::forcecast> maxima) {
++            sts::honest::CombatNet n;
++            if (Ws.size() != bs.size() || Ws.empty()) throw std::runtime_error("CombatNet: bad layer lists");
++            n.in = static_cast<int>(Ws[0].shape(1));
++            for (std::size_t l = 0; l < Ws.size(); ++l) {
++                auto w = Ws[l]; auto bb = bs[l];
++                n.dims.push_back(static_cast<int>(w.shape(0)));
++                n.W.emplace_back(w.data(), w.data() + w.size());
++                n.b.emplace_back(bb.data(), bb.data() + bb.size());
++            }
++            n.maxima.assign(maxima.data(), maxima.data() + maxima.size());
++            return n;
++        }))
++        .def_readonly("in_dim", &sts::honest::CombatNet::in)
++        .def("obs", [](const sts::honest::CombatNet &net, const GameContext &gc, const BattleContext &bc) {
++            std::vector<float> x; sts::honest::buildObs(net, gc, bc, x); return x; })
++        .def("greedy_state", [](const sts::honest::CombatNet &net, const GameContext &gc, const BattleContext &bc) {
++            std::vector<float> x; sts::honest::buildObs(net, gc, bc, x);
++            int n = static_cast<int>(search::Action::getAllActionsInState(bc).size());
++            return net.greedy(x, std::min(n, 128)); });
++
++    m.def("rollout_q", [](const GameContext &gc, const BattleContext &bc, const std::vector<int> &cands,
++                          const std::vector<std::uint64_t> &dets, const sts::honest::CombatNet *net, int policy,
++                          double gamma, int cap, bool exact) {
++            std::vector<std::vector<double>> out(cands.size(), std::vector<double>(dets.size(), 0.0));
++            std::uint64_t steps = 0;
++            {
++                pybind11::gil_scoped_release rel;
++                for (std::size_t c = 0; c < cands.size(); ++c)
++                    for (std::size_t k = 0; k < dets.size(); ++k)
++                        out[c][k] = sts::honest::rolloutOne(gc, bc, cands[c], dets[k], exact, net, policy, gamma, cap, &steps);
++            }
++            return std::make_pair(out, steps);
++        }, pybind11::arg("gc"), pybind11::arg("bc"), pybind11::arg("cands"), pybind11::arg("dets"),
++           pybind11::arg("net") = nullptr, pybind11::arg("policy") = 0, pybind11::arg("gamma") = 0.97,
++           pybind11::arg("cap") = 200, pybind11::arg("exact") = false,
++        "scores[c][k]: rollout of candidate action index c on sampled world dets[k] (honest.py semantics); returns (scores, total_steps)");
++
++
++    m.def("rollout_qb", [](const GameContext &gc, const BattleContext &bc, const std::vector<int> &cands,
++                           const std::vector<std::uint64_t> &dets, const sts::honest::CombatNet *net, int policy,
++                           double gamma, int cap, bool exact, const std::vector<int> &root_last) {
++            std::vector<std::vector<double>> out;
++            std::uint64_t steps = 0;
++            {
++                pybind11::gil_scoped_release rel;
++                out = sts::honest::rolloutBatch(gc, bc, cands, dets, exact, net, policy, gamma, cap, &steps, root_last);
++            }
++            return std::make_pair(out, steps);
++        }, pybind11::arg("gc"), pybind11::arg("bc"), pybind11::arg("cands"), pybind11::arg("dets"),
++           pybind11::arg("net") = nullptr, pybind11::arg("policy") = 0, pybind11::arg("gamma") = 0.97,
++           pybind11::arg("cap") = 200, pybind11::arg("exact") = false, pybind11::arg("root_last") = std::vector<int>{},
++        "batched/vectorized rollout_q (all candidate x sample rollouts in lockstep)");
++    m.def("cpu_has_avx2", []() { return sts::honest::g_has_avx2; });
++
++
++    m.def("mcts_root", [](const BattleContext &bc, const std::vector<std::uint64_t> &dets, std::int64_t sims_per_tree, bool exact) {
++            std::vector<sts::honest::MctsRootStat> st;
++            {
++                pybind11::gil_scoped_release rel;
++                st = sts::honest::mctsEnsemble(bc, dets, sims_per_tree, exact);
++            }
++            std::vector<std::tuple<std::uint32_t, std::int64_t, double>> out;
++            for (auto &x : st) out.emplace_back(x.bits, x.visits, x.value_sum);
++            return out;
++        }, pybind11::arg("bc"), pybind11::arg("dets"), pybind11::arg("sims_per_tree"), pybind11::arg("exact") = false,
++        "ensemble of BattleScumSearcher2 trees on determinized roots -> [(action_bits, visits, value_sum)]");
++
+     pybind11::class_<search::Action> action(m, "Action");
+     action.def(pybind11::init<std::uint32_t>())
+         .def_readwrite("bits", &search::Action::bits)
+diff --git src/game/GameContext.cpp src/game/GameContext.cpp
+index fa10364..8a7c65a 100644
+--- src/game/GameContext.cpp
++++ src/game/GameContext.cpp
+@@ -1097,7 +1097,7 @@ void GameContext::enterBossTreasureRoom() {
+     }
+ 
+     regainControlAction = [=](GameContext &gc) {
+-        gc.transitionToAct(act+1);
++        gc.transitionToAct(gc.act+1);
+     };
+ }
+ 
+@@ -2622,8 +2622,8 @@ void GameContext::chooseEventOption(int idx) {
+                         if (addRelic) {
+                             reward.addRelic(combatRewardRelic);
+                         }
+-                        reward.addCardReward(createCardReward(Room::EVENT));
+-                        addPotionRewards(reward);
++                        reward.addCardReward(gc.createCardReward(Room::EVENT));
++                        gc.addPotionRewards(reward);
+                         gc.openCombatRewardScreen(reward);
+                         gc.regainControlAction = returnToMapAction;
+                     };
+@@ -2679,7 +2679,7 @@ void GameContext::chooseEventOption(int idx) {
+                 case 4:
+                     loseGold(unfavorable ? 110 : 90);
+                     regainControlAction = [=](GameContext &gc) {
+-                        gc.deck.upgradeRandomCards(miscRng, 1);
++                        gc.deck.upgradeRandomCards(gc.miscRng, 1);
+                         returnToMapAction(gc);
+                     };
+                     openCardSelectScreen(CardSelectScreenType::REMOVE, 1);
+@@ -3028,7 +3028,7 @@ void GameContext::chooseEventOption(int idx) {
+                         Rewards reward;
+                         reward.addGold(goldAmt);
+                         reward.addRelic(rareRelic);
+-                        addPotionRewards(reward);
++                        gc.addPotionRewards(reward);
+                         reward.addCardReward(gc.createCardReward(Room::EVENT));
+                         gc.openCombatRewardScreen(reward);
+                         gc.regainControlAction = returnToMapAction;
+@@ -3073,8 +3073,8 @@ void GameContext::chooseEventOption(int idx) {
+                     Rewards reward;
+                     reward.addGold(goldAmt);
+                     reward.addRelic(RelicId::ODD_MUSHROOM);
+-                    addPotionRewards(reward);
+-                    reward.addCardReward(createCardReward(Room::EVENT));
++                    gc.addPotionRewards(reward);
++                    reward.addCardReward(gc.createCardReward(Room::EVENT));
+                     gc.openCombatRewardScreen(reward);
+                     gc.regainControlAction = returnToMapAction;
+                 };

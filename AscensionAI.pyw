@@ -505,7 +505,7 @@ class AscensionApp:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("AscensionAI Control Panel")
-        self.root.geometry("900x820")
+        self.root.geometry("1100x860")
         self.root.minsize(760, 680)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -556,8 +556,21 @@ class AscensionApp:
 
         pad = {"padx": 10, "pady": 5}
 
+        # Top-level tabs: the original live-game control panel + Sim Experiments
+        self.main_nb = ttk.Notebook(self.root)
+        self.main_nb.pack(fill="both", expand=True)
+        self._live_tab = ttk.Frame(self.main_nb)
+        self.main_nb.add(self._live_tab, text="  Live Game (STS)  ")
+        self.sim_tab = None
+        try:
+            from sim_tab import SimExperimentsTab
+            self.sim_tab = SimExperimentsTab(self.main_nb, _logger)
+            self.main_nb.select(1)
+        except Exception as e:  # never let the sim tab break the live-game panel
+            _logger.error(f"Sim Experiments tab failed to load: {e}\n{traceback.format_exc()}")
+
         # Hardware panel
-        hw_frame = ttk.LabelFrame(self.root, text="  Hardware  ", padding=10)
+        hw_frame = ttk.LabelFrame(self._live_tab, text="  Hardware  ", padding=10)
         hw_frame.pack(fill="x", **pad)
 
         hw_info = (
@@ -569,7 +582,7 @@ class AscensionApp:
         ttk.Label(hw_frame, text=hw_info, font=("Consolas", 10)).pack(anchor="w")
 
         # Controls panel
-        ctrl_frame = ttk.LabelFrame(self.root, text="  Controls  ", padding=10)
+        ctrl_frame = ttk.LabelFrame(self._live_tab, text="  Controls  ", padding=10)
         ctrl_frame.pack(fill="x", **pad)
 
         row1 = ttk.Frame(ctrl_frame)
@@ -839,7 +852,7 @@ class AscensionApp:
         ).pack(side="left")
 
         # Progress panel
-        stats_frame = ttk.LabelFrame(self.root, text="  Progress  ", padding=10)
+        stats_frame = ttk.LabelFrame(self._live_tab, text="  Progress  ", padding=10)
         stats_frame.pack(fill="x", **pad)
 
         self.stats_vars = {
@@ -865,7 +878,7 @@ class AscensionApp:
         ttk.Button(btn_row, text="View Training Plot", command=self._show_plot).pack(side="left")
 
         # Log panel
-        log_frame = ttk.LabelFrame(self.root, text="  Logs  ", padding=5)
+        log_frame = ttk.LabelFrame(self._live_tab, text="  Logs  ", padding=5)
         log_frame.pack(fill="both", expand=True, **pad)
 
         top_row = ttk.Frame(log_frame)
@@ -4284,6 +4297,8 @@ class AscensionApp:
                 return
             self._stop()
         _logger.info("AscensionAI Control Panel shutting down")
+        if getattr(self, "sim_tab", None) is not None:
+            self.sim_tab.close()   # sim runs live in WSL and keep running
         self.root.destroy()
 
     def run(self):
