@@ -1,7 +1,7 @@
 # AscensionAI: Path to Max Win Rate on All Characters and Ascensions
 
 Date: 2026-11-06
-Status: adopted. Phases 0 and 1 are done (see `docs/experiments/014_honest_search.md`), and Phase 2 is in progress (`015_cpp_search.md`).
+Status: adopted. Phases 0–2 are done (`docs/experiments/014_honest_search.md`, `015_cpp_search.md`); Phase 3 is next.
 
 ## 1. Diagnosis (why Ironclad was stuck)
 
@@ -19,7 +19,7 @@ Old draft labels (draft_data*.jsonl, draft V nets), ds_train teacher runs and th
 ## 4. Phases (gate on fixed-150, confirmed on holdout-150; move to 500-seed evals once cheap)
 - **Phase 0 — Reproduce (DONE):** WSL2 rebuild; mainline_v3 9/150 byte-identical; sim layer in git (`sim/`).
 - **Phase 1 — Honest search (DONE):** copy + determinize bindings; honest combat and draft teacher; honest taxonomy (014).
-- **Phase 2 — C++ search engine (IN PROGRESS):** batched C++ rollouts, determinized MCTS, adaptive samples for bosses and elites, potion conservation. Gate: best honest engine vs the K=8 baseline (1/150, floor 22.41).
+- **Phase 2 — C++ search engine (DONE):** batched C++ rollouts, determinized MCTS, adaptive samples for bosses and elites, potion conservation. Gate: best honest engine vs the K=8 baseline (1/150, floor 22.41).
 - **Phase 3 — Consistent Ironclad A0 wins:** expert iteration with search at play time. Honest K-sample macro search for every non-combat decision (cards, map, rest/smith, shop, events, Neow, boss relic, potions); learned prior + value nets trained on honest search outputs with a within-decision ranking loss, used to prune search and replace rollouts, then iterate; one run-level value that prices HP, gold, potions and deck together; attack the biggest taxonomy bucket first. Milestones: 25% → 50% → 75% → 85%+.
 - **Phase 4 — Ironclad ascensions:** audit each level against the real game; ascension in the observation, one set of nets; curriculum by band (A1–5, A6–10, A11–15, A16–20) with a replay mix of lower levels. Targets: A10 70%+, A15 55%+, A20 40%+, then push (top humans win ~50–70% at A20 Ironclad).
 - **Phase 5 — Silent:** the sim has no Silent card logic. Check for an existing fork first; otherwise implement ~75 cards, Silent relics and class events. Differential-test against the real game via CommunicationMod, with unit tests per card. Make the observation character-agnostic (card-ID embeddings + set encoder + character token). Then rerun Phases 3–4, warm-started from Ironclad.
@@ -32,7 +32,7 @@ Primary machine: ASUS ROG Zephyrus G15 (GA503QR) running 24/7: Ryzen 9 5900HS 8c
 ## 6. Progress log
 - **Phase 0 (2026-11-06):** mainline_v3 reproduces 9/150, floor 26.06; all 150 outputs byte-identical to the GCP originals.
 - **Phase 1 (2026-11-06):** honest search drops mainline_v3 to 1/150 at K=8 (floor 22.41); the draft teacher drops from 15/50 to 0/50 on the same seeds.
-- **Phase 2 (in progress):** C++ rollouts are identical to Python and ~11× faster in wall-clock; 1-ply K=32 gets 5/150, floor 24.40 (best honest result so far).
+- **Phase 2 (2026-11-06, gate passed):** C++ rollouts are identical to Python and ~11× faster in wall-clock. Chosen engine 1-ply K=64: eval 6/150, floor 24.61; holdout-150 7 wins / floor 26.67 vs honest K=8 3 / 23.10 (+3.57 floors, 95% CI +2.45..+4.75). Determinized MCTS and a potion-saving rule both lost to 1-ply. Throughput: ~45 min per 150 seeds at K=64 (12× K=8), so Phase 3 must make samples cheaper (value net, priors).
 
 ## 7. Open decisions
 1. Definition of a win: Act 3 boss for the ladder phases, Heart for the final scoreboard (recommended).

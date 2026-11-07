@@ -272,10 +272,11 @@
   <main>
     <section class="section">
       <h2>Project Snapshot</h2>
-      <p class="lead">November 2026: an audit found that every earlier search result &mdash; including mainline_v3's 9 wins and the draft teacher's 44 &mdash; came from search that <strong>replayed the true seed</strong>, so its rollouts knew the real draw order, enemy rolls and future rewards. Those numbers are now labelled <span class="tag cv">clairvoyant (seed-peeking)</span>. The search was rebuilt to <strong>sample hidden information instead of reading it</strong> (exact C++ state copies + determinization), which dropped the agent to <strong>1 win / floor 22.4</strong> &mdash; the honest baseline. A native batched C++ rollout engine (bit-identical to the Python search, ~11&times; faster per run) then made far more samples affordable: <strong>K=32 sampled worlds per decision reaches 5 wins / floor 24.4</strong>, the current best honest result.</p>
+      <p class="lead">November 2026: an audit found that every earlier search result &mdash; including mainline_v3's 9 wins and the draft teacher's 44 &mdash; came from search that <strong>replayed the true seed</strong>, so its rollouts knew the real draw order, enemy rolls and future rewards. Those numbers are now labelled <span class="tag cv">clairvoyant (seed-peeking)</span>. The search was rebuilt to <strong>sample hidden information instead of reading it</strong> (exact C++ state copies + determinization), which dropped the agent to <strong>1 win / floor 22.4</strong> &mdash; the honest baseline. A native batched C++ rollout engine (bit-identical to the Python search, ~11&times; faster per run) then made far more samples affordable: <strong>K=64 sampled worlds per decision reaches 6 wins / floor 24.6</strong> on the fixed seeds and <strong>7 wins / floor 26.7 on the 150-seed holdout</strong> (+3.6 floors over honest K=8 on the same seeds, 95% CI +2.5&ndash;+4.8), the current best honest result.</p>
       <div class="metric-grid">
-        <div class="metric"><span>Best honest (K=32, 150 seeds)</span><strong>5 wins &middot; 24.4</strong></div>
+        <div class="metric"><span>Best honest (K=64, 150 seeds)</span><strong>6 wins &middot; 24.6</strong></div>
         <div class="metric"><span>Honest baseline (K=8)</span><strong>1 win &middot; 22.4</strong></div>
+        <div class="metric"><span>Holdout-150: K=64 vs K=8</span><strong>7 vs 3 wins &middot; 26.7 vs 23.1</strong></div>
         <div class="metric"><span>Clairvoyant mainline_v3 (reference)</span><strong>9 wins &middot; 26.1</strong></div>
         <div class="metric"><span>150-seed eval, honest K=8</span><strong>35 min &rarr; 3 min</strong></div>
       </div>
@@ -287,8 +288,8 @@
       <div class="roadmap">
         <div class="phase done"><span class="st">done</span><h3>Phase 0 &mdash; Reproduce</h3><p>Rebuilt the sim on a WSL2 laptop (no sudo); mainline_v3 reproduced byte-for-byte on all 150 seeds.</p></div>
         <div class="phase done"><span class="st">done</span><h3>Phase 1 &mdash; Honest search</h3><p>C++ <code>copy()</code>/<code>determinize()</code>; honest 1-ply combat and draft teacher. Baseline: 1 win, floor 22.4 (<a href="experiments/014_honest_search.md">014</a>).</p></div>
-        <div class="phase now"><span class="st">in progress</span><h3>Phase 2 &mdash; Native C++ search</h3><p>Batched AVX2 rollouts (bit-identical, ~37&times;/rollout), ensemble MCTS, adaptive samples, potion conservation. Best so far K=32: 5 wins, floor 24.4.</p></div>
-        <div class="phase next"><span class="st">next</span><h3>Phase 3 &mdash; Consistent Ironclad A0 wins</h3><p>Expert iteration with search at play time: honest K-sample search for every non-combat decision, prior + value nets trained on honest search outputs, one run-level value. Milestones 25% &rarr; 50% &rarr; 75% &rarr; 85%+.</p></div>
+        <div class="phase done"><span class="st">done</span><h3>Phase 2 &mdash; Native C++ search</h3><p>Batched AVX2 rollouts (bit-identical, ~37&times;/rollout), ensemble MCTS, adaptive samples, potion conservation. Gate passed on holdout-150: K=64 7 wins / floor 26.7 vs K=8 3 / 23.1 (<a href="experiments/015_cpp_search.md">015</a>).</p></div>
+        <div class="phase now"><span class="st">next up</span><h3>Phase 3 &mdash; Consistent Ironclad A0 wins</h3><p>Expert iteration with search at play time: honest K-sample search for every non-combat decision, prior + value nets trained on honest search outputs, one run-level value. Milestones 25% &rarr; 50% &rarr; 75% &rarr; 85%+.</p></div>
         <div class="phase next"><span class="st">later</span><h3>Phase 4 &mdash; Ironclad ascensions</h3><p>Ascension in the observation, curriculum by band (A1&ndash;5 &hellip; A16&ndash;20). Targets A10 70%+, A15 55%+, A20 40%+.</p></div>
         <div class="phase next"><span class="st">later</span><h3>Phases 5&ndash;6 &mdash; Silent, Defect, Watcher</h3><p>Implement the missing class logic in the sim, differential-tested against the real game; character-agnostic observation; rerun Phases 3&ndash;4 warm-started from Ironclad.</p></div>
         <div class="phase next"><span class="st">later</span><h3>Phase 7 &mdash; Completion</h3><p>Act 4 and the Heart; real-game validation per character &times; ascension; final win-rate table with CIs on held-out seeds.</p></div>
@@ -378,11 +379,11 @@
 
     <section class="section">
       <h2>Current Results</h2>
-      <p class="lead">The current best <strong>honest</strong> agent is mainline_v3's macro stack with honest combat search at K=32 sampled worlds per decision: <strong>5 wins / 150, floor 24.4</strong>. The earlier mainline results are kept below as <span class="tag cv">clairvoyant (seed-peeking)</span> references; their macro levers (deck hygiene, role scorer, tempo smithing) carry over unchanged.</p>
+      <p class="lead">The current best <strong>honest</strong> agent is mainline_v3's macro stack with honest combat search at K=64 sampled worlds per decision: <strong>6 wins / 150, floor 24.6</strong> on the fixed seeds, <strong>7 wins / floor 26.7</strong> on the untouched holdout. The earlier mainline results are kept below as <span class="tag cv">clairvoyant (seed-peeking)</span> references; their macro levers (deck hygiene, role scorer, tempo smithing) carry over unchanged.</p>
       <div class="grid">
         <article class="card">
-          <h3>Honest K=32 (current best) <span class="tag hon">honest</span></h3>
-          <p>150 fixed seeds: <strong>24.4 avg floor, 5 wins</strong>, vs the honest K=8 baseline 22.4 / 1 (paired floor gain +2.0, 95% CI +0.8&ndash;+3.1). Native batched C++ rollouts make 32 samples per decision cheap.</p>
+          <h3>Honest K=64 (current best) <span class="tag hon">honest</span></h3>
+          <p>Holdout-150: <strong>26.7 avg floor, 7 wins</strong> vs honest K=8 on the same seeds 23.1 / 3 (paired +3.6 floors, 95% CI +2.5&ndash;+4.8; all 4 win flips one way). Fixed seeds: 24.6 / 6. Native batched C++ rollouts make 64 samples per decision affordable. Determinized MCTS and potion-saving rules lost to plain 1-ply.</p>
           <a href="experiments/015_cpp_search.md">View report</a>
         </article>
         <article class="card">
