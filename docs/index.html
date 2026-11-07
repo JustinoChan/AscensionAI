@@ -288,8 +288,12 @@
         <div class="phase done"><span class="st">done</span><h3>Phase 0 &mdash; Reproduce</h3><p>Rebuilt the sim on a WSL2 laptop (no sudo); mainline_v3 reproduced byte-for-byte on all 150 seeds.</p></div>
         <div class="phase done"><span class="st">done</span><h3>Phase 1 &mdash; Honest search</h3><p>C++ <code>copy()</code>/<code>determinize()</code>; honest 1-ply combat and draft teacher. Baseline: 1 win, floor 22.4 (<a href="experiments/014_honest_search.md">014</a>).</p></div>
         <div class="phase now"><span class="st">in progress</span><h3>Phase 2 &mdash; Native C++ search</h3><p>Batched AVX2 rollouts (bit-identical, ~37&times;/rollout), ensemble MCTS, adaptive samples, potion conservation. Best so far K=32: 5 wins, floor 24.4.</p></div>
-        <div class="phase next"><span class="st">next</span><h3>Phases 3&ndash;7</h3><p>Stronger honest combat (learned value / deeper search where it matters), honest relabelling of drafting data, then macro and full-run training on honest targets.</p></div>
+        <div class="phase next"><span class="st">next</span><h3>Phase 3 &mdash; Consistent Ironclad A0 wins</h3><p>Expert iteration with search at play time: honest K-sample search for every non-combat decision, prior + value nets trained on honest search outputs, one run-level value. Milestones 25% &rarr; 50% &rarr; 75% &rarr; 85%+.</p></div>
+        <div class="phase next"><span class="st">later</span><h3>Phase 4 &mdash; Ironclad ascensions</h3><p>Ascension in the observation, curriculum by band (A1&ndash;5 &hellip; A16&ndash;20). Targets A10 70%+, A15 55%+, A20 40%+.</p></div>
+        <div class="phase next"><span class="st">later</span><h3>Phases 5&ndash;6 &mdash; Silent, Defect, Watcher</h3><p>Implement the missing class logic in the sim, differential-tested against the real game; character-agnostic observation; rerun Phases 3&ndash;4 warm-started from Ironclad.</p></div>
+        <div class="phase next"><span class="st">later</span><h3>Phase 7 &mdash; Completion</h3><p>Act 4 and the Heart; real-game validation per character &times; ascension; final win-rate table with CIs on held-out seeds.</p></div>
       </div>
+      <p class="lead" style="margin-top:12px">Full plan: <a href="2026-11-06-path-to-max-winrate-plan.md">Path to max win rate on all characters and ascensions</a>.</p>
     </section>
 
     <section class="section">
