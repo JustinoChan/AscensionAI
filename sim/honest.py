@@ -53,6 +53,36 @@ def _by_room(prefix, cast=int):
     return d
 HONEST_K_BY_ROOM = _by_room("HONEST_K")
 POTION_SAVE = os.environ.get("POTION_SAVE", "0") == "1"
+# HARVEST=<dir>: passive Phase-3 data harvest (root combat states + K-sample Q per
+# candidate + fight outcomes, and run-level states at every non-combat decision),
+# written to <dir>/seed_<seed>.npz. Decisions are unchanged.
+HARVEST = os.environ.get("HARVEST", "")
+# Phase 3 step 1c (all default off):
+#   HONEST_PRIOR=<npz>  candidate prior (NpNet layout) used to rank/prune root candidates
+#   HONEST_TOPK=<m>     keep the top-m root candidates (default: TOPK of the base search)
+#   HONEST_VNET=<npz>   value net; with HONEST_DEPTH=<d> >= 0 every rollout is cut after d
+#                       default-policy steps and scored  G += gamma^steps * VSCALE * V(s_leaf)
+#   HONEST_VSCALE       value scale (default 50, as trained by train_h1.py)
+# Phase 3 step 2 (default off): honest macro search with short run-level rollouts.
+#   MACRO_CARD=1  card reward: take_i vs skip
+#   MACRO_REST=1  campfire: rest vs smith
+#   MACRO_K=<n> sampled worlds per candidate (default 6), MACRO_H=<floors> horizon
+#   (default 6, never past the end of the current act's boss), MACRO_COMBAT_K=<k>
+#   combat inside rollouts: 0 = varN greedy (C++ obs+net, default), k>0 = honest
+#   1-ply C++ search with k samples. Score = floor reached + MACRO_HPW * hp/max_hp
+#   (default 2) + 100 * win; death ends the rollout at its floor.
+MACRO_CARD = os.environ.get("MACRO_CARD", "0") == "1"
+MACRO_REST = os.environ.get("MACRO_REST", "0") == "1"
+MACRO_K = int(os.environ.get("MACRO_K", "6"))
+MACRO_H = int(os.environ.get("MACRO_H", "6"))
+MACRO_COMBAT_K = int(os.environ.get("MACRO_COMBAT_K", "0"))
+MACRO_HPW = float(os.environ.get("MACRO_HPW", "2"))
+MACRO_LOG = os.environ.get("MACRO_LOG", "0") == "1"
+HONEST_PRIOR = os.environ.get("HONEST_PRIOR", "")
+HONEST_TOPK = int(os.environ.get("HONEST_TOPK", "0"))
+HONEST_VNET = os.environ.get("HONEST_VNET", "")
+HONEST_DEPTH = int(os.environ.get("HONEST_DEPTH", "-1"))
+HONEST_VSCALE = float(os.environ.get("HONEST_VSCALE", "50"))
 POTION_SAVE_HP = float(os.environ.get("POTION_SAVE_HP", "0.25"))
 MCTS_SIMS_BY_ROOM = _by_room("MCTS_SIMS")
 
@@ -129,7 +159,100 @@ def make_honest(base, GAMMA, TOPK, ROLL_CAP):
 
         def _macro_action(self):
             self._hb()
-            return self._hwrapped("_macro_action", True)
+            top = bool(HARVEST) and not getattr(self, "_in_rollout", False) and not self.__dict__.get("_hstack")
+            if top:
+                self._hv_close()
+                try:
+                    o = self._obs1200()
+                    mk = self._mask()
+                except Exception:
+                    o, mk = None, None
+            a = self._hwrapped("_macro_action", True)
+            if top and a is not None and o is not None:
+                gc = self.env.gc
+                self._hv()["m"].append((o, mk, str(gc.screen_state).split(".")[-1], int(a),
+                                        int(gc.floor_num), int(gc.act), int(gc.cur_hp), int(gc.max_hp),
+                                        int(gc.gold), len(gc.deck)))
+            return a
+
+        # ---------------- Phase-3 harvest (HARVEST=<dir>) ----------------
+        def _hv(self):
+            return self.__dict__.setdefault("_hv_d", {"c": [], "f": [], "m": [], "open": None})
+
+        def _hv_combat(self, legal, scores, best, K):
+            h = self._hv()
+            e = self.env
+            gc, bc = e.gc, e.bc
+            f = h["open"]
+            if f is None:
+                acts = bc.get_possible_actions()
+                pots = len({a.bits & 0xFFFF for a in acts if ((a.bits >> 29) & 0xF) == 1})
+                f = {"room": self._room(), "floor": int(gc.floor_num), "act": int(gc.act),
+                     "hp_in": int(bc.player.cur_hp), "mhp": int(gc.max_hp), "pot_in": pots,
+                     "pot_used": 0, "ndec": 0}
+                h["open"] = f
+            try:
+                obs = self._obs1235()
+            except Exception:
+                obs = None
+            f["pot_used"] += int(self._is_potion(best))
+            f["ndec"] += 1
+            h["c"].append((obs, list(legal), [list(r) for r in scores], int(best), len(h["f"]),
+                           int(bc.player.cur_hp), int(bc.player.block), int(K)))
+
+        def _hv_close(self):
+            h = self._hv()
+            f = h["open"]
+            if f is None:
+                return
+            gc = self.env.gc
+            f["hp_out"] = max(0, int(gc.cur_hp))
+            f["mhp_out"] = int(gc.max_hp)
+            f["won"] = int(gc.outcome != slaythespire.GameOutcome.PLAYER_LOSS)
+            h["f"].append(f)
+            h["open"] = None
+
+        def _hv_dump(self, seed, out):
+            import numpy as np
+            h = self._hv()
+            self._hv_close()
+            c = [r for r in h["c"] if r[0] is not None]
+            T = max([len(r[1]) for r in c] + [1])
+            Kx = max([r[7] for r in c] + [1])
+            N = len(c)
+            q = np.full((N, T, Kx), np.nan, np.float32)
+            leg = np.full((N, T), -1, np.int16)
+            for i, r in enumerate(c):
+                leg[i, :len(r[1])] = r[1]
+                for j, row in enumerate(r[2]):
+                    q[i, j, :len(row)] = row
+            F = h["f"]
+            M = [r for r in h["m"]]
+            d = dict(
+                c_obs=np.array([r[0] for r in c], np.float32).reshape(N, -1),
+                c_legal=leg, c_q=q, c_chosen=np.array([r[3] for r in c], np.int16),
+                c_fight=np.array([r[4] for r in c], np.int32), c_hp=np.array([r[5] for r in c], np.int16),
+                c_block=np.array([r[6] for r in c], np.int16), c_k=np.array([r[7] for r in c], np.int16),
+                f_room=np.array([x["room"] for x in F], "U8"),
+                **{"f_" + k: np.array([x[k] for x in F], np.int16)
+                   for k in ("floor", "act", "hp_in", "hp_out", "mhp", "mhp_out", "pot_in", "pot_used", "ndec", "won")},
+                m_obs=np.array([r[0] for r in M], np.float32).reshape(len(M), -1),
+                m_mask=np.array([r[1] for r in M], np.int8).reshape(len(M), -1),
+                m_ss=np.array([r[2] for r in M], "U16"),
+                **{"m_" + k: np.array([r[i] for r in M], np.int16)
+                   for i, k in enumerate(("action", "floor", "act", "hp", "mhp", "gold", "deck"), start=3)},
+                run=np.array([int(seed), int(out["floor"]), int(out["win"]), int(out["act"])], np.int32))
+            os.makedirs(HARVEST, exist_ok=True)
+            p = os.path.join(HARVEST, "seed_%d" % int(seed))
+            np.savez_compressed(p + ".tmp.npz", **d)
+            os.replace(p + ".tmp.npz", p + ".npz")
+            out["harvest"] = {"decisions": N, "fights": len(F), "macro": len(M)}
+
+        def play_v2(self, seed):
+            out = super().play_v2(seed)
+            if HARVEST:
+                self._hv_dump(seed, out)
+            return out
 
         def _smith_best(self):
             return self._hwrapped("_smith_best", True)
@@ -142,6 +265,24 @@ def make_honest(base, GAMMA, TOPK, ROLL_CAP):
                                            [b for _, b in n.pbody] + [n.pi[1]],
                                            self.maxima.astype("float32"))
                 self._cnet_obj = c
+            return c
+
+        def _prior_net(self):
+            n = self.__dict__.get("_prior_obj")
+            if n is None:
+                from np_policy import NpNet
+                n = self._prior_obj = NpNet(HONEST_PRIOR)
+            return n
+
+        def _vnet(self):
+            c = self.__dict__.get("_vnet_obj")
+            if c is None:
+                import numpy as np
+                z = np.load(HONEST_VNET)
+                c = slaythespire.CombatNet([z["pbody.%d.weight" % i] for i in (0, 2, 4)] + [z["pi.weight"]],
+                                           [z["pbody.%d.bias" % i] for i in (0, 2, 4)] + [z["pi.bias"]],
+                                           self.maxima.astype("float32"))
+                self._vnet_obj = c
             return c
 
         # ---------------- honest 1-ply combat search ----------------
@@ -212,7 +353,7 @@ def make_honest(base, GAMMA, TOPK, ROLL_CAP):
             self._hb()
             room = self._room()
             if getattr(self, "_in_rollout", False):
-                K = HONEST_TAIL_K
+                K = MACRO_COMBAT_K if (MACRO_CARD or MACRO_REST) and MACRO_COMBAT_K > 0 else HONEST_TAIL_K
             else:
                 K = HONEST_K_BY_ROOM.get(room, HONEST_K)
             engine = HONEST_ENGINE
@@ -228,17 +369,25 @@ def make_honest(base, GAMMA, TOPK, ROLL_CAP):
                 keep = [i for i in legal if not self._is_potion(i, acts)]
                 if keep:
                     legal = keep
-            if len(legal) > TOPK:
-                prior = self.net.logits(self._obs1235(), mask)
-                legal = sorted(legal, key=lambda a: prior[a], reverse=True)[:TOPK]
+            topk = TOPK if (getattr(self, "_in_rollout", False) or not HONEST_TOPK) else HONEST_TOPK
+            if len(legal) > topk:
+                pnet = self._prior_net() if HONEST_PRIOR else self.net
+                prior = pnet.logits(self._obs1235(), mask)
+                legal = sorted(legal, key=lambda a: prior[a], reverse=True)[:topk]
             dets = [self._hdet(k) for k in range(K)]
             if HONEST_CPP:
                 # native batched rollouts: same worlds, same policy, same score
                 e = self.env
                 last = getattr(e, "_last", None)
-                scores, _ = slaythespire.rollout_qb(e.gc, e.bc, legal, dets, self._cnet(), 0,
-                                                    GAMMA, ROLL_CAP, False,
-                                                    [] if last is None else [int(v) for v in last])
+                if HONEST_VNET and HONEST_DEPTH >= 0:
+                    scores, _ = slaythespire.rollout_qb(e.gc, e.bc, legal, dets, self._cnet(), 0,
+                                                        GAMMA, ROLL_CAP, False,
+                                                        [] if last is None else [int(v) for v in last],
+                                                        self._vnet(), HONEST_DEPTH, HONEST_VSCALE)
+                else:
+                    scores, _ = slaythespire.rollout_qb(e.gc, e.bc, legal, dets, self._cnet(), 0,
+                                                        GAMMA, ROLL_CAP, False,
+                                                        [] if last is None else [int(v) for v in last])
                 best, bq = legal[0], -1e18
                 for a, row in zip(legal, scores):
                     tot = 0.0
@@ -247,6 +396,8 @@ def make_honest(base, GAMMA, TOPK, ROLL_CAP):
                     qa = tot / K
                     if qa > bq:
                         bq, best = qa, a
+                if HARVEST and not getattr(self, "_in_rollout", False):
+                    self._hv_combat(legal, scores, best, K)
                 return int(best)
             live = self._hsnap()
             best, bq = legal[0], -1e18
@@ -260,6 +411,80 @@ def make_honest(base, GAMMA, TOPK, ROLL_CAP):
                     bq, best = qa, a
             self._hload(live)
             return int(best)
+
+        # ---------------- honest macro search (MACRO_CARD / MACRO_REST) ----------------
+        def _choose(self, ss, labels, deck, strike, defend, gold, act):
+            if not getattr(self, "_in_rollout", False):
+                if MACRO_CARD and ss in ("REWARDS", "CARD_SELECT") and any(L["dd"] >= 1 for L in labels)                         and not any(L.get("ud", 0) >= 1 for L in labels):
+                    takes = sorted([L for L in labels if L["dd"] >= 1], key=lambda x: x["i"])
+                    noops = [L for L in labels if L["dd"] == 0 and L["rd"] == 0]
+                    leave = [L for L in noops if L["to"] == "MAP_SCREEN"]
+                    skip = leave or noops
+                    cands = [L["i"] for L in takes] + ([skip[0]["i"]] if skip else [])
+                    if len(cands) >= 2:
+                        return self._macro_search("card", cands)
+                if MACRO_REST and ss == "REST_ROOM":
+                    smith = [L for L in labels if L["to"] == "CARD_SELECT" and L["dd"] == 0]
+                    rest = [L for L in labels if L["hp_d"] > 0]
+                    if smith and rest:
+                        return self._macro_search("rest", [rest[0]["i"], smith[0]["i"]])
+            return super()._choose(ss, labels, deck, strike, defend, gold, act)
+
+        def _macro_search(self, kind, cands):
+            gc = self.env.gc
+            f0, a0 = int(gc.floor_num), int(gc.act)
+            fmax = min(f0 + MACRO_H, 17 * a0)            # never past this act's boss floor
+            live = self._hsnap()
+            hist, srf = list(self.history), self._shop_removed_floor
+            stack = self.__dict__.get("_hstack", [])
+            saved = list(stack)
+            dets = [self._hdet(k) for k in range(MACRO_K)]
+            self._in_rollout = True
+            vals = []
+            try:
+                for ci in cands:
+                    v = 0.0
+                    for d in dets:                          # common random numbers across candidates
+                        self._shop_removed_floor = srf
+                        v += self._mrollout(live, ci, d, fmax)
+                    vals.append(v / len(dets))
+            finally:
+                self._in_rollout = False
+                stack[:] = saved
+                self.history = hist
+                self._shop_removed_floor = srf
+                self._hload(live)
+            best = cands[max(range(len(cands)), key=lambda j: vals[j])]
+            if MACRO_LOG:
+                self.__dict__.setdefault("macro_log", []).append(
+                    {"kind": kind, "floor": f0, "cands": cands, "vals": [round(x, 3) for x in vals], "pick": best})
+            return int(best)
+
+        def _mrollout(self, live, first_a, det, fmax, cap=3000):
+            self._hload(live, det)
+            e = self.env
+            e.step(int(first_a))
+            steps = 0
+            while steps < cap and e.gc.outcome == _UND:
+                if not e.in_combat and int(e.gc.floor_num) >= fmax:
+                    break
+                if e.in_combat:
+                    if MACRO_COMBAT_K > 0:
+                        a = self._search_action()
+                    else:
+                        a = self._cnet().greedy_state(e.gc, e.bc)
+                else:
+                    a = self._macro_action()
+                if a is None:
+                    break
+                e.step(int(a))
+                steps += 1
+            gc = e.gc
+            if gc.outcome == _VIC:
+                return 100.0 + int(gc.floor_num)
+            if gc.outcome != _UND:
+                return float(int(gc.floor_num))
+            return int(gc.floor_num) + MACRO_HPW * gc.cur_hp / max(1, gc.max_hp)
 
         # ---------------- honest draft teacher (DRAFT_SEARCH=1) ----------------
         def _hrollout_run(self, live, first_a, det, cap=4000):

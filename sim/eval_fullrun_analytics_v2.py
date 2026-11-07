@@ -931,6 +931,8 @@ if __name__ == "__main__":
         out["secs"] = round(_t.time() - _t0, 2)
         if hasattr(ev, "potion_audit"):
             out["potion_audit"] = ev.potion_audit
+        if hasattr(ev, "macro_log"):
+            out["macro_log"] = ev.macro_log
         print(json.dumps(out), flush=True)
     else:
         ev = V2(combat_npz, "policy_varE.npz", mode)

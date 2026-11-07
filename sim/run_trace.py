@@ -9,6 +9,7 @@ a decision. Adds out["trace"] to the run JSON:
   fights : {floor, act, room, enc, hp_start, max_hp, potions_start[], turns,
             potions_used[], hp_end, hp_lost, died}
   events : {floor, kind: card+/card-/relic+/potion+/upgrade, what}
+  offers : card rewards seen {floor, act, offered[], picked (name or null = skipped)}
 """
 import collections
 import slaythespire as S
@@ -27,7 +28,7 @@ def _potion_name(v):
 
 def install(ev):
     env = ev.env
-    T = {"floors": [], "acts": [], "fights": [], "events": []}
+    T = {"floors": [], "acts": [], "fights": [], "events": [], "offers": []}
     ev.trace = T
     st = {"busy": 0, "fight": None, "act": None, "floor": None}
 
@@ -104,6 +105,18 @@ def install(ev):
             pre_turn = int(env.bc.turn)
         else:
             before = snap_state()
+            offer = None
+            if _name(env.gc.screen_state) in ("REWARDS", "CARD_SELECT"):
+                try:
+                    offered = sorted(_name(c.id) for c in env.gc.get_card_reward())
+                except Exception:
+                    offered = []
+                if offered:
+                    key = (int(env.gc.floor_num), tuple(offered))
+                    if st.get("offer_key") != key:
+                        st["offer_key"] = key
+                        T["offers"].append({"floor": key[0], "act": int(env.gc.act), "offered": offered, "picked": None})
+                    offer = T["offers"][-1]
         out = orig_step(idx)
         post_in = bool(env.in_combat)
         gc = env.gc
@@ -128,6 +141,10 @@ def install(ev):
         if not pre_in and not post_in:
             after = snap_state()
             fl = int(gc.floor_num)
+            if offer is not None and offer["picked"] is None:
+                for k in (after[0] - before[0]):
+                    if k.rstrip("+") in offer["offered"]:
+                        offer["picked"] = k.rstrip("+")
             for kind, i in (("card", 0), ("relic", 1), ("potion", 2)):
                 for k, v in (after[i] - before[i]).items():
                     for _ in range(v):
