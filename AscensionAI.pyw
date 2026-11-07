@@ -568,6 +568,17 @@ class AscensionApp:
             self.main_nb.select(1)
         except Exception as e:  # never let the sim tab break the live-game panel
             _logger.error(f"Sim Experiments tab failed to load: {e}\n{traceback.format_exc()}")
+        self.health_strip = None
+        self.analytics_tab = None
+        try:
+            from dash_tabs import AnalyticsTab, HealthStrip
+            if self.sim_tab is not None:
+                self.health_strip = HealthStrip(self.sim_tab.frame)
+                kids = self.sim_tab.frame.pack_slaves()
+                self.health_strip.frame.pack(fill="x", pady=(0, 6), before=kids[0] if kids else None)
+            self.analytics_tab = AnalyticsTab(self.main_nb, _logger)
+        except Exception as e:  # analytics are optional (need matplotlib)
+            _logger.error(f"Analytics tab failed to load: {e}\n{traceback.format_exc()}")
 
         # Hardware panel
         hw_frame = ttk.LabelFrame(self._live_tab, text="  Hardware  ", padding=10)
@@ -4299,6 +4310,8 @@ class AscensionApp:
         _logger.info("AscensionAI Control Panel shutting down")
         if getattr(self, "sim_tab", None) is not None:
             self.sim_tab.close()   # sim runs live in WSL and keep running
+        if getattr(self, "health_strip", None) is not None:
+            self.health_strip.close()
         self.root.destroy()
 
     def run(self):

@@ -102,7 +102,7 @@ class SimExperimentsTab:
         jq = ttk.LabelFrame(f, text="  Job queue  (overnight chain + jobq; runs one job at a time in WSL)  ", padding=6)
         jq.pack(fill="x", pady=(8, 0))
         cols = ("src", "name", "state", "note")
-        self.jq_tree = ttk.Treeview(jq, columns=cols, show="headings", height=7)
+        self.jq_tree = ttk.Treeview(jq, columns=cols, show="headings", height=5)
         for c, w in zip(cols, (90, 430, 80, 360)):
             self.jq_tree.heading(c, text=c)
             self.jq_tree.column(c, width=w, stretch=(c in ("name", "note")))
