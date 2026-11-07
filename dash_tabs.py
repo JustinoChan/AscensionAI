@@ -12,7 +12,16 @@ import time
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-import matplotlib
+try:
+    import matplotlib
+except ImportError:          # launched without the per-user site dir on sys.path (e.g. from a service/agent env)
+    import os
+    import sys
+    for _p in (os.path.join(os.path.expanduser("~"), "AppData", "Roaming", "Python",
+                            "Python%d%d" % sys.version_info[:2], "site-packages"),):
+        if os.path.isdir(_p) and _p not in sys.path:
+            sys.path.append(_p)
+    import matplotlib
 matplotlib.use("TkAgg")
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg  # noqa: E402
 from matplotlib.figure import Figure  # noqa: E402
