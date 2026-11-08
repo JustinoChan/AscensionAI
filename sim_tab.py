@@ -131,6 +131,25 @@ class SimExperimentsTab:
         self._jq_events_n = None
         self._jq_ids = {}
 
+        # LLM teacher (local Ollama)
+        lt = ttk.LabelFrame(f, text="  LLM teacher  (local Ollama; out-of-combat choices, honest state only)  ", padding=6)
+        lt.pack(fill="x", pady=(8, 0))
+        self.llm_var = tk.StringVar(value="Ollama: checking...")
+        ttk.Label(lt, textvariable=self.llm_var, font=("Consolas", 9)).pack(anchor="w")
+        lb = ttk.Frame(lt)
+        lb.pack(fill="x", pady=(4, 0))
+        ttk.Label(lb, text="model:").pack(side="left")
+        self.llm_model = tk.StringVar(value="qwen2.5-coder:7b")
+        self.llm_model_box = ttk.Combobox(lb, textvariable=self.llm_model, width=22, state="readonly", values=["qwen2.5-coder:7b"])
+        self.llm_model_box.pack(side="left", padx=(2, 8))
+        self.llm_think = tk.StringVar(value="")
+        ttk.Label(lb, text="thinking:").pack(side="left")
+        ttk.Combobox(lb, textvariable=self.llm_think, width=6, state="readonly", values=["", "1", "0"]).pack(side="left", padx=(2, 8))
+        ttk.Label(lb, text="sim workers:").pack(side="left")
+        self.llm_par = tk.StringVar(value="4")
+        ttk.Entry(lb, textvariable=self.llm_par, width=4).pack(side="left", padx=(2, 8))
+        ttk.Button(lb, text="Queue pilot (3-seed smoke + 50 eval500 seeds)", command=self._llm_launch).pack(side="left")
+
         # per-run table
         runs = ttk.LabelFrame(f, text="  Runs  (click a row to tail its log; newest at the bottom)  ", padding=6)
         runs.pack(fill="x", pady=(8, 0))
@@ -353,6 +372,14 @@ class SimExperimentsTab:
                     self._q.put(("jobq", d))
             except Exception:  # noqa: BLE001
                 pass
+            self._llm_tick = getattr(self, "_llm_tick", 0) + 1
+            if self._llm_tick % 3 == 1:
+                try:
+                    p = _wsl("cd ~/sts && .venv/bin/python dash_data.py llm", timeout=30)
+                    if p.returncode == 0 and p.stdout.strip():
+                        self._q.put(("llm", json.loads(p.stdout)))
+                except Exception:  # noqa: BLE001
+                    pass
             name = self._selected
             r = self._run(name) if name else None
             if r and r.get("log"):
@@ -375,6 +402,8 @@ class SimExperimentsTab:
                     self.conn_var.set("WSL error: %s" % val)
                 elif kind == "jobq":
                     self._apply_jobq(val)
+                elif kind == "llm":
+                    self._apply_llm(val)
                 elif kind == "log":
                     if self._selected is not None:
                         self._set_log(val)
@@ -411,6 +440,33 @@ class SimExperimentsTab:
             if ev["state"] in ("done", "failed"):
                 _toast("AscensionAI job %s" % ev["state"], ev["name"])
         self._jq_events_n = d.get("events_n", self._jq_events_n)
+
+    def _apply_llm(self, d):
+        if d.get("installed"):
+            self.llm_model_box.configure(values=d["installed"])
+        loaded = ", ".join("%s (%.1f GB VRAM)" % (m["name"], m["vram_gb"]) for m in d.get("loaded", [])) or "none"
+        line1 = "Ollama %s at %s   loaded: %s" % ("UP" if d.get("up") else "DOWN", d.get("host"), loaded)
+        if d.get("run"):
+            line2 = ("run %s  model %s  thinking %s   seeds %s/%s   decisions %d   %.1f/min   latency mean %s s, median %s s"
+                     "   fallback %.1f%%   card picks differing from policy %s") % (
+                d["run"], d.get("model"), {"1": "on", "0": "off"}.get(d.get("think") or "", "default"), d.get("done"), d.get("total"),
+                d.get("decisions", 0), d.get("per_min", 0), d.get("mean_latency"), d.get("median_latency"),
+                100 * (d.get("fallback_rate") or 0),
+                "--" if d.get("card_disagree") is None else "%.0f%%" % (100 * d["card_disagree"]))
+        else:
+            line2 = "no LLM runs yet"
+        self.llm_var.set(line1 + "\n" + line2)
+
+    def _llm_launch(self):
+        m, t, par = self.llm_model.get().strip(), self.llm_think.get().strip(), self.llm_par.get().strip() or "4"
+        if not m or not par.isdigit():
+            return
+        if not messagebox.askyesno("LLM pilot", "Queue the LLM teacher pilot?\n\nmodel %s, thinking %s, %s sim workers\n"
+                                   "3-seed smoke test, then 50 eval500 seeds (K=64 combat), compared with eval500_K64."
+                                   % (m, t or "default", par)):
+            return
+        self._bg("queue LLM pilot", "python3 jobq.py add 'LLM pilot %s think=%s' -- ./llm_pilot.sh %s %s %s && ./overnight_watchdog.sh && python3 jobq.py list"
+                 % (m, t or "-", _shq(m), _shq(t) if t else "''", par))
 
     def _jq_selected_id(self):
         sel = self.jq_tree.selection()

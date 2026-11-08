@@ -375,6 +375,19 @@ class TrainingPanel(_Panel):
         self.f.clear()
         if not d:
             return
+        if "rl" in d and d["rl"].get("rl"):
+            h = d["rl"]
+            R, Vv = h["rl"], h.get("rl_val", [])
+            self.gate.set("nets/rl: out-of-combat policy PPO, %d iterations, %d games; latest val: %s" % (
+                len(R), R[-1]["games"], ("%s floor %.2f, %d wins / %d" % (Vv[-1]["tag"], Vv[-1]["floor"], Vv[-1]["wins"], Vv[-1]["n"])) if Vv else "--"))
+            a = self.f.add_subplot(221); a.plot([x["iter"] for x in R], [x["floor"] for x in R]); a.set_title("RL: mean floor per batch (sampled policy)", fontsize=9)
+            a = self.f.add_subplot(222); a.plot([x["iter"] for x in R], [100 * x["win_rate"] for x in R]); a.set_title("RL: win % per batch", fontsize=9)
+            a = self.f.add_subplot(223); a.plot([x["iter"] for x in R], [x["entropy"] for x in R]); a.set_title("RL: policy entropy", fontsize=9); a.set_xlabel("iteration")
+            a = self.f.add_subplot(224)
+            a.plot(range(len(Vv)), [x["floor"] for x in Vv], "o-"); a.set_xticks(range(len(Vv)), [x["tag"] for x in Vv], rotation=45, fontsize=7)
+            a.set_title("RL: greedy policy on 100 validation seeds (floor)", fontsize=9)
+            self.c.draw_idle()
+            return
         name, h = sorted(d.items())[-1]
         g = h.get("gate")
         self.gate.set("nets/%s gate: %s" % (name, ("prior %s, value %s — %s" % ("PASS" if g["prior"] else "FAIL", "PASS" if g["value"] else "FAIL", g["why"])) if g else "n/a"))
