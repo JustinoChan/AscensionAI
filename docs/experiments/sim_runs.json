@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-11-07 17:48",
+ "generated_at": "2026-11-07 20:37",
  "eval_seeds": "10007 + i*7919",
  "note": "Headless sts_lightspeed sim, Ironclad A0. clairvoyant = search replayed the true seed (saw future draws/rolls); honest = search samples hidden information.",
  "bucket_order": [
@@ -684,6 +684,77 @@
     "A2_elite": 27,
     "A2_boss": 15,
     "A3": 10
+   }
+  },
+  {
+   "name": "ab_mcard_K32",
+   "description": "Phase 3 2a: honest card-reward search (K=32 worlds, 6-floor horizon, greedy combat in rollouts) on mainline_h1",
+   "group": "honest",
+   "env": "HONEST=1 HONEST_CPP=1 HONEST_K=64 MACRO_CARD=1 MACRO_K=32 MACRO_LOG=1 TRACE=1",
+   "seeds": 150,
+   "wins": 2,
+   "win_rate_pct": 1.33,
+   "avg_floor": 28.72,
+   "reached_act2": 141,
+   "reached_act3": 25,
+   "secs_per_seed_mean": 303.4,
+   "wall_secs": 3460,
+   "clairvoyant": false,
+   "deaths": {
+    "A1_boss": 6,
+    "A1_elite": 3,
+    "A2_monster": 49,
+    "A2_elite": 38,
+    "A2_boss": 29,
+    "A3": 23
+   }
+  },
+  {
+   "name": "ab_mrest_K16",
+   "description": "Phase 3 2b: honest rest-vs-smith search (K=16 worlds, 6-floor horizon, K=4 combat in rollouts) on mainline_h1",
+   "group": "honest",
+   "env": "HONEST=1 HONEST_CPP=1 HONEST_K=64 MACRO_REST=1 MACRO_K=16 MACRO_COMBAT_K=4 MACRO_LOG=1 TRACE=1",
+   "seeds": 150,
+   "wins": 7,
+   "win_rate_pct": 4.67,
+   "avg_floor": 25.24,
+   "reached_act2": 119,
+   "reached_act3": 17,
+   "secs_per_seed_mean": 352.3,
+   "wall_secs": 4649,
+   "clairvoyant": false,
+   "deaths": {
+    "A1_boss": 15,
+    "A1_elite": 10,
+    "A1_other": 6,
+    "A2_monster": 52,
+    "A2_elite": 34,
+    "A2_boss": 16,
+    "A3": 10
+   }
+  },
+  {
+   "name": "ab_pv_d8_K128",
+   "description": "Phase 3 1c: prior top-3 + V leaf depth 8 at K=128 (replaces the mis-sized K=384 arm)",
+   "group": "honest",
+   "env": "HONEST=1 HONEST_CPP=1 HONEST_K=128 HONEST_PRIOR=nets/h1/prior_h1.npz HONEST_TOPK=3 HONEST_VNET=nets/h1/value_h1.npz HONEST_DEPTH=8 TRACE=1",
+   "seeds": 150,
+   "wins": 0,
+   "win_rate_pct": 0.0,
+   "avg_floor": 20.56,
+   "reached_act2": 95,
+   "reached_act3": 7,
+   "secs_per_seed_mean": 126.0,
+   "wall_secs": 1387,
+   "clairvoyant": false,
+   "deaths": {
+    "A1_boss": 25,
+    "A1_elite": 17,
+    "A1_other": 13,
+    "A2_monster": 58,
+    "A2_elite": 24,
+    "A2_boss": 6,
+    "A3": 7
    }
   }
  ]

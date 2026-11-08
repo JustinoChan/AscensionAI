@@ -544,6 +544,61 @@
         }
       },
       "notes": "Phase 2 done; gate passed. Holdout-150 K=64 vs K=8: +3.57 floors (bootstrap 95% CI +2.45..+4.75), wins 3 -> 7 (4-0 flips, McNemar p=0.125); K=64 vs K=32 +1.84 (CI +0.85..+2.86). Chosen engine: 1-ply K=64. MCTS and POTION_SAVE lost to 1-ply."
+    },
+    {
+      "run_id": "phase3_step1_2_20261107",
+      "report": "016_phase3_step1_2.md",
+      "search_honesty": "honest",
+      "model_path": "mainline_h1 (C++ 1-ply K=64) + nets/h1 prior/value + MACRO_CARD / MACRO_REST",
+      "training_mode": "honest_harvest + supervised nets + honest macro search",
+      "hyperparameters": {
+        "harvest_seeds": 1600,
+        "fights": 23462,
+        "macro_k_card": 32,
+        "macro_k_rest": 16,
+        "macro_horizon_floors": 6,
+        "eval_seeds": 150
+      },
+      "evaluation": {
+        "games": 150,
+        "arms": {
+          "cpp_1ply_K64": {
+            "average_floor": 24.61,
+            "wins": 6
+          },
+          "ab_mcard_K32": {
+            "average_floor": 28.72,
+            "wins": 2
+          },
+          "ab_mrest_K16": {
+            "average_floor": 25.24,
+            "wins": 7
+          },
+          "ab_prior3_K64": {
+            "average_floor": 23.0,
+            "wins": 3
+          },
+          "ab_pv_d8_K64": {
+            "average_floor": 22.37,
+            "wins": 2
+          },
+          "ab_pv_d16_K64": {
+            "average_floor": 23.37,
+            "wins": 2
+          },
+          "ab_pv_d8_K128": {
+            "average_floor": 20.56,
+            "wins": 0
+          }
+        },
+        "holdout_150": {
+          "holdout_K128": {
+            "average_floor": 26.72,
+            "wins": 5
+          }
+        }
+      },
+      "notes": "Card search vs K=64: +4.11 floors (CI +2.46..+5.79), wins 6->2 (McNemar p=0.125); Act-1 boss deaths 23->6 but Act-2 boss deaths 16->29 (scaling cards at Act-2 entry 3.16->1.48). Value leaf/prior: offline pass, online loss; K=128 value-leaf -4.05 (biased leaf). K=384 equal-wall arm quarantined (mis-sized)."
     }
   ]
 }
