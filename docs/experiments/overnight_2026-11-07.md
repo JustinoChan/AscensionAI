@@ -90,7 +90,7 @@ A2_boss         16    13     -3
 A3              10     8     -2
 ```
 
-- ab_pv_d8_Keq: not run
+- ab_pv_d8_Keq: **stopped and quarantined** (17:35). The equal-wall-clock K was sized from c2's wall time (565 s), but c2's runs were short because that arm dies earlier, so it picked K=384, about 14x K=64's cost per seed (median 32 min per seed, ETA +6 h, seeds near the 2 h kill timeout). The 35 finished seeds are kept in `sim_logs/honest_partial_ab_pv_d8_K384` and excluded from the ledger. A properly sized replacement, `ab_pv_d8_K128`, is queued.
 ### ab_pv_d16_K64
 
 `HONEST=1 HONEST_CPP=1 HONEST_K=64 HONEST_PRIOR=nets/h1/prior_h1.npz HONEST_TOPK=3 HONEST_VNET=nets/h1/value_h1.npz HONEST_DEPTH=16`
