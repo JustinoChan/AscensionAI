@@ -1,0 +1,5 @@
+{
+ "prior": true,
+ "value": true,
+ "why": "prior: regret@3 0.703 vs varN 0.805, recall@3 0.829 vs varN 0.819 (need both better); value: V_mae 14.82 vs const 24.48 (need <=0.8x), V_r2 0.447 (need >0.2), win ECE 0.041"
+}
