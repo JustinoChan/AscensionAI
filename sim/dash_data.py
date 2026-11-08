@@ -18,7 +18,7 @@ import collections, glob, json, math, os, re, sqlite3, subprocess, sys, time
 os.chdir(os.path.expanduser("~/sts"))
 DB = "sim_logs/results.db"
 EVAL0, HOLD0 = 10007, 20011
-REF = {"eval": "cpp_1ply_K64", "holdout": "holdout_K64"}
+REF = {"eval": "cpp_1ply_K64", "holdout": "holdout_K64", "eval500": "eval500_K64"}
 
 
 def con():
@@ -37,6 +37,8 @@ def wilson(k, n, z=1.96):
 
 def seed_set(seeds):
     s = set(seeds)
+    if 40009 in s:
+        return "eval500"
     if EVAL0 in s:
         return "eval"
     if HOLD0 in s:
@@ -64,7 +66,7 @@ def progress():
     out.sort(key=lambda r: r["t"])
     best = {}
     for r in out:
-        if r["clairvoyant"] or r["n"] < 150 or r["set"] not in ("eval", "holdout"):
+        if r["clairvoyant"] or r["n"] < 150 or r["set"] not in ("eval", "holdout", "eval500"):
             continue
         b = best.get(r["set"])
         if b is None or (r["floor"], r["wins"]) > (b["floor"], b["wins"]):

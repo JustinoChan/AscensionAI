@@ -36,7 +36,7 @@ def save(q):
     os.makedirs(D, exist_ok=True)
     json.dump(q, open(Q + ".t", "w"), indent=1); os.replace(Q + ".t", Q)
     runs = [j["arm"] for j in q["jobs"] if j.get("arm") and j["state"] != "cancelled"]
-    json.dump({"name": "Job queue", "runs": runs, "totals": {r: 150 for r in runs},
+    json.dump({"name": "Job queue", "runs": runs, "totals": {r: (500 if r.startswith("eval500") else 150) for r in runs},
                "est_secs": {r: 3600 for r in runs}}, open("sim_logs/queues/jobq.json", "w"), indent=1)
 
 
