@@ -79,6 +79,8 @@ def ingest(quiet=False):
             m = json.load(open(p))
         except Exception:
             continue
+        if m.get("no_ledger"):
+            continue
         d = os.path.dirname(p)
         name = m.get("name")
         rows = []

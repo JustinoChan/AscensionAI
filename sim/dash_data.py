@@ -18,7 +18,7 @@ import collections, glob, json, math, os, re, sqlite3, subprocess, sys, time
 os.chdir(os.path.expanduser("~/sts"))
 DB = "sim_logs/results.db"
 EVAL0, HOLD0 = 10007, 20011
-REF = {"eval": "cpp_1ply_K64", "holdout": "holdout_K64", "eval500": "eval500_K64"}
+REF = {"eval": "cpp_1ply_K64", "holdout": "holdout_K64"}
 
 
 def con():
@@ -37,8 +37,6 @@ def wilson(k, n, z=1.96):
 
 def seed_set(seeds):
     s = set(seeds)
-    if 40009 in s:
-        return "eval500"
     if EVAL0 in s:
         return "eval"
     if HOLD0 in s:
@@ -66,7 +64,7 @@ def progress():
     out.sort(key=lambda r: r["t"])
     best = {}
     for r in out:
-        if r["clairvoyant"] or r["n"] < 150 or r["set"] not in ("eval", "holdout", "eval500"):
+        if r["clairvoyant"] or r["n"] < 150 or r["set"] not in ("eval", "holdout"):
             continue
         b = best.get(r["set"])
         if b is None or (r["floor"], r["wins"]) > (b["floor"], b["wins"]):
@@ -389,6 +387,49 @@ def training():
     return out
 
 
+# ------------------------------------------------------------------ llm teacher
+def llm():
+    import urllib.request
+    gw = subprocess.run(["ip", "route"], capture_output=True, text=True).stdout
+    host = "http://%s:11434" % next((l.split()[2] for l in gw.splitlines() if l.startswith("default")), "127.0.0.1")
+    out = {"host": host, "up": False, "loaded": [], "installed": []}
+    try:
+        out["installed"] = [m["name"] for m in json.loads(urllib.request.urlopen(host + "/api/tags", timeout=3).read())["models"]]
+        out["loaded"] = [{"name": m["name"], "vram_gb": round(m.get("size_vram", 0) / 2 ** 30, 2)}
+                         for m in json.loads(urllib.request.urlopen(host + "/api/ps", timeout=3).read()).get("models", [])]
+        out["up"] = True
+    except Exception as e:
+        out["error"] = str(e)[:120]
+    files = glob.glob("sim_logs/honest/*/llm_seed_*.jsonl")
+    if files:
+        run = os.path.basename(os.path.dirname(max(files, key=os.path.getmtime)))
+        recs = []
+        for f in glob.glob("sim_logs/honest/%s/llm_seed_*.jsonl" % run):
+            for line in open(f):
+                try:
+                    recs.append(json.loads(line))
+                except Exception:
+                    pass
+        now = time.time()
+        real = [r for r in recs if r.get("error") != "dryrun"]
+        lat = [r["latency"] for r in real if not r["fallback"]]
+        recent = [r for r in recs if now - r["t"] < 600]
+        card = [r for r in real if r["screen"] in ("REWARDS", "CARD_SELECT") and not r["fallback"] and r.get("policy_choice") is not None]
+        run_meta = {}
+        try:
+            run_meta = json.load(open("sim_logs/honest/%s/RUN.json" % run))
+        except Exception:
+            pass
+        out.update({"run": run, "model": (recs[-1].get("model") if recs else None), "think": (recs[-1].get("think") if recs else None),
+                    "decisions": len(recs), "seeds": len(set(r["seed"] for r in recs)), "per_min": round(len(recent) / 10.0, 1),
+                    "mean_latency": round(sum(lat) / len(lat), 2) if lat else None,
+                    "median_latency": round(sorted(lat)[len(lat) // 2], 2) if lat else None,
+                    "fallback_rate": round(sum(r["fallback"] for r in recs) / max(1, len(recs)), 3),
+                    "card_disagree": round(sum(r["choice"] != r["policy_choice"] for r in card) / max(1, len(card)), 3) if card else None,
+                    "total": run_meta.get("total"), "done": len(glob.glob("sim_logs/honest/%s/seed_*.json" % run))})
+    return out
+
+
 # ------------------------------------------------------------------ digest
 def digest(write=False, hours=24):
     now = time.time()
@@ -452,6 +493,8 @@ if __name__ == "__main__":
         r = digest(write="--write" in a)
         if "--md" in a:
             print(r["markdown"]); sys.exit(0)
+    elif cmd == "llm":
+        r = llm()
     elif cmd == "traced":
         r = traced()
     else:

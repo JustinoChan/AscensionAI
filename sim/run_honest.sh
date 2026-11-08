@@ -20,12 +20,12 @@ d, arm, n, envs, desc, pgid = sys.argv[1:]
 import subprocess
 commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip()
 dirty = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no"], capture_output=True, text=True).stdout.strip()
-json.dump({"git_commit": commit + ("+dirty" if dirty else ""), "name": arm, "description": desc, "group": "honest", "total": int(n), "parallel": 14,
+json.dump({"git_commit": commit + ("+dirty" if dirty else ""), "name": arm, "description": desc, "group": "honest", "total": int(n), "parallel": int(__import__("os").environ.get("PAR", "14")),
            "env": envs, "seed_set": "%s + i*%s" % (__import__("os").environ["SEED0"], __import__("os").environ["SEEDSTEP"]), "started_at": time.time(), "pgid": int(pgid),
            "log": d + "/run.log", "out_dir": d}, open(d + "/RUN.json", "w"), indent=1)
 PY
 echo "[$(date '+%F %T')] start $arm  n=$n  timeout=${to}s  env: $envs" >> "$OUTD/run.log"
-seq 0 $((n-1)) | xargs -P 14 -I{} bash -c '
+seq 0 $((n-1)) | xargs -P ${PAR:-14} -I{} bash -c '
   seed=$(( SEED0 + {} * SEEDSTEP )); out="$OUTD/seed_$seed.json"
   [ -s "$out" ] && exit 0
   env $ARMENV timeout -s KILL $TO "$PY" eval_fullrun_analytics_v2.py $seed macro > "$out.tmp" 2>"$OUTD/seed_$seed.err" \

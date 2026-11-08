@@ -86,6 +86,22 @@ MACRO_KIND = {kind: {"K": int(os.environ.get("MACRO_K_" + kind.upper(), MACRO_K)
                      "H": int(os.environ.get("MACRO_H_" + kind.upper(), MACRO_H)),
                      "CK": int(os.environ.get("MACRO_COMBAT_K_" + kind.upper(), MACRO_COMBAT_K))}
               for kind in ("card", "rest")}
+# Phase 3 step 3.2 (default off): learned out-of-combat policy (rl_macro_train.py).
+#   MACRO_POLICY=<npz>      candidate scorer replaces the heuristic macro at every live out-of-combat
+#                           decision with >= 2 legal options. Each legal option i is described by
+#                           [obs1200(now), obs1200(after i) - obs1200(now), screen one-hot(16)], where
+#                           "after i" is computed on a DETERMINIZED copy (unknown nodes / random event
+#                           outcomes are sampled, never read). MLP 2416-256-256-1, softmax over options.
+#   MACRO_FEAT_LOG=<dir>    (no policy) log the same candidate features + the heuristic's choice (BC data)
+#   MACRO_POLICY_SAMPLE=1   sample from softmax (training); default argmax (evaluation)
+#   MACRO_POLICY_LOG=<dir>  write <dir>/seed_<s>.npz with (obs, mask, action, logp) + run outcome
+MACRO_POLICY = os.environ.get("MACRO_POLICY", "")
+MACRO_POLICY_SAMPLE = os.environ.get("MACRO_POLICY_SAMPLE", "0") == "1"
+MACRO_POLICY_LOG = os.environ.get("MACRO_POLICY_LOG", "")
+MACRO_FEAT_LOG = os.environ.get("MACRO_FEAT_LOG", "")
+MACRO_MAX_CANDS = 30
+# LLM_MACRO=1: local-Ollama out-of-combat teacher (llm_macro.py; default off, never imported when off)
+LLM_MACRO = os.environ.get("LLM_MACRO", "0") == "1"
 HONEST_PRIOR = os.environ.get("HONEST_PRIOR", "")
 HONEST_TOPK = int(os.environ.get("HONEST_TOPK", "0"))
 HONEST_VNET = os.environ.get("HONEST_VNET", "")
@@ -166,6 +182,11 @@ def make_honest(base, GAMMA, TOPK, ROLL_CAP):
                     pass
 
         def _macro_action(self):
+            if MACRO_POLICY and not getattr(self, "_in_rollout", False) and not self.__dict__.get("_hstack"):
+                a = self._policy_action()
+                if a is not None:
+                    self._hb()
+                    return a
             self._hb()
             top = bool(HARVEST) and not getattr(self, "_in_rollout", False) and not self.__dict__.get("_hstack")
             if top:
@@ -175,13 +196,97 @@ def make_honest(base, GAMMA, TOPK, ROLL_CAP):
                     mk = self._mask()
                 except Exception:
                     o, mk = None, None
+            fl = None
+            if MACRO_FEAT_LOG and not MACRO_POLICY and not getattr(self, "_in_rollout", False) and not self.__dict__.get("_hstack"):
+                mk2 = self._mask()
+                if int(mk2.sum()) >= 2:
+                    fl = self._cand_feats(mk2)
             a = self._hwrapped("_macro_action", True)
+            if fl is not None and a is not None and int(a) < len(fl[0]):
+                gc = self.env.gc
+                self.__dict__.setdefault("_pol_log", []).append((fl[0].astype("float16"), int(a), 0.0, fl[1], int(gc.floor_num), int(gc.act)))
             if top and a is not None and o is not None:
                 gc = self.env.gc
                 self._hv()["m"].append((o, mk, str(gc.screen_state).split(".")[-1], int(a),
                                         int(gc.floor_num), int(gc.act), int(gc.cur_hp), int(gc.max_hp),
                                         int(gc.gold), len(gc.deck)))
+            if LLM_MACRO and a is not None and not getattr(self, "_in_rollout", False) and not self.__dict__.get("_hstack"):
+                mk3 = self._mask()
+                if int(mk3.sum()) >= 2:
+                    T = self.__dict__.get("_teacher")
+                    if T is None:
+                        import llm_macro
+                        T = self._teacher = llm_macro.Teacher(self)
+                    c = T.choose(mk3, int(a))
+                    if c is not None:
+                        return int(c)
             return a
+
+        # ---------------- learned out-of-combat policy (MACRO_POLICY) ----------------
+        _SS = ["EVENT_SCREEN", "REWARDS", "BOSS_RELIC_REWAR", "CARD_SELECT", "MAP_SCREEN", "TREASURE_ROOM",
+               "REST_ROOM", "SHOP_ROOM", "BATTLE", "GAME_OVER", "NEOW", "OTHER"]
+
+        def _cand_feats(self, mask):
+            """[n, 2416] float32 features for legal options 0..n-1 (honest afterstates on a determinized copy)."""
+            import numpy as np
+            n = min(int(mask.sum()), MACRO_MAX_CANDS)
+            live = self._hsnap()
+            o0 = self._obs1200().astype(np.float32)
+            ss = str(self.env.gc.screen_state).split(".")[-1]
+            oh = np.zeros(16, np.float32)
+            oh[self._SS.index(ss) if ss in self._SS else 11] = 1
+            det = self._hdet(0)
+            F = np.zeros((n, 2416), np.float32)
+            for k in range(n):
+                self._hload(live, det)
+                try:
+                    self._ff_step(k)
+                    o1 = self._obs1200().astype(np.float32)
+                except Exception:
+                    o1 = o0
+                F[k, :1200] = o0
+                F[k, 1200:2400] = o1 - o0
+                F[k, 2400:] = oh
+            self._hload(live)
+            return F, ss
+
+        def _policy_action(self):
+            import numpy as np
+            mask = self._mask()
+            if int(mask.sum()) < 2:
+                return None
+            P = self.__dict__.get("_pol")
+            if P is None:
+                z = np.load(MACRO_POLICY)
+                P = self._pol = [(z["l%d.weight" % i], z["l%d.bias" % i]) for i in range(3)]
+                self._pol_rng = np.random.default_rng((int(self.seed) * 2654435761 + 97) % (1 << 32))
+                self._pol_log = []
+            F, ss = self._cand_feats(mask)
+            h = F
+            for li, (W, b) in enumerate(P):
+                x = h @ W.T + b
+                h = x if li == len(P) - 1 else 0.5 * x * (1.0 + np.tanh(0.7978845608 * (x + 0.044715 * x ** 3)))
+            lg = h[:, 0].astype(np.float64)
+            pr = np.exp(lg - lg.max()); pr /= pr.sum()
+            a = int(self._pol_rng.choice(len(pr), p=pr)) if MACRO_POLICY_SAMPLE else int(np.argmax(lg))
+            if MACRO_POLICY_LOG:
+                gc = self.env.gc
+                self._pol_log.append((F.astype(np.float16), a, float(np.log(pr[a] + 1e-12)), ss, int(gc.floor_num), int(gc.act)))
+            return a
+
+        def _pol_dump(self, seed, out, path):
+            import numpy as np
+            L = self.__dict__.get("_pol_log", [])
+            os.makedirs(path, exist_ok=True)
+            n = [len(x[0]) for x in L]
+            p = os.path.join(path, "seed_%d" % int(seed))
+            np.savez_compressed(p + ".tmp.npz",
+                                feats=np.concatenate([x[0] for x in L]) if L else np.zeros((0, 2416), np.float16),
+                                ncand=np.array(n, np.int16), action=np.array([x[1] for x in L], np.int16),
+                                logp=np.array([x[2] for x in L], np.float32), ss=np.array([x[3] for x in L], "U16"),
+                                floor=np.array([x[4] for x in L], np.int16), act=np.array([x[5] for x in L], np.int16),
+                                run=np.array([int(seed), int(out["floor"]), int(out["win"]), int(out["act"])], np.int32))
+            os.replace(p + ".tmp.npz", p + ".npz")
 
         # ---------------- Phase-3 harvest (HARVEST=<dir>) ----------------
         def _hv(self):
@@ -260,6 +365,12 @@ def make_honest(base, GAMMA, TOPK, ROLL_CAP):
             out = super().play_v2(seed)
             if HARVEST:
                 self._hv_dump(seed, out)
+            if MACRO_POLICY and MACRO_POLICY_LOG:
+                self._pol_dump(seed, out, MACRO_POLICY_LOG)
+            if MACRO_FEAT_LOG and not MACRO_POLICY:
+                self._pol_dump(seed, out, MACRO_FEAT_LOG)
+            if LLM_MACRO and self.__dict__.get("_teacher") is not None:
+                out["llm"] = self._teacher.summary()
             return out
 
         def _smith_best(self):
@@ -383,7 +494,8 @@ def make_honest(base, GAMMA, TOPK, ROLL_CAP):
                 pnet = self._prior_net() if HONEST_PRIOR else self.net
                 prior = pnet.logits(self._obs1235(), mask)
                 legal = sorted(legal, key=lambda a: prior[a], reverse=True)[:topk]
-            dets = [self._hdet(k) for k in range(K)]
+            clair = self.__dict__.get("_clair", False)     # headroom diagnostic only (headroom.py); never set in play
+            dets = [0] if clair else [self._hdet(k) for k in range(K)]
             if HONEST_CPP:
                 # native batched rollouts: same worlds, same policy, same score
                 e = self.env
@@ -395,14 +507,14 @@ def make_honest(base, GAMMA, TOPK, ROLL_CAP):
                                                         self._vnet(), HONEST_DEPTH, HONEST_VSCALE)
                 else:
                     scores, _ = slaythespire.rollout_qb(e.gc, e.bc, legal, dets, self._cnet(), 0,
-                                                        GAMMA, ROLL_CAP, False,
+                                                        GAMMA, ROLL_CAP, clair,
                                                         [] if last is None else [int(v) for v in last])
                 best, bq = legal[0], -1e18
                 for a, row in zip(legal, scores):
                     tot = 0.0
                     for v in row:
                         tot += v
-                    qa = tot / K
+                    qa = tot / len(dets)
                     if qa > bq:
                         bq, best = qa, a
                 if HARVEST and not getattr(self, "_in_rollout", False):
