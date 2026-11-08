@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-11-07 20:37",
+ "generated_at": "2026-11-08 01:09",
  "eval_seeds": "10007 + i*7919",
  "note": "Headless sts_lightspeed sim, Ironclad A0. clairvoyant = search replayed the true seed (saw future draws/rolls); honest = search samples hidden information.",
  "bucket_order": [
@@ -755,6 +755,98 @@
     "A2_elite": 24,
     "A2_boss": 6,
     "A3": 7
+   }
+  },
+  {
+   "name": "ab_mcard_a1",
+   "description": "Phase 3 2c-1a: card search in Act 1 only (32 worlds, 6-floor horizon)",
+   "group": "honest",
+   "env": "HONEST=1 HONEST_CPP=1 HONEST_K=64 MACRO_CARD=1 MACRO_K_CARD=32 MACRO_CARD_ACTS=1 MACRO_LOG=1 TRACE=1",
+   "seeds": 150,
+   "wins": 3,
+   "win_rate_pct": 2.0,
+   "avg_floor": 28.65,
+   "reached_act2": 141,
+   "reached_act3": 27,
+   "secs_per_seed_mean": 255.5,
+   "wall_secs": 2930,
+   "clairvoyant": false,
+   "deaths": {
+    "A1_boss": 6,
+    "A1_elite": 3,
+    "A2_monster": 53,
+    "A2_elite": 35,
+    "A2_boss": 26,
+    "A3": 24
+   }
+  },
+  {
+   "name": "ab_mcard_h17",
+   "description": "Phase 3 2c-1b: card search, horizon through the act boss (16 worlds)",
+   "group": "honest",
+   "env": "HONEST=1 HONEST_CPP=1 HONEST_K=64 MACRO_CARD=1 MACRO_K_CARD=16 MACRO_H_CARD=17 MACRO_LOG=1 TRACE=1",
+   "seeds": 150,
+   "wins": 4,
+   "win_rate_pct": 2.67,
+   "avg_floor": 28.23,
+   "reached_act2": 139,
+   "reached_act3": 22,
+   "secs_per_seed_mean": 252.9,
+   "wall_secs": 2773,
+   "clairvoyant": false,
+   "deaths": {
+    "A1_boss": 7,
+    "A1_elite": 2,
+    "A1_other": 2,
+    "A2_monster": 46,
+    "A2_elite": 39,
+    "A2_boss": 32,
+    "A3": 18
+   }
+  },
+  {
+   "name": "ab_stack",
+   "description": "Phase 3 2c: ab_mcard_a1 card fix + rest search on mainline_h1",
+   "group": "honest",
+   "env": "HONEST=1 HONEST_CPP=1 HONEST_K=64 MACRO_CARD=1 MACRO_K_CARD=32 MACRO_CARD_ACTS=1 MACRO_REST=1 MACRO_K_REST=16 MACRO_COMBAT_K_REST=4 MACRO_LOG=1 TRACE=1",
+   "seeds": 150,
+   "wins": 5,
+   "win_rate_pct": 3.33,
+   "avg_floor": 28.15,
+   "reached_act2": 139,
+   "reached_act3": 19,
+   "secs_per_seed_mean": 427.8,
+   "wall_secs": 5061,
+   "clairvoyant": false,
+   "deaths": {
+    "A1_boss": 7,
+    "A1_elite": 4,
+    "A2_monster": 45,
+    "A2_elite": 42,
+    "A2_boss": 33,
+    "A3": 14
+   }
+  },
+  {
+   "name": "holdout_stack",
+   "description": "Phase 3 2c GATE holdout-150: ab_mcard_a1 + rest search",
+   "group": "honest",
+   "env": "HONEST=1 HONEST_CPP=1 HONEST_K=64 MACRO_CARD=1 MACRO_K_CARD=32 MACRO_CARD_ACTS=1 MACRO_REST=1 MACRO_K_REST=16 MACRO_COMBAT_K_REST=4 MACRO_LOG=1 TRACE=1",
+   "seeds": 150,
+   "wins": 2,
+   "win_rate_pct": 1.33,
+   "avg_floor": 29.3,
+   "reached_act2": 146,
+   "reached_act3": 25,
+   "secs_per_seed_mean": 451.7,
+   "wall_secs": 5160,
+   "clairvoyant": false,
+   "deaths": {
+    "A1_boss": 4,
+    "A2_monster": 48,
+    "A2_elite": 39,
+    "A2_boss": 34,
+    "A3": 23
    }
   }
  ]

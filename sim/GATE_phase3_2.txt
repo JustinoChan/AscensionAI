@@ -1,0 +1,53 @@
+Phase 3 step 2c gate (2026-11-07 22:18:37)
+card fix chosen: ab_mcard_a1  because higher paired floor delta (4.04 vs 3.62)
+stack env: HONEST=1 HONEST_CPP=1 HONEST_K=64 MACRO_CARD=1 MACRO_K_CARD=32 MACRO_CARD_ACTS=1 MACRO_REST=1 MACRO_K_REST=16 MACRO_COMBAT_K_REST=4 MACRO_LOG=1 TRACE=1
+
+A = cpp_1ply_K64
+B = ab_mcard_a1
+shared seeds: 150
+wins   A   6 (4.0%, 95% CI 1.8-8.5%)   B   3 (2.0%, 95% CI 0.7-5.7%)
+win flips: A-only 4, B-only 1  -> exact McNemar p = 0.375
+avg floor A 24.61  B 28.65   paired diff B-A = +4.04  (bootstrap 95% CI +2.30 .. +5.79)  *
+
+A = cpp_1ply_K64
+B = ab_mcard_h17
+shared seeds: 150
+wins   A   6 (4.0%, 95% CI 1.8-8.5%)   B   4 (2.7%, 95% CI 1.0-6.7%)
+win flips: A-only 5, B-only 3  -> exact McNemar p = 0.727
+avg floor A 24.61  B 28.23   paired diff B-A = +3.62  (bootstrap 95% CI +1.81 .. +5.44)  *
+
+== stack on eval-150 vs K=64
+A = cpp_1ply_K64
+B = ab_stack
+shared seeds: 150
+wins   A   6 (4.0%, 95% CI 1.8-8.5%)   B   5 (3.3%, 95% CI 1.4-7.6%)
+win flips: A-only 4, B-only 3  -> exact McNemar p = 1.000
+avg floor A 24.61  B 28.15   paired diff B-A = +3.55  (bootstrap 95% CI +1.75 .. +5.31)  *
+
+outcome          A     B    B-A
+WIN              6     5     -1
+A1_boss         23     7    -16
+A1_elite         8     4     -4
+A1_other         7     0     -7
+A2_monster      46    45     -1
+A2_elite        34    42     +8
+A2_boss         16    33    +17
+A3              10    14     +4
+
+== GATE: stack on holdout-150 vs holdout K=64
+A = holdout_K64
+B = holdout_stack
+shared seeds: 150
+wins   A   7 (4.7%, 95% CI 2.3-9.3%)   B   2 (1.3%, 95% CI 0.4-4.7%)
+win flips: A-only 5, B-only 0  -> exact McNemar p = 0.062
+avg floor A 26.67  B 29.30   paired diff B-A = +2.63  (bootstrap 95% CI +1.09 .. +4.21)  *
+
+outcome          A     B    B-A
+WIN              7     2     -5
+A1_boss         12     4     -8
+A1_elite         5     0     -5
+A1_other         5     0     -5
+A2_monster      52    48     -4
+A2_elite        30    39     +9
+A2_boss         24    34    +10
+A3              15    23     +8

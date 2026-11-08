@@ -78,6 +78,14 @@ MACRO_H = int(os.environ.get("MACRO_H", "6"))
 MACRO_COMBAT_K = int(os.environ.get("MACRO_COMBAT_K", "0"))
 MACRO_HPW = float(os.environ.get("MACRO_HPW", "2"))
 MACRO_LOG = os.environ.get("MACRO_LOG", "0") == "1"
+# per-decision overrides (default: the shared MACRO_* values above)
+#   MACRO_CARD_ACTS=1[,2,3]  only search card rewards in these acts (default: all)
+#   MACRO_K_CARD / MACRO_K_REST, MACRO_H_CARD / MACRO_H_REST, MACRO_COMBAT_K_CARD / MACRO_COMBAT_K_REST
+MACRO_CARD_ACTS = [int(x) for x in os.environ.get("MACRO_CARD_ACTS", "").split(",") if x.strip()]
+MACRO_KIND = {kind: {"K": int(os.environ.get("MACRO_K_" + kind.upper(), MACRO_K)),
+                     "H": int(os.environ.get("MACRO_H_" + kind.upper(), MACRO_H)),
+                     "CK": int(os.environ.get("MACRO_COMBAT_K_" + kind.upper(), MACRO_COMBAT_K))}
+              for kind in ("card", "rest")}
 HONEST_PRIOR = os.environ.get("HONEST_PRIOR", "")
 HONEST_TOPK = int(os.environ.get("HONEST_TOPK", "0"))
 HONEST_VNET = os.environ.get("HONEST_VNET", "")
@@ -353,7 +361,8 @@ def make_honest(base, GAMMA, TOPK, ROLL_CAP):
             self._hb()
             room = self._room()
             if getattr(self, "_in_rollout", False):
-                K = MACRO_COMBAT_K if (MACRO_CARD or MACRO_REST) and MACRO_COMBAT_K > 0 else HONEST_TAIL_K
+                ck = getattr(self, "_mck", MACRO_COMBAT_K)
+                K = ck if (MACRO_CARD or MACRO_REST) and ck > 0 else HONEST_TAIL_K
             else:
                 K = HONEST_K_BY_ROOM.get(room, HONEST_K)
             engine = HONEST_ENGINE
@@ -415,7 +424,7 @@ def make_honest(base, GAMMA, TOPK, ROLL_CAP):
         # ---------------- honest macro search (MACRO_CARD / MACRO_REST) ----------------
         def _choose(self, ss, labels, deck, strike, defend, gold, act):
             if not getattr(self, "_in_rollout", False):
-                if MACRO_CARD and ss in ("REWARDS", "CARD_SELECT") and any(L["dd"] >= 1 for L in labels)                         and not any(L.get("ud", 0) >= 1 for L in labels):
+                if MACRO_CARD and ss in ("REWARDS", "CARD_SELECT") and any(L["dd"] >= 1 for L in labels)                         and not any(L.get("ud", 0) >= 1 for L in labels)                         and (not MACRO_CARD_ACTS or int(self.env.gc.act) in MACRO_CARD_ACTS):
                     takes = sorted([L for L in labels if L["dd"] >= 1], key=lambda x: x["i"])
                     noops = [L for L in labels if L["dd"] == 0 and L["rd"] == 0]
                     leave = [L for L in noops if L["to"] == "MAP_SCREEN"]
@@ -433,13 +442,15 @@ def make_honest(base, GAMMA, TOPK, ROLL_CAP):
         def _macro_search(self, kind, cands):
             gc = self.env.gc
             f0, a0 = int(gc.floor_num), int(gc.act)
-            fmax = min(f0 + MACRO_H, 17 * a0)            # never past this act's boss floor
+            P = MACRO_KIND[kind]
+            fmax = min(f0 + P["H"], 17 * a0)            # never past this act's boss floor
             live = self._hsnap()
             hist, srf = list(self.history), self._shop_removed_floor
             stack = self.__dict__.get("_hstack", [])
             saved = list(stack)
-            dets = [self._hdet(k) for k in range(MACRO_K)]
+            dets = [self._hdet(k) for k in range(P["K"])]
             self._in_rollout = True
+            self._mck = P["CK"]
             vals = []
             try:
                 for ci in cands:
@@ -469,7 +480,7 @@ def make_honest(base, GAMMA, TOPK, ROLL_CAP):
                 if not e.in_combat and int(e.gc.floor_num) >= fmax:
                     break
                 if e.in_combat:
-                    if MACRO_COMBAT_K > 0:
+                    if getattr(self, "_mck", MACRO_COMBAT_K) > 0:
                         a = self._search_action()
                     else:
                         a = self._cnet().greedy_state(e.gc, e.bc)
