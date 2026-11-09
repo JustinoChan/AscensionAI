@@ -178,9 +178,9 @@ def rl(iters):
     prog = os.environ.get("RL_PROG", "sim_logs/honest/rl_macro")
     os.makedirs(prog, exist_ok=True)
     json.dump({"name": "rl_macro", "description": "Phase 3 3.2: RL out-of-combat policy (PPO on run outcome, K=%s combat)" % COMBAT_K,
-               "group": "rl", "total": iters * GAMES, "parallel": WORKERS, "env": "rl_macro_train.py",
+               "group": "rl", "total": iters * GAMES + (iters // EVAL_EVERY + 1) * len(VAL_SEEDS), "parallel": WORKERS, "env": "rl_macro_train.py",
                "seed_set": "%d + i*%d" % (RL_SEED0, RL_STEP), "started_at": time.time(), "log": "nets/rl/rl.log",
-               "out_dir": prog, "no_ledger": True}, open(prog + "/RUN.json", "w"), indent=1)
+               "out_dir": prog, "no_ledger": True, "pgid": os.getpgid(0)}, open(prog + "/RUN.json", "w"), indent=1)
     if not hist["rl_val"]:
         hist["rl_val"].append(evaluate_policy(OUT + "/pol_bc.npz", "bc"))
         json.dump(hist, open(hist_p, "w"))

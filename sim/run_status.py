@@ -114,6 +114,12 @@ def run_status(meta, now):
                 rate = min(rate, len(win) / (now - win[0]))
         elif done + partial > 0 and elapsed > 0:
             rate = (done + partial) / elapsed
+        # bursty producers (RL: games come in batches with update / validation pauses): never let a
+        # momentary lull push the estimate far below the whole-run average
+        if done + partial > 50 and elapsed > 0:
+            overall = (done + partial) / elapsed
+            if rate is None or rate < overall / 3:
+                rate = overall
         if rate:
             eta = remaining / rate
     pct = 100.0 * (done + (partial if state == "running" else 0)) / total if total else 0.0

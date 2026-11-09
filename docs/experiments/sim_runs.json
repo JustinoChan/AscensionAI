@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-11-08 01:09",
+ "generated_at": "2026-11-09 00:58",
  "eval_seeds": "10007 + i*7919",
  "note": "Headless sts_lightspeed sim, Ironclad A0. clairvoyant = search replayed the true seed (saw future draws/rolls); honest = search samples hidden information.",
  "bucket_order": [
@@ -847,6 +847,144 @@
     "A2_elite": 39,
     "A2_boss": 34,
     "A3": 23
+   }
+  },
+  {
+   "name": "eval500_K64",
+   "description": "eval500 baseline: mainline_h1 honest C++ 1-ply K=64 (no macro toggles), seeds 40009 + i*1000003",
+   "group": "honest",
+   "env": "HONEST=1 HONEST_CPP=1 HONEST_K=64 TRACE=1",
+   "seeds": 500,
+   "wins": 6,
+   "win_rate_pct": 1.2,
+   "avg_floor": 24.21,
+   "reached_act2": 384,
+   "reached_act3": 49,
+   "secs_per_seed_mean": 177.3,
+   "wall_secs": 6420,
+   "clairvoyant": false,
+   "deaths": {
+    "A1_boss": 74,
+    "A1_elite": 21,
+    "A1_other": 21,
+    "A2_monster": 187,
+    "A2_elite": 95,
+    "A2_boss": 53,
+    "A3": 43
+   }
+  },
+  {
+   "name": "rl_bcdata",
+   "description": "Phase 3 3.2 BC data: mainline macro + honest candidate features, K=8, bc seeds 800000011+i*19",
+   "group": "honest",
+   "env": "HONEST=1 HONEST_CPP=1 HONEST_K=8 MACRO_FEAT_LOG=sim_logs/rl/bcdata",
+   "seeds": 1000,
+   "wins": 7,
+   "win_rate_pct": 0.7,
+   "avg_floor": 21.43,
+   "reached_act2": 647,
+   "reached_act3": 45,
+   "secs_per_seed_mean": 14.8,
+   "wall_secs": 1600,
+   "clairvoyant": false,
+   "deaths": {
+    "A1_boss": 216,
+    "A1_elite": 67,
+    "A1_other": 70,
+    "A2_monster": 361,
+    "A2_elite": 180,
+    "A2_boss": 61,
+    "A3": 38
+   }
+  },
+  {
+   "name": "llm_smoke3_qwen3_8b_think0",
+   "description": "LLM teacher smoke test: qwen3:8b think=0, eval500 seeds 0-2",
+   "group": "honest",
+   "env": "HONEST=1 HONEST_CPP=1 HONEST_K=64 LLM_MACRO=1 LLM_MODEL=qwen3:8b LLM_THINK=0",
+   "seeds": 3,
+   "wins": 0,
+   "win_rate_pct": 0.0,
+   "avg_floor": 16.0,
+   "reached_act2": 0,
+   "reached_act3": 0,
+   "secs_per_seed_mean": 207.1,
+   "wall_secs": 0,
+   "clairvoyant": false,
+   "deaths": {
+    "A1_boss": 3
+   }
+  },
+  {
+   "name": "llm_pilot50_qwen3_8b_think0",
+   "description": "LLM teacher pilot: qwen3:8b think=0, eval500 seeds 0-49, K=64 combat",
+   "group": "honest",
+   "env": "HONEST=1 HONEST_CPP=1 HONEST_K=64 LLM_MACRO=1 LLM_MODEL=qwen3:8b LLM_THINK=0",
+   "seeds": 50,
+   "wins": 0,
+   "win_rate_pct": 0.0,
+   "avg_floor": 20.36,
+   "reached_act2": 23,
+   "reached_act3": 0,
+   "secs_per_seed_mean": 142.3,
+   "wall_secs": 1894,
+   "clairvoyant": false,
+   "deaths": {
+    "A1_boss": 22,
+    "A1_elite": 1,
+    "A1_other": 4,
+    "A2_monster": 10,
+    "A2_elite": 8,
+    "A2_boss": 4,
+    "A2_other": 1
+   }
+  },
+  {
+   "name": "rlval_heuristic_K8",
+   "description": "reference: mainline heuristics, K=8, on the 100 RL validation seeds",
+   "group": "honest",
+   "env": "HONEST=1 HONEST_CPP=1 HONEST_K=8",
+   "seeds": 100,
+   "wins": 0,
+   "win_rate_pct": 0.0,
+   "avg_floor": 21.39,
+   "reached_act2": 65,
+   "reached_act3": 6,
+   "secs_per_seed_mean": 13.7,
+   "wall_secs": 371,
+   "clairvoyant": false,
+   "deaths": {
+    "A1_boss": 19,
+    "A1_elite": 11,
+    "A1_other": 5,
+    "A2_monster": 41,
+    "A2_elite": 10,
+    "A2_boss": 8,
+    "A3": 6
+   }
+  },
+  {
+   "name": "eval500_rl_K64",
+   "description": "GATE: RL out-of-combat policy (it099) + honest K=64 combat, eval500",
+   "group": "honest",
+   "env": "HONEST=1 HONEST_CPP=1 HONEST_K=64 MACRO_POLICY=nets/rl/pol_gate.npz TRACE=1",
+   "seeds": 500,
+   "wins": 28,
+   "win_rate_pct": 5.6,
+   "avg_floor": 32.14,
+   "reached_act2": 459,
+   "reached_act3": 129,
+   "secs_per_seed_mean": 198.4,
+   "wall_secs": 7205,
+   "clairvoyant": false,
+   "deaths": {
+    "A1_boss": 33,
+    "A1_elite": 6,
+    "A1_other": 2,
+    "A2_monster": 90,
+    "A2_elite": 76,
+    "A2_boss": 164,
+    "A3": 101
    }
   }
  ]

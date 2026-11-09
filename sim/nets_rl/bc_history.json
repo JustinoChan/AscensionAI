@@ -1,0 +1,184 @@
+{
+ "bc": [
+  {
+   "epoch": 0,
+   "loss": 0.9911577701568604,
+   "val_acc": 0.726852674604585,
+   "by_screen": {
+    "BOSS_RELIC_REWAR": 0.362,
+    "CARD_SELECT": 0.538,
+    "EVENT_SCREEN": 0.675,
+    "MAP_SCREEN": 0.691,
+    "REST_ROOM": 0.883,
+    "REWARDS": 0.764,
+    "SHOP_ROOM": 0.414,
+    "TREASURE_ROOM": 1.0
+   }
+  },
+  {
+   "epoch": 1,
+   "loss": 0.9181609749794006,
+   "val_acc": 0.7817664830282566,
+   "by_screen": {
+    "BOSS_RELIC_REWAR": 0.29,
+    "CARD_SELECT": 0.824,
+    "EVENT_SCREEN": 0.653,
+    "MAP_SCREEN": 0.688,
+    "REST_ROOM": 0.905,
+    "REWARDS": 0.832,
+    "SHOP_ROOM": 0.392,
+    "TREASURE_ROOM": 1.0
+   }
+  },
+  {
+   "epoch": 2,
+   "loss": 0.7781277894973755,
+   "val_acc": 0.786564776968189,
+   "by_screen": {
+    "BOSS_RELIC_REWAR": 0.377,
+    "CARD_SELECT": 0.827,
+    "EVENT_SCREEN": 0.689,
+    "MAP_SCREEN": 0.665,
+    "REST_ROOM": 0.905,
+    "REWARDS": 0.84,
+    "SHOP_ROOM": 0.355,
+    "TREASURE_ROOM": 1.0
+   }
+  },
+  {
+   "epoch": 3,
+   "loss": 0.6658768057823181,
+   "val_acc": 0.7915407854984894,
+   "by_screen": {
+    "BOSS_RELIC_REWAR": 0.348,
+    "CARD_SELECT": 0.83,
+    "EVENT_SCREEN": 0.687,
+    "MAP_SCREEN": 0.671,
+    "REST_ROOM": 0.896,
+    "REWARDS": 0.848,
+    "SHOP_ROOM": 0.359,
+    "TREASURE_ROOM": 1.0
+   }
+  },
+  {
+   "epoch": 4,
+   "loss": 0.6507821083068848,
+   "val_acc": 0.7979385107517327,
+   "by_screen": {
+    "BOSS_RELIC_REWAR": 0.348,
+    "CARD_SELECT": 0.827,
+    "EVENT_SCREEN": 0.689,
+    "MAP_SCREEN": 0.71,
+    "REST_ROOM": 0.899,
+    "REWARDS": 0.852,
+    "SHOP_ROOM": 0.352,
+    "TREASURE_ROOM": 1.0
+   }
+  },
+  {
+   "epoch": 5,
+   "loss": 0.6434717178344727,
+   "val_acc": 0.7968722232095256,
+   "by_screen": {
+    "BOSS_RELIC_REWAR": 0.319,
+    "CARD_SELECT": 0.827,
+    "EVENT_SCREEN": 0.677,
+    "MAP_SCREEN": 0.719,
+    "REST_ROOM": 0.899,
+    "REWARDS": 0.849,
+    "SHOP_ROOM": 0.363,
+    "TREASURE_ROOM": 1.0
+   }
+  },
+  {
+   "epoch": 6,
+   "loss": 0.6925791501998901,
+   "val_acc": 0.7958059356673183,
+   "by_screen": {
+    "BOSS_RELIC_REWAR": 0.275,
+    "CARD_SELECT": 0.833,
+    "EVENT_SCREEN": 0.639,
+    "MAP_SCREEN": 0.727,
+    "REST_ROOM": 0.899,
+    "REWARDS": 0.851,
+    "SHOP_ROOM": 0.359,
+    "TREASURE_ROOM": 1.0
+   }
+  },
+  {
+   "epoch": 7,
+   "loss": 0.6604522466659546,
+   "val_acc": 0.797583081570997,
+   "by_screen": {
+    "BOSS_RELIC_REWAR": 0.348,
+    "CARD_SELECT": 0.83,
+    "EVENT_SCREEN": 0.617,
+    "MAP_SCREEN": 0.747,
+    "REST_ROOM": 0.909,
+    "REWARDS": 0.852,
+    "SHOP_ROOM": 0.348,
+    "TREASURE_ROOM": 1.0
+   }
+  },
+  {
+   "epoch": 8,
+   "loss": 0.6470174193382263,
+   "val_acc": 0.7963390794384219,
+   "by_screen": {
+    "BOSS_RELIC_REWAR": 0.304,
+    "CARD_SELECT": 0.833,
+    "EVENT_SCREEN": 0.603,
+    "MAP_SCREEN": 0.755,
+    "REST_ROOM": 0.912,
+    "REWARDS": 0.851,
+    "SHOP_ROOM": 0.341,
+    "TREASURE_ROOM": 1.0
+   }
+  },
+  {
+   "epoch": 9,
+   "loss": 0.6414504051208496,
+   "val_acc": 0.8016705171494579,
+   "by_screen": {
+    "BOSS_RELIC_REWAR": 0.348,
+    "CARD_SELECT": 0.833,
+    "EVENT_SCREEN": 0.648,
+    "MAP_SCREEN": 0.725,
+    "REST_ROOM": 0.912,
+    "REWARDS": 0.845,
+    "SHOP_ROOM": 0.516,
+    "TREASURE_ROOM": 1.0
+   }
+  },
+  {
+   "epoch": 10,
+   "loss": 0.6260072588920593,
+   "val_acc": 0.8018482317398259,
+   "by_screen": {
+    "BOSS_RELIC_REWAR": 0.377,
+    "CARD_SELECT": 0.833,
+    "EVENT_SCREEN": 0.644,
+    "MAP_SCREEN": 0.744,
+    "REST_ROOM": 0.909,
+    "REWARDS": 0.856,
+    "SHOP_ROOM": 0.337,
+    "TREASURE_ROOM": 1.0
+   }
+  },
+  {
+   "epoch": 11,
+   "loss": 0.5717060565948486,
+   "val_acc": 0.7965167940287897,
+   "by_screen": {
+    "BOSS_RELIC_REWAR": 0.319,
+    "CARD_SELECT": 0.837,
+    "EVENT_SCREEN": 0.67,
+    "MAP_SCREEN": 0.707,
+    "REST_ROOM": 0.909,
+    "REWARDS": 0.852,
+    "SHOP_ROOM": 0.341,
+    "TREASURE_ROOM": 1.0
+   }
+  }
+ ]
+}

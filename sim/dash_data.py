@@ -320,7 +320,9 @@ def health():
     st = os.statvfs(os.path.expanduser("~"))
     h["disk_free_gb"] = round(st.f_bavail * st.f_frsize / 2 ** 30, 1)
     now = time.time()
-    recent = [p for p in glob.glob("sim_logs/honest/*/seed_*.json") if now - os.path.getmtime(p) < 1800]
+    outputs = (glob.glob("sim_logs/honest/*/seed_*.json") + glob.glob("sim_logs/headroom/seed_*.json")
+               + glob.glob("sim_logs/rl/*/seed_*.npz") + glob.glob("sim_logs/traces/*/seed_*.json"))
+    recent = [p for p in outputs if now - os.path.getmtime(p) < 1800]
     h["seeds_per_hour"] = len(recent) * 2
     hb = None
     try:
