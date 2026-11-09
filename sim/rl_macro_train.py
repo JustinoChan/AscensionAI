@@ -28,12 +28,19 @@ GAMES = int(os.environ.get("RL_GAMES", "100"))
 WORKERS = int(os.environ.get("RL_WORKERS", "10"))
 COMBAT_K = os.environ.get("RL_COMBAT_K", "8")
 WIN_BONUS = float(os.environ.get("RL_WIN_BONUS", "1.0"))
+# boss-aware reward (default 0 = off, identical): + RL_BOSS_BONUS for each act boss beaten
+# (Act 1 boss = reached floor 17, Act 2 boss = reached floor 34, Act 3 boss = win)
+BOSS_BONUS = float(os.environ.get("RL_BOSS_BONUS", "0"))
+
+
+def reward(floor, win):
+    return floor / 50.0 + WIN_BONUS * win + BOSS_BONUS * ((floor >= 17) + (floor >= 34) + win)
 LR = float(os.environ.get("RL_LR", "1e-4"))
 CLIP, PPO_EPOCHS, ENT = 0.2, 4, 0.01
 EVAL_EVERY = int(os.environ.get("RL_EVAL_EVERY", "10"))
-RL_SEED0, RL_STEP = 600000007, 13
+RL_SEED0, RL_STEP = int(os.environ.get("RL_SEED0", "600000007")), 13
 VAL_SEEDS = [700000001 + i * 17 for i in range(int(os.environ.get("RL_VAL_N", "100")))]
-D_IN = 2416
+D_IN = 2416 + (28 if os.environ.get("MACRO_MAPFEAT", "0") == "1" else 0)
 torch.manual_seed(0)
 
 
@@ -177,9 +184,9 @@ def rl(iters):
     opt = torch.optim.Adam(m.parameters(), lr=LR)
     prog = os.environ.get("RL_PROG", "sim_logs/honest/rl_macro")
     os.makedirs(prog, exist_ok=True)
-    json.dump({"name": "rl_macro", "description": "Phase 3 3.2: RL out-of-combat policy (PPO on run outcome, K=%s combat)" % COMBAT_K,
+    json.dump({"name": os.path.basename(prog), "description": "Phase 3: RL out-of-combat policy (PPO on run outcome, K=%s combat, %s)" % (COMBAT_K, OUT),
                "group": "rl", "total": iters * GAMES + (iters // EVAL_EVERY + 1) * len(VAL_SEEDS), "parallel": WORKERS, "env": "rl_macro_train.py",
-               "seed_set": "%d + i*%d" % (RL_SEED0, RL_STEP), "started_at": time.time(), "log": "nets/rl/rl.log",
+               "seed_set": "%d + i*%d" % (RL_SEED0, RL_STEP), "started_at": time.time(), "log": OUT + "/rl.log",
                "out_dir": prog, "no_ledger": True, "pgid": os.getpgid(0)}, open(prog + "/RUN.json", "w"), indent=1)
     if not hist["rl_val"]:
         hist["rl_val"].append(evaluate_policy(OUT + "/pol_bc.npz", "bc"))
@@ -193,7 +200,7 @@ def rl(iters):
         G = load_logs(play(snap, seeds, os.environ.get("RL_TMP", "sim_logs/rl") + "/it%03d" % it, True, "it%03d" % it))
         if len(G) < GAMES // 2:
             print("iteration %d: only %d games, stopping" % (it, len(G)), flush=True); break
-        R = np.array([g[4][1] / 50.0 + WIN_BONUS * g[4][2] for g in G])
+        R = np.array([reward(int(g[4][1]), int(g[4][2])) for g in G])
         mu, sd = float(R.mean()), float(R.std() + 1e-6)
         adv = (R - mu) / sd
         m.train()

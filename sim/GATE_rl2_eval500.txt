@@ -1,0 +1,48 @@
+gate policy: checkpoint it039 (val floor 31.45, wins 4/100; best=it039, last=it049)
+
+A = eval500_K64
+B = eval500_rl2_K64
+shared seeds: 500
+wins   A   6 (1.2%, 95% CI 0.6-2.6%)   B  25 (5.0%, 95% CI 3.4-7.3%)
+win flips: A-only 6, B-only 25  -> exact McNemar p = 0.001
+avg floor A 24.21  B 32.51   paired diff B-A = +8.30  (bootstrap 95% CI +7.30 .. +9.32)  *
+
+outcome          A     B    B-A
+WIN              6    25    +19
+A1_boss         74    30    -44
+A1_elite        21     2    -19
+A1_other        21     3    -18
+A2_monster     187    91    -96
+A2_elite        95    74    -21
+A2_boss         53   167   +114
+A3              43   108    +65
+
+eval500_K64
+  Act 1: reached 500, died 116 (23.2% of reaching)  {'BOSS': 74, 'ELITE': 21, 'MONSTER': 18, 'EVENT': 3}
+  Act 2: reached 384, died 335 (87.2% of reaching)  {'MONSTER': 187, 'ELITE': 95, 'BOSS': 53}
+  Act 3: reached  49, died  43 (87.8% of reaching)  {'MONSTER': 19, 'ELITE': 11, 'BOSS': 9, 'EVENT': 4}
+eval500_rl2_K64
+  Act 1: reached 500, died  35 (7.0% of reaching)  {'BOSS': 30, 'MONSTER': 3, 'ELITE': 2}
+  Act 2: reached 465, died 332 (71.4% of reaching)  {'BOSS': 167, 'MONSTER': 91, 'ELITE': 74}
+  Act 3: reached 133, died 108 (81.2% of reaching)  {'MONSTER': 42, 'BOSS': 38, 'ELITE': 28}
+
+LOSS TAXONOMY  (eval500_rl2_K64)
+runs 500  wins 25  losses 475
+
+ 167  A2_boss_scaling
+  74  A2_elite
+  61  A2_monster_attrition_outpaced
+  42  A3_monster
+  38  A3_boss
+  30  A1_boss_underprepared
+  30  A2_monster_thrown_winnable
+  28  A3_elite
+   3  A1_other_MONSTER
+   2  A1_elite_overrisk
+
+sum check: 475 == 475 : True
+
+--- Act-2-monster losses: deck @ Act-2 entry (n=91) ---
+median size 20  starters 10  upgraded 2  upg_tempo 1
+median aoe 1  draw_energy 1  powers 3  scaling 3
+median enemy_hp_frac @ death 0.42

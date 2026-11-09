@@ -99,9 +99,15 @@ MACRO_POLICY = os.environ.get("MACRO_POLICY", "")
 MACRO_POLICY_SAMPLE = os.environ.get("MACRO_POLICY_SAMPLE", "0") == "1"
 MACRO_POLICY_LOG = os.environ.get("MACRO_POLICY_LOG", "")
 MACRO_FEAT_LOG = os.environ.get("MACRO_FEAT_LOG", "")
+# MACRO_MAPFEAT=1: append 28 visible-map features (mapfeat.py: min/max elites, rests, shops, '?', treasure,
+# monsters on the paths to the boss, floors left, path count; for the position now and after each option)
+MACRO_MAPFEAT = os.environ.get("MACRO_MAPFEAT", "0") == "1"
 MACRO_MAX_CANDS = 30
 # LLM_MACRO=1: local-Ollama out-of-combat teacher (llm_macro.py; default off, never imported when off)
 LLM_MACRO = os.environ.get("LLM_MACRO", "0") == "1"
+# Phase 3 step 3.5 (default off): HONEST_ROLLOUT_NET=<npz> replaces varN as the C++ rollout (default) policy
+# inside honest 1-ply search; same layout as policy_varN.npz (pbody.0/2/4 + pi). Root pruning still uses varN.
+HONEST_ROLLOUT_NET = os.environ.get("HONEST_ROLLOUT_NET", "")
 HONEST_PRIOR = os.environ.get("HONEST_PRIOR", "")
 HONEST_TOPK = int(os.environ.get("HONEST_TOPK", "0"))
 HONEST_VNET = os.environ.get("HONEST_VNET", "")
@@ -236,17 +242,30 @@ def make_honest(base, GAMMA, TOPK, ROLL_CAP):
             oh = np.zeros(16, np.float32)
             oh[self._SS.index(ss) if ss in self._SS else 11] = 1
             det = self._hdet(0)
-            F = np.zeros((n, 2416), np.float32)
+            gl = self.env.gc
+            if MACRO_MAPFEAT:
+                import mapfeat
+                pos0 = (int(gl.cur_map_node_x), int(gl.cur_map_node_y), int(gl.act))
+                m0 = mapfeat.summary(gl, pos0[0], pos0[1])
+            F = np.zeros((n, 2416 + (2 * mapfeat.N if MACRO_MAPFEAT else 0)), np.float32)
             for k in range(n):
                 self._hload(live, det)
                 try:
                     self._ff_step(k)
                     o1 = self._obs1200().astype(np.float32)
+                    if MACRO_MAPFEAT:
+                        g = self.env.gc
+                        pos1 = (int(g.cur_map_node_x), int(g.cur_map_node_y), int(g.act))
+                        m1 = m0 if pos1 == pos0 or pos1[2] != pos0[2] else mapfeat.summary(gl, pos1[0], pos1[1])
                 except Exception:
                     o1 = o0
+                    m1 = m0 if MACRO_MAPFEAT else None
                 F[k, :1200] = o0
                 F[k, 1200:2400] = o1 - o0
-                F[k, 2400:] = oh
+                F[k, 2400:2416] = oh
+                if MACRO_MAPFEAT:
+                    F[k, 2416:2416 + mapfeat.N] = m0
+                    F[k, 2416 + mapfeat.N:] = m1
             self._hload(live)
             return F, ss
 
@@ -379,6 +398,14 @@ def make_honest(base, GAMMA, TOPK, ROLL_CAP):
         def _cnet(self):
             c = self.__dict__.get("_cnet_obj")
             if c is None:
+                if HONEST_ROLLOUT_NET:
+                    import numpy as np
+                    z = np.load(HONEST_ROLLOUT_NET)
+                    c = slaythespire.CombatNet([z["pbody.%d.weight" % i] for i in (0, 2, 4)] + [z["pi.weight"]],
+                                               [z["pbody.%d.bias" % i] for i in (0, 2, 4)] + [z["pi.bias"]],
+                                               self.maxima.astype("float32"))
+                    self._cnet_obj = c
+                    return c
                 n = self.net
                 c = slaythespire.CombatNet([w for w, _ in n.pbody] + [n.pi[0]],
                                            [b for _, b in n.pbody] + [n.pi[1]],
