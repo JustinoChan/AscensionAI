@@ -238,7 +238,7 @@ class SimExperimentsTab:
             "name": ttk.Label(g, text=name, font=("Consolas", 9), cursor="hand2"),
             "bar": ttk.Progressbar(g, orient="horizontal", mode="determinate", maximum=100, length=220),
             "pct": ttk.Label(g, width=7, font=("Consolas", 9)),
-            "done": ttk.Label(g, width=9, font=("Consolas", 9)),
+            "done": ttk.Label(g, width=13, font=("Consolas", 9)),
             "wins": ttk.Label(g, width=5, font=("Consolas", 9)),
             "floor": ttk.Label(g, width=8, font=("Consolas", 9)),
             "elapsed": ttk.Label(g, width=9, font=("Consolas", 9)),
