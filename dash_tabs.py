@@ -17,8 +17,10 @@ try:
 except ImportError:          # launched without the per-user site dir on sys.path (e.g. from a service/agent env)
     import os
     import sys
-    for _p in (os.path.join(os.path.expanduser("~"), "AppData", "Roaming", "Python",
-                            "Python%d%d" % sys.version_info[:2], "site-packages"),):
+    # project-local install first (pip install --target .pylibs matplotlib), then the per-user site dir
+    for _p in (os.path.join(os.path.dirname(os.path.abspath(__file__)), ".pylibs"),
+               os.path.join(os.path.expanduser("~"), "AppData", "Roaming", "Python",
+                            "Python%d%d" % sys.version_info[:2], "site-packages")):
         if os.path.isdir(_p) and _p not in sys.path:
             sys.path.append(_p)
     import matplotlib
