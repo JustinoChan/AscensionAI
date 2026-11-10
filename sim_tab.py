@@ -112,6 +112,21 @@ class SimExperimentsTab:
         self.jq_tree.tag_configure("skipped", foreground="#9e9e9e")
         self.jq_tree.tag_configure("todo", foreground="#9e9e9e")
         self.jq_tree.pack(fill="x")
+        pf = ttk.Frame(jq)
+        pf.pack(fill="x", pady=(4, 0))
+        pf.columnconfigure(1, weight=1)
+        ttk.Label(pf, text="Running job:", width=13).grid(row=0, column=0, sticky="w")
+        self.jq_run_bar = ttk.Progressbar(pf, orient="horizontal", mode="determinate", maximum=100,
+                                          style="Run.Horizontal.TProgressbar")
+        self.jq_run_bar.grid(row=0, column=1, sticky="we", padx=4)
+        self.jq_run_txt = tk.StringVar(value="--")
+        ttk.Label(pf, textvariable=self.jq_run_txt, font=("Consolas", 9)).grid(row=0, column=2, sticky="w")
+        ttk.Label(pf, text="Whole queue:", width=13).grid(row=1, column=0, sticky="w")
+        self.jq_all_bar = ttk.Progressbar(pf, orient="horizontal", mode="determinate", maximum=100,
+                                          style="Done.Horizontal.TProgressbar")
+        self.jq_all_bar.grid(row=1, column=1, sticky="we", padx=4)
+        self.jq_all_txt = tk.StringVar(value="--")
+        ttk.Label(pf, textvariable=self.jq_all_txt, font=("Consolas", 9)).grid(row=1, column=2, sticky="w")
         jb = ttk.Frame(jq)
         jb.pack(fill="x", pady=(4, 0))
         self.jq_preset = tk.StringVar(value="eval150_vs_K64")
@@ -423,13 +438,51 @@ class SimExperimentsTab:
         sel_key = self.jq_tree.item(sel[0], "values")[1] if sel else None
         self.jq_tree.delete(*self.jq_tree.get_children())
         self._jq_ids = {}
-        for j in d.get("overnight", []):
+        now = time.time()
+        jobs = d.get("jobs", [])
+        # ---- progress: running job (time vs its estimate, refined by its live stage) + whole queue
+        run = next((j for j in jobs if j["state"] == "running"), None)
+        stage = next((r for r in (self._last_status or {}).get("runs", []) if r.get("state") == "running"), None)
+        rem_run, el = 0.0, 0.0
+        if run:
+            el = now - float(run.get("started") or now)
+            est = float(run.get("est_hours") or 0) * 3600
+            rem_run = max(est - el, (stage or {}).get("eta") or 0, 0)
+            pct = 100.0 * el / max(1.0, el + rem_run)
+            self.jq_run_bar["value"] = pct
+            st = (" | stage %s %.0f%% ETA %s" % (stage["name"], stage.get("pct", 0), fmt_dur(stage.get("eta")))) if stage else ""
+            self.jq_run_txt.set("#%d %.0f%%  elapsed %s, ~%s left%s%s" % (
+                run["id"], pct, fmt_dur(el), fmt_dur(rem_run), st, "" if run.get("est_hours") else " (no estimate)"))
+        else:
+            self.jq_run_bar["value"] = 0
+            self.jq_run_txt.set("idle")
+        pend = [j for j in jobs if j["state"] == "pending"]
+        t = now + rem_run
+        starts = {}
+        for j in pend:
+            starts[j["id"]] = t
+            t += float(j.get("est_hours") or 1.0) * 3600
+        rem_all = t - now
+        self.jq_all_bar["value"] = (100.0 * el / max(1.0, el + rem_all)) if (run or pend) else 100
+        self.jq_all_txt.set(("%d pending after this one, ~%s left, done ≈ %s (approx.)" % (
+            len(pend), fmt_dur(rem_all), time.strftime("%a %H:%M", time.localtime(t)))) if (run or pend) else "queue empty")
+        # ---- rows: everything not finished + the last few finished jobs (old overnight chain hidden once done)
+        ov = [j for j in d.get("overnight", []) if j["state"] in ("todo", "running")]
+        fin = [j for j in jobs if j["state"] not in ("pending", "running")][-3:]
+        show = fin + [j for j in jobs if j["state"] in ("running", "pending")]
+        for j in ov:
             iid = self.jq_tree.insert("", "end", values=("overnight", j["name"], j["state"], j.get("note", "")),
                                       tags=(j["state"],))
             self._jq_ids[iid] = None
-        for j in d.get("jobs", []):
-            iid = self.jq_tree.insert("", "end", values=("jobq #%d" % j["id"], j["name"], j["state"],
-                                                         ("rc %s" % j["rc"]) if "rc" in j else j["cmd"][:80]),
+        for j in show:
+            if j["state"] == "pending":
+                note = "≈ starts %s, ~%s (approx.)" % (time.strftime("%H:%M", time.localtime(starts[j["id"]])),
+                                                       fmt_dur(float(j.get("est_hours") or 1.0) * 3600))
+            elif j["state"] == "running":
+                note = self.jq_run_txt.get()
+            else:
+                note = ("rc %s" % j["rc"]) if "rc" in j else j["cmd"][:80]
+            iid = self.jq_tree.insert("", "end", values=("jobq #%d" % j["id"], j["name"], j["state"], note),
                                       tags=(j["state"],))
             self._jq_ids[iid] = j["id"]
             if sel_key == j["name"]:
