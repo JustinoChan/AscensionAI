@@ -83,6 +83,11 @@
   <main>
     <section class="grid">
       <article class="card highlight">
+        <h2>017&ndash;018 RL out-of-combat policy &mdash; 10.6% wins</h2>
+        <p>Honest candidate scorer trained by PPO on run outcomes. eval500 with honest K=64 combat: 5.6% (017) &rarr; <strong>10.6%</strong> with visible-map features + boss-kill bonus (018), vs 1.2% search-only; holdout-150 14.7%.</p>
+        <button class="btn" data-report="018_rl_round3.md">View Report</button>
+      </article>
+      <article class="card">
         <h2>016 Phase 3: value/prior shortcuts + honest macro search</h2>
         <p>23k-fight honest harvest; value net + ranking prior pass offline but lose online (&minus;1.2 to &minus;4.1 floors). Honest card-reward search: <strong>+4.1 floors</strong> (28.7 vs 24.6, CI +2.5&ndash;+5.8) but wins 6 &rarr; 2 (short horizon under-drafts scaling). Rest-vs-smith search: +0.6 (n.s.).</p>
         <button class="btn" data-report="016_phase3_step1_2.md">View Report</button>

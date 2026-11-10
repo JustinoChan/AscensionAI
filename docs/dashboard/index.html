@@ -624,15 +624,15 @@
     // Current deployed agent (headless-simulator era). The hero cards reflect
     // this; the snapshot above is the historical live-game PPO era.
     const CURRENT = {
-      agent: "honest K=64",
-      era: "honest search &middot; headless sim",
-      evalSeeds: 150,
-      avgFloor: 24.61,
-      wins: 6,
-      winPct: 4.0,
-      act2ReachPct: 74.7,
+      agent: "RL out-of-combat + honest K=64",
+      era: "honest search + learned policy &middot; headless sim",
+      evalSeeds: 500,
+      avgFloor: 35.58,
+      wins: 53,
+      winPct: 10.6,
+      act2ReachPct: 94.2,
       combat: "1-ply, 64 sampled worlds",
-      updated: "2026-11-06"
+      updated: "2026-11-10"
     };
 
     let state = structuredClone(snapshot);

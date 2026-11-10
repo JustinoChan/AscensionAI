@@ -599,6 +599,50 @@
         }
       },
       "notes": "Card search vs K=64: +4.11 floors (CI +2.46..+5.79), wins 6->2 (McNemar p=0.125); Act-1 boss deaths 23->6 but Act-2 boss deaths 16->29 (scaling cards at Act-2 entry 3.16->1.48). Value leaf/prior: offline pass, online loss; K=128 value-leaf -4.05 (biased leaf). K=384 equal-wall arm quarantined (mis-sized)."
+    },
+    {
+      "run_id": "rl_out_of_combat_20261110",
+      "report": "018_rl_round3.md",
+      "search_honesty": "honest",
+      "model_path": "sim/nets_rl3c/pol_gate.npz (candidate scorer, MACRO_MAPFEAT=1) + honest C++ 1-ply K=64",
+      "training_mode": "BC on heuristic choices + PPO on run outcome (K=8 combat)",
+      "hyperparameters": {
+        "reward": "floor/50 + win + 0.3*act bosses beaten",
+        "iterations": "150 + 120",
+        "games_per_iter": 100
+      },
+      "evaluation": {
+        "games": 500,
+        "arms": {
+          "eval500_K64": {
+            "wins": 6,
+            "average_floor": 24.21
+          },
+          "eval500_rl_K64 (017)": {
+            "wins": 28,
+            "average_floor": 32.14
+          },
+          "eval500_rl3_K64": {
+            "wins": 51,
+            "average_floor": 33.2
+          },
+          "eval500_rl3c_K64": {
+            "wins": 53,
+            "average_floor": 35.58
+          }
+        },
+        "holdout_150": {
+          "holdout_K64": {
+            "wins": 7,
+            "average_floor": 26.67
+          },
+          "holdout_rl3_K64": {
+            "wins": 22,
+            "average_floor": 34.68
+          }
+        }
+      },
+      "notes": "Round 3 vs 017: McNemar p=0.008 (46 vs 23 flips); continued vs 017 p=0.003, floor +3.44. Act 2/3 bosses ~half of losses."
     }
   ]
 }

@@ -1,6 +1,40 @@
 # 018 RL Round 3: Visible-Map Features + Boss-Kill Bonus
 
-**Status:** auto-generated 2026-11-10 07:00 PST from the run logs; numbers are final, commentary to follow.
+**Dates:** 2026-11-09 → 2026-11-10
+**Status:** gate passed, holdout confirmed. **Win rate roughly doubled over 017.**
+
+## Summary
+
+All numbers below: eval500, honest K=64 combat, Ironclad A0.
+
+| agent | wins / 500 | win % (95% CI) | avg floor | Act 1 / 2 / 3 death rate |
+|---|---|---|---|---|
+| heuristic mainline (search only) | 6 | 1.2% (0.6–2.6) | 24.21 | 23% / 87% / 88% |
+| 017 RL out-of-combat, it 99 | 28 | 5.6% (3.9–8.0) | 32.14 | 8% / 72% / 78% |
+| **018 round 3, it 69** (map features + boss bonus) | **51** | **10.2% (7.8–13.2)** | 33.20 | 10% / 65% / 68% |
+| **018 round 3 continued** (+120 iterations, it 99) | **53** | **10.6% (8.2–13.6)** | **35.58** | **6% / 58% / 73%** |
+
+- **Round 3 vs 017,** paired on the same seeds:
+  - 46 seeds won only by round 3, 23 only by 017, exact McNemar **p = 0.008**.
+  - The continued policy: 46 vs 21, **p = 0.003**, floor **+3.44** (CI +2.29 … +4.58).
+- **Holdout-150** (seeds never used for selection): round 3 it 69 won **22/150 = 14.7%** against holdout K=64's 7/150. p = 0.003, floor +8.0 (CI +5.8 … +10.2).
+- **Bosses** (017 → continued round 3):
+  - Champ 41% → **63%**, Collector 45% → **58%**, Automaton 46% → 49%.
+  - Time Eater 38% → 49%, Donu & Deca 42% → 42%, Awakened One 50% → 31% (small samples, 24–45 fights each).
+  - 198/500 runs now reach Act 3, against 49 for the baseline.
+- **What changed:** two things, at once.
+  - (a) The scorer now sees the visible map: min/max elites, rests, shops, "?" and treasure on the paths to the boss.
+  - (b) The reward pays 0.3 per act boss beaten.
+  - Together they move the policy toward boss readiness: Champ, Collector and the Act 3 bosses improve, while Act 1 stays as before.
+  - Which of the two did the work is untested. The single-variable ablations (boss bonus 0.5 vs 0.3, and an explicit deck-vs-boss feature set) are queued as round 4.
+- **Remaining losses** (continued policy): **Act 2 boss 151 and Act 3 boss 78**, about half of all losses. Then Act 2 hallway 80, Act 2 elite 37, Act 3 elite 29, Act 1 boss 26.
+- **Training curve:** validation floor rose from 19.7 (BC) to 32.7 by it 69. The continuation from it 69 reached 33.8–34.7, still rising at the end, so more PPO is running now (round 3d).
+
+The auto-generated detail (validation curve, raw gate output) follows.
+
+---
+
+**Generated:** 2026-11-10 07:00 PST from the run logs.
 
 ## Setup
 
