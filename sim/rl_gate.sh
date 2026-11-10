@@ -18,7 +18,7 @@ set -- $PICK; TAG=$1
 cp $NETDIR/val_$TAG.npz $NETDIR/pol_gate.npz
 echo "gate policy: checkpoint $TAG (val floor $2, wins $3/100; best=$4, last=$5)" | tee $OUTF
 grep -q "^n=500 " sim_logs/honest/$ARM/SUMMARY.txt 2>/dev/null || \
-  SEED0=40009 SEEDSTEP=1000003 PAR=14 ./run_honest.sh $ARM 500 7200 "HONEST=1 HONEST_CPP=1 HONEST_K=64 MACRO_POLICY=$NETDIR/pol_gate.npz TRACE=1" "GATE: RL out-of-combat policy ($TAG) + honest K=64 combat, eval500"
+  SEED0=40009 SEEDSTEP=1000003 PAR=14 ./run_honest.sh $ARM 500 7200 "HONEST=1 HONEST_CPP=1 HONEST_K=64 MACRO_POLICY=$NETDIR/pol_gate.npz TRACE=1${EXTRA_ENV:+ $EXTRA_ENV}" "GATE: RL out-of-combat policy ($TAG) + honest K=64 combat, eval500"
 python3 ledger.py ingest > /dev/null
 { echo; python3 ledger.py compare eval500_K64 $ARM | sed -n 1,20p; echo
   ARM=$ARM python3 - <<'PY'

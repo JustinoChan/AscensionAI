@@ -153,8 +153,9 @@ def bc():
 def play(policy, seeds, outdir, sample, tag):
     os.makedirs(outdir, exist_ok=True)
     prog = os.environ.get("RL_PROG", "sim_logs/honest/rl_macro")
-    env = "HONEST=1 HONEST_CPP=1 HONEST_K=%s MACRO_POLICY=%s MACRO_POLICY_LOG=%s%s" % (
-        COMBAT_K, policy, outdir, " MACRO_POLICY_SAMPLE=1" if sample else "")
+    MAPFEAT_ENV = " MACRO_MAPFEAT=1" if os.environ.get("MACRO_MAPFEAT", "0") == "1" else ""
+    env = "HONEST=1 HONEST_CPP=1 HONEST_K=%s MACRO_POLICY=%s MACRO_POLICY_LOG=%s%s%s" % (
+        COMBAT_K, policy, outdir, " MACRO_POLICY_SAMPLE=1" if sample else "", MAPFEAT_ENV)
     script = ("s=$1; [ -s {d}/seed_$s.npz ] && exit 0; env {env} nice -n 5 .venv/bin/python eval_fullrun_analytics_v2.py $s macro "
               "> {d}/game_$s.json 2>/dev/null && cp {d}/game_$s.json {p}/seed_{t}_$s.json; exit 0").format(d=outdir, env=env, p=prog, t=tag)
     p = subprocess.Popen(["xargs", "-P", str(WORKERS), "-n", "1", "bash", "-c", script, "_"], stdin=subprocess.PIPE, text=True)

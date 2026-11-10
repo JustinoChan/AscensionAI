@@ -1,0 +1,1 @@
+policy: nets/rl/pol_gate.npz (plain-K64 arm eval500_rl_K64); boss budget: HONEST_K_BOSS=256 HONEST_K_ELITE=128, K=64 elsewhere
