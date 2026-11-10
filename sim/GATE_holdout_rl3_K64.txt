@@ -1,0 +1,20 @@
+A = holdout_K64
+B = holdout_rl3_K64
+shared seeds: 150
+wins   A   7 (4.7%, 95% CI 2.3-9.3%)   B  22 (14.7%, 95% CI 9.9-21.2%)
+win flips: A-only 4, B-only 19  -> exact McNemar p = 0.003
+avg floor A 26.67  B 34.68   paired diff B-A = +8.01  (bootstrap 95% CI +5.81 .. +10.17)  *
+
+outcome          A     B    B-A
+WIN              7    22    +15
+A1_boss         12    10     -2
+A1_elite         5     2     -3
+A1_other         5     0     -5
+A2_monster      52    29    -23
+A2_elite        30    17    -13
+A2_boss         24    32     +8
+A2_other         0     1     +1
+A3              15    37    +22
+wins   A   9 (6.0%, 95% CI 3.2-11.0%)   B  22 (14.7%, 95% CI 9.9-21.2%)
+win flips: A-only 7, B-only 20  -> exact McNemar p = 0.019
+avg floor A 32.72  B 34.68   paired diff B-A = +1.96  (bootstrap 95% CI -0.33 .. +4.30)

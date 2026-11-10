@@ -1,6 +1,6 @@
 # 018 RL Round 3: Visible-Map Features + Boss-Kill Bonus
 
-**Status:** auto-generated 2026-11-09 22:18 PST from the run logs; numbers are final, commentary to follow.
+**Status:** auto-generated 2026-11-10 07:00 PST from the run logs; numbers are final, commentary to follow.
 
 ## Setup
 
@@ -136,5 +136,101 @@ A3 ELITE REPTOMANCER                    24/32   75.0% (23.2)     24/34   70.6% (
 ## Overnight branch
 
 ```
-(not available yet)
+[2026-11-09 22:18:59] round 3 eval500: 51 wins floor 33.2 vs it099 28 wins floor 32.14 -> branch A
+```
+
+### GATE_holdout_rl3_K64.txt
+
+```
+A = holdout_K64
+B = holdout_rl3_K64
+shared seeds: 150
+wins   A   7 (4.7%, 95% CI 2.3-9.3%)   B  22 (14.7%, 95% CI 9.9-21.2%)
+win flips: A-only 4, B-only 19  -> exact McNemar p = 0.003
+avg floor A 26.67  B 34.68   paired diff B-A = +8.01  (bootstrap 95% CI +5.81 .. +10.17)  *
+
+outcome          A     B    B-A
+WIN              7    22    +15
+A1_boss         12    10     -2
+A1_elite         5     2     -3
+A1_other         5     0     -5
+A2_monster      52    29    -23
+A2_elite        30    17    -13
+A2_boss         24    32     +8
+A2_other         0     1     +1
+A3              15    37    +22
+wins   A   9 (6.0%, 95% CI 3.2-11.0%)   B  22 (14.7%, 95% CI 9.9-21.2%)
+win flips: A-only 7, B-only 20  -> exact McNemar p = 0.019
+avg floor A 32.72  B 34.68   paired diff B-A = +1.96  (bootstrap 95% CI -0.33 .. +4.30)
+```
+
+### GATE_rl3c_eval500.txt
+
+```
+gate policy: checkpoint it099 (val floor 33.82, wins 10/100; best=it099, last=it119)
+
+A = eval500_K64
+B = eval500_rl3c_K64
+shared seeds: 500
+wins   A   6 (1.2%, 95% CI 0.6-2.6%)   B  53 (10.6%, 95% CI 8.2-13.6%)
+win flips: A-only 6, B-only 53  -> exact McNemar p = 0.000
+avg floor A 24.21  B 35.58   paired diff B-A = +11.36  (bootstrap 95% CI +10.22 .. +12.48)  *
+
+outcome          A     B    B-A
+WIN              6    53    +47
+A1_boss         74    26    -48
+A1_elite        21     3    -18
+A1_other        21     0    -21
+A2_monster     187    80   -107
+A2_elite        95    37    -58
+A2_boss         53   151    +98
+A2_other         0     5     +5
+A3              43   145   +102
+
+eval500_K64
+  Act 1: reached 500, died 116 (23.2% of reaching)  {'BOSS': 74, 'ELITE': 21, 'MONSTER': 18, 'EVENT': 3}
+  Act 2: reached 384, died 335 (87.2% of reaching)  {'MONSTER': 187, 'ELITE': 95, 'BOSS': 53}
+  Act 3: reached  49, died  43 (87.8% of reaching)  {'MONSTER': 19, 'ELITE': 11, 'BOSS': 9, 'EVENT': 4}
+eval500_rl3c_K64
+  Act 1: reached 500, died  29 (5.8% of reaching)  {'BOSS': 26, 'ELITE': 3}
+  Act 2: reached 471, died 273 (58.0% of reaching)  {'BOSS': 151, 'MONSTER': 80, 'ELITE': 37, 'EVENT': 5}
+  Act 3: reached 198, died 145 (73.2% of reaching)  {'BOSS': 78, 'ELITE': 29, 'MONSTER': 27, 'EVENT': 11}
+
+LOSS TAXONOMY  (eval500_rl3c_K64)
+runs 500  wins 53  losses 447
+
+ 151  A2_boss_scaling
+  78  A3_boss
+  48  A2_monster_attrition_outpaced
+  37  A2_elite
+  32  A2_monster_thrown_winnable
+  29  A3_elite
+  27  A3_monster
+  26  A1_boss_underprepared
+  11  A3_event
+   5  A2_other_EVENT
+   3  A1_elite_overrisk
+
+sum check: 447 == 447 : True
+
+--- Act-2-monster losses: deck @ Act-2 entry (n=80) ---
+median size 17.0  starters 8.5  upgraded 3.0  upg_tempo 2.0
+median aoe 1.0  draw_energy 1.0  powers 2.0  scaling 2.0
+A = eval500_rl_K64
+B = eval500_rl3c_K64
+shared seeds: 500
+wins   A  28 (5.6%, 95% CI 3.9-8.0%)   B  53 (10.6%, 95% CI 8.2-13.6%)
+win flips: A-only 21, B-only 46  -> exact McNemar p = 0.003
+avg floor A 32.14  B 35.58   paired diff B-A = +3.44  (bootstrap 95% CI +2.29 .. +4.58)  *
+
+outcome          A     B    B-A
+WIN             28    53    +25
+A1_boss         33    26     -7
+A1_elite         6     3     -3
+A1_other         2     0     -2
+A2_monster      90    80    -10
+A2_elite        76    37    -39
+A2_boss        164   151    -13
+A2_other         0     5     +5
+A3             101   145    +44
 ```
