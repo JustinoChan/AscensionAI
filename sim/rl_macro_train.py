@@ -40,7 +40,7 @@ CLIP, PPO_EPOCHS, ENT = 0.2, 4, 0.01
 EVAL_EVERY = int(os.environ.get("RL_EVAL_EVERY", "10"))
 RL_SEED0, RL_STEP = int(os.environ.get("RL_SEED0", "600000007")), 13
 VAL_SEEDS = [700000001 + i * 17 for i in range(int(os.environ.get("RL_VAL_N", "100")))]
-D_IN = 2416 + (28 if os.environ.get("MACRO_MAPFEAT", "0") == "1" else 0)
+D_IN = 2416 + (28 if os.environ.get("MACRO_MAPFEAT", "0") == "1" else 0) + (24 if os.environ.get("MACRO_BOSSFEAT", "0") == "1" else 0)
 torch.manual_seed(0)
 
 
@@ -153,7 +153,7 @@ def bc():
 def play(policy, seeds, outdir, sample, tag):
     os.makedirs(outdir, exist_ok=True)
     prog = os.environ.get("RL_PROG", "sim_logs/honest/rl_macro")
-    MAPFEAT_ENV = " MACRO_MAPFEAT=1" if os.environ.get("MACRO_MAPFEAT", "0") == "1" else ""
+    MAPFEAT_ENV = (" MACRO_MAPFEAT=1" if os.environ.get("MACRO_MAPFEAT", "0") == "1" else "") + (" MACRO_BOSSFEAT=1" if os.environ.get("MACRO_BOSSFEAT", "0") == "1" else "")
     env = "HONEST=1 HONEST_CPP=1 HONEST_K=%s MACRO_POLICY=%s MACRO_POLICY_LOG=%s%s%s" % (
         COMBAT_K, policy, outdir, " MACRO_POLICY_SAMPLE=1" if sample else "", MAPFEAT_ENV)
     script = ("s=$1; [ -s {d}/seed_$s.npz ] && exit 0; env {env} nice -n 5 .venv/bin/python eval_fullrun_analytics_v2.py $s macro "

@@ -102,6 +102,12 @@ MACRO_FEAT_LOG = os.environ.get("MACRO_FEAT_LOG", "")
 # MACRO_MAPFEAT=1: append 28 visible-map features (mapfeat.py: min/max elites, rests, shops, '?', treasure,
 # monsters on the paths to the boss, floors left, path count; for the position now and after each option)
 MACRO_MAPFEAT = os.environ.get("MACRO_MAPFEAT", "0") == "1"
+# MACRO_BOSSFEAT=1: append a deck-role summary (size, starters, upgraded, tempo upgrades, damage, block, AoE,
+# scaling, draw/energy, powers, junk, quality) for the deck now and after each option (24 inputs). With the act
+# boss one-hot already in obs, this lets the scorer learn "deck vs this boss" directly.
+MACRO_BOSSFEAT = os.environ.get("MACRO_BOSSFEAT", "0") == "1"
+_ROLE_KEYS = ("size", "starters", "upgraded", "upg_tempo", "damage", "block", "aoe", "scaling", "draw_energy",
+              "powers", "junk", "qsum")
 MACRO_MAX_CANDS = 30
 # LLM_MACRO=1: local-Ollama out-of-combat teacher (llm_macro.py; default off, never imported when off)
 LLM_MACRO = os.environ.get("LLM_MACRO", "0") == "1"
@@ -243,11 +249,17 @@ def make_honest(base, GAMMA, TOPK, ROLL_CAP):
             oh[self._SS.index(ss) if ss in self._SS else 11] = 1
             det = self._hdet(0)
             gl = self.env.gc
+            import mapfeat
             if MACRO_MAPFEAT:
-                import mapfeat
                 pos0 = (int(gl.cur_map_node_x), int(gl.cur_map_node_y), int(gl.act))
                 m0 = mapfeat.summary(gl, pos0[0], pos0[1])
-            F = np.zeros((n, 2416 + (2 * mapfeat.N if MACRO_MAPFEAT else 0)), np.float32)
+            def _roles():
+                r = self._deck_roles() or {}
+                return [float(r.get(k, 0)) / (40.0 if k in ("size", "qsum") else 20.0) for k in _ROLE_KEYS]
+            if MACRO_BOSSFEAT:
+                r0 = _roles()
+            base_w = 2416 + (2 * mapfeat.N if MACRO_MAPFEAT else 0)
+            F = np.zeros((n, base_w + (2 * len(_ROLE_KEYS) if MACRO_BOSSFEAT else 0)), np.float32)
             for k in range(n):
                 self._hload(live, det)
                 try:
@@ -257,15 +269,20 @@ def make_honest(base, GAMMA, TOPK, ROLL_CAP):
                         g = self.env.gc
                         pos1 = (int(g.cur_map_node_x), int(g.cur_map_node_y), int(g.act))
                         m1 = m0 if pos1 == pos0 or pos1[2] != pos0[2] else mapfeat.summary(gl, pos1[0], pos1[1])
+                    r1 = _roles() if MACRO_BOSSFEAT else None
                 except Exception:
                     o1 = o0
                     m1 = m0 if MACRO_MAPFEAT else None
+                    r1 = r0 if MACRO_BOSSFEAT else None
                 F[k, :1200] = o0
                 F[k, 1200:2400] = o1 - o0
                 F[k, 2400:2416] = oh
                 if MACRO_MAPFEAT:
                     F[k, 2416:2416 + mapfeat.N] = m0
-                    F[k, 2416 + mapfeat.N:] = m1
+                    F[k, 2416 + mapfeat.N:base_w] = m1
+                if MACRO_BOSSFEAT:
+                    F[k, base_w:base_w + len(_ROLE_KEYS)] = r0
+                    F[k, base_w + len(_ROLE_KEYS):] = r1
             self._hload(live)
             return F, ss
 
