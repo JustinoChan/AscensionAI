@@ -129,6 +129,14 @@ def main(a):
         p, arm, env = a[1], a[2], a[3]
         desc = a[4] if len(a) > 4 else env
         add("%s %s" % (p, arm), PRESETS[p][0].format(arm=arm, env=env, desc=desc), arm=arm)
+        locked(lambda q: q["jobs"][-1].__setitem__("est_hours", {"eval150": 1.0, "holdout150": 0.8, "eval150_vs_K64": 1.0}.get(p, 1.0)))
+    elif cmd == "est":                  # est <id> <hours>: approximate duration for the dashboard queue bars
+        jid, hrs = int(a[1]), float(a[2])
+        def f(q):
+            for j in q["jobs"]:
+                if j["id"] == jid:
+                    j["est_hours"] = hrs
+        locked(f)
     elif cmd in ("cancel", "retry", "move"):
         jid = int(a[1])
 
