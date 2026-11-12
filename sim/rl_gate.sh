@@ -7,7 +7,7 @@ export NETDIR
 PICK=$(python3 - <<'PY'
 import json, os
 h = json.load(open(os.environ.get("NETDIR","nets/rl") + "/train_history.json"))
-V = [v for v in h["rl_val"] if os.path.exists(os.environ.get("NETDIR","nets/rl") + "/val_%s.npz" % v["tag"])]
+V = [v for v in h["rl_val"] if v["tag"] != "bc" and os.path.exists(os.environ.get("NETDIR","nets/rl") + "/val_%s.npz" % v["tag"])]   # never re-gate the starting policy
 best = max(V, key=lambda v: (v["wins"], v["floor"]))
 last = V[-1]
 pick = last if (last["wins"], last["floor"]) >= (best["wins"] - 1, best["floor"] - 0.5) else best

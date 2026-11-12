@@ -42,6 +42,17 @@ RL_SEED0, RL_STEP = int(os.environ.get("RL_SEED0", "600000007")), 13
 VAL_SEEDS = [700000001 + i * 17 for i in range(int(os.environ.get("RL_VAL_N", "100")))]
 D_IN = 2416 + (28 if os.environ.get("MACRO_MAPFEAT", "0") == "1" else 0) + (24 if os.environ.get("MACRO_BOSSFEAT", "0") == "1" else 0)
 torch.manual_seed(0)
+# RL_CRITIC=1: per-decision advantage = R_game - V(state) with a learned critic V (state part of the features:
+# obs now, screen one-hot, map summary now, deck roles now) instead of one batch-normalised R per game.
+CRITIC = os.environ.get("RL_CRITIC", "0") == "1"
+CRITIC_WARMUP = int(os.environ.get("RL_CRITIC_WARMUP", "5"))   # iterations the critic is fitted but not yet used
+_MAP = os.environ.get("MACRO_MAPFEAT", "0") == "1"; _BOSS = os.environ.get("MACRO_BOSSFEAT", "0") == "1"
+SIDX = list(range(1200)) + list(range(2400, 2416)) + (list(range(2416, 2430)) if _MAP else []) +        (list(range(2416 + (28 if _MAP else 0), 2416 + (28 if _MAP else 0) + 12)) if _BOSS else [])
+
+
+def critic_net():
+    return nn.Sequential(nn.Linear(len(SIDX), 256), nn.GELU(approximate="tanh"), nn.Linear(256, 256),
+                         nn.GELU(approximate="tanh"), nn.Linear(256, 1))
 
 
 def scorer():
@@ -183,6 +194,13 @@ def rl(iters):
         shutil.copy(OUT + "/pol_bc.npz", cur)
     m = load_npz(scorer(), cur).to(dev)
     opt = torch.optim.Adam(m.parameters(), lr=LR)
+    if CRITIC:
+        crit = critic_net().to(dev)
+        if os.path.exists(OUT + "/critic.pt"):
+            crit.load_state_dict(torch.load(OUT + "/critic.pt"))
+        copt = torch.optim.Adam(crit.parameters(), lr=3e-4)
+    crit_start = start if not (CRITIC and os.path.exists(OUT + "/critic.pt")) else -10 ** 6
+    warm_done = lambda it: it - crit_start >= CRITIC_WARMUP
     prog = os.environ.get("RL_PROG", "sim_logs/honest/rl_macro")
     os.makedirs(prog, exist_ok=True)
     json.dump({"name": os.path.basename(prog), "description": "Phase 3: RL out-of-combat policy (PPO on run outcome, K=%s combat, %s)" % (COMBAT_K, OUT),
@@ -204,18 +222,40 @@ def rl(iters):
         R = np.array([reward(int(g[4][1]), int(g[4][2])) for g in G])
         mu, sd = float(R.mean()), float(R.std() + 1e-6)
         adv = (R - mu) / sd
+        cinfo = {}
+        if CRITIC:
+            S = [g[0][np.concatenate([[0], np.cumsum(g[1])[:-1]])][:, SIDX].astype(np.float32) for g in G]
+            with torch.no_grad():
+                V = [crit(torch.tensor(x, device=dev))[:, 0].cpu().numpy() for x in S]
+            ADVC = [R[gi] - V[gi] for gi in range(len(G))]
+            flat = np.concatenate(ADVC); am, asd = float(flat.mean()), float(flat.std() + 1e-6)
+            ADVC = [(a - am) / asd for a in ADVC]
+            yv = np.concatenate([np.full(len(x), R[gi], np.float32) for gi, x in enumerate(S)])
+            pv = np.concatenate(V)
+            cinfo["critic_expl_var"] = float(1 - np.var(yv - pv) / (np.var(yv) + 1e-9))
+            getadv = (lambda gi, di: (ADVC[gi][di], G[gi][3][di])) if warm_done(it) else (lambda gi, di: (adv[gi], G[gi][3][di]))
+            cinfo["critic_used"] = bool(warm_done(it))
+        else:
+            getadv = lambda gi, di: (adv[gi], G[gi][3][di])
         m.train()
         for _ in range(PPO_EPOCHS):
-            for fs, nc, ac, ex, _ in minibatches(G, 512, extra=lambda gi, di: (adv[gi], G[gi][3][di])):
+            for fs, nc, ac, ex, _ in minibatches(G, 512, extra=getadv):
                 A, LP = ex[:, 0], ex[:, 1]
                 lp, ent = batch_logp(m, fs, nc, ac)
                 ratio = torch.exp(lp - LP)
                 loss = -torch.min(ratio * A, torch.clamp(ratio, 1 - CLIP, 1 + CLIP) * A).mean() - ENT * ent.mean()
                 opt.zero_grad(); loss.backward(); nn.utils.clip_grad_norm_(m.parameters(), 1.0); opt.step()
         save_npz(m, cur)
+        if CRITIC:                                     # fit V(state) -> R on this batch (after using it for advantages)
+            X = torch.tensor(np.concatenate(S), device=dev); Y = torch.tensor(yv, device=dev)
+            for _ in range(4):
+                for i in torch.randperm(len(X), device=dev).split(2048):
+                    l = F.mse_loss(crit(X[i])[:, 0], Y[i]); copt.zero_grad(); l.backward(); copt.step()
+            cinfo["critic_loss"] = float(l)
+            torch.save(crit.state_dict(), OUT + "/critic.pt")
         rec = {"iter": it, "games": (it + 1) * GAMES, "n": len(G), "mean_R": mu, "win_rate": float(np.mean([g[4][2] for g in G])),
                "floor": float(np.mean([g[4][1] for g in G])), "decisions": int(sum(len(g[2]) for g in G)),
-               "entropy": float(ent.mean()), "secs": round(time.time() - t0, 1)}
+               "entropy": float(ent.mean()), "secs": round(time.time() - t0, 1), **cinfo}
         hist["rl"].append(rec)
         print(json.dumps(rec), flush=True)
         if (it + 1) % EVAL_EVERY == 0:

@@ -1,0 +1,75 @@
+gate policy: checkpoint it109 (val floor 34.67, wins 14/100; best=it109, last=it149)
+
+A = eval500_K64
+B = eval500_rl3e_K64
+shared seeds: 500
+wins   A   6 (1.2%, 95% CI 0.6-2.6%)   B  77 (15.4%, 95% CI 12.5-18.8%)
+win flips: A-only 6, B-only 77  -> exact McNemar p = 0.000
+avg floor A 24.21  B 38.05   paired diff B-A = +13.83  (bootstrap 95% CI +12.68 .. +14.95)  *
+
+outcome          A     B    B-A
+WIN              6    77    +71
+A1_boss         74    15    -59
+A1_elite        21     1    -20
+A1_other        21     2    -19
+A2_monster     187    64   -123
+A2_elite        95    43    -52
+A2_boss         53   132    +79
+A3              43   166   +123
+
+eval500_K64
+  Act 1: reached 500, died 116 (23.2% of reaching)  {'BOSS': 74, 'ELITE': 21, 'MONSTER': 18, 'EVENT': 3}
+  Act 2: reached 384, died 335 (87.2% of reaching)  {'MONSTER': 187, 'ELITE': 95, 'BOSS': 53}
+  Act 3: reached  49, died  43 (87.8% of reaching)  {'MONSTER': 19, 'ELITE': 11, 'BOSS': 9, 'EVENT': 4}
+eval500_rl3e_K64
+  Act 1: reached 500, died  18 (3.6% of reaching)  {'BOSS': 15, 'MONSTER': 2, 'ELITE': 1}
+  Act 2: reached 482, died 239 (49.6% of reaching)  {'BOSS': 132, 'MONSTER': 64, 'ELITE': 43}
+  Act 3: reached 243, died 166 (68.3% of reaching)  {'BOSS': 95, 'ELITE': 39, 'MONSTER': 27, 'EVENT': 5}
+
+LOSS TAXONOMY  (eval500_rl3e_K64)
+runs 500  wins 77  losses 423
+
+ 132  A2_boss_scaling
+  95  A3_boss
+  43  A2_elite
+  39  A3_elite
+  37  A2_monster_attrition_outpaced
+  27  A3_monster
+  27  A2_monster_thrown_winnable
+  15  A1_boss_underprepared
+   5  A3_event
+   2  A1_other_MONSTER
+   1  A1_elite_overrisk
+
+sum check: 423 == 423 : True
+
+--- Act-2-monster losses: deck @ Act-2 entry (n=64) ---
+median size 16.5  starters 8.0  upgraded 2.0  upg_tempo 2.0
+median aoe 1.0  draw_energy 1.0  powers 2.0  scaling 2.0
+A = eval500_rl3d_K64
+B = eval500_rl3e_K64
+shared seeds: 500
+wins   A  81 (16.2%, 95% CI 13.2-19.7%)   B  77 (15.4%, 95% CI 12.5-18.8%)
+win flips: A-only 52, B-only 48  -> exact McNemar p = 0.764
+avg floor A 37.39  B 38.05   paired diff B-A = +0.65  (bootstrap 95% CI -0.33 .. +1.67)
+
+outcome          A     B    B-A
+WIN             81    77     -4
+A1_boss         19    15     -4
+A1_elite         2     1     -1
+A1_other         3     2     -1
+A2_monster      66    64     -2
+A2_elite        41    43     +2
+A2_boss        133   132     -1
+A2_other         2     0     -2
+A3             153   166    +13
+fight                                  eval500_rl3d_K64 won/met (HP) eval500_rl3e_K64 won/met (HP)
+A1 BOSS HEXAGHOST                      186/195  95.4% (42.0)    185/195  94.9% (44.4)   
+A1 BOSS SLIME_BOSS                     137/139  98.6% (21.5)    138/139  99.3% (21.3)   
+A1 BOSS THE_GUARDIAN                   153/161  95.0% (37.6)    159/163  97.5% (37.8)   
+A2 BOSS AUTOMATON                       70/126  55.6% (53.9)     76/128  59.4% (55.7)   
+A2 BOSS CHAMP                           86/120  71.7% (48.2)     88/126  69.8% (47.0)   
+A2 BOSS COLLECTOR                       78/121  64.5% (50.3)     79/121  65.3% (49.0)   
+A3 BOSS AWAKENED_ONE                    27/52   51.9% (53.1)     24/54   44.4% (59.0)   
+A3 BOSS DONU_AND_DECA                   29/67   43.3% (57.8)     29/65   44.6% (59.1)   
+A3 BOSS TIME_EATER                      25/52   48.1% (53.4)     24/53   45.3% (59.1)   
