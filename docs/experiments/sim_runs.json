@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-11-14 04:57",
+ "generated_at": "2026-11-14 07:43",
  "eval_seeds": "10007 + i*7919",
  "note": "Headless sts_lightspeed sim, Ironclad A0. clairvoyant = search replayed the true seed (saw future draws/rolls); honest = search samples hidden information.",
  "bucket_order": [
@@ -1393,6 +1393,32 @@
     "A2_boss": 100,
     "A2_other": 5,
     "A3": 148
+   }
+  },
+  {
+   "name": "eval500_rl5b_boss_K64",
+   "description": "rl5b policy + boss-RL rollout net (nets/boss1/val_it059.npz), K=64, eval500",
+   "group": "honest",
+   "env": "HONEST=1 HONEST_CPP=1 HONEST_K=64 MACRO_MAPFEAT=1 MACRO_POLICY=nets/rl5b/pol_gate.npz HONEST_ROLLOUT_NET=nets/boss1/val_it059.npz TRACE=1",
+   "seeds": 500,
+   "wins": 163,
+   "win_rate_pct": 32.6,
+   "avg_floor": 40.72,
+   "reached_act2": 478,
+   "reached_act3": 294,
+   "secs_per_seed_mean": 269.9,
+   "wall_secs": 9912,
+   "clairvoyant": false,
+   "deaths": {
+    "A1_boss": 15,
+    "A1_elite": 4,
+    "A1_other": 3,
+    "A2_monster": 37,
+    "A2_elite": 23,
+    "A2_boss": 122,
+    "A2_other": 2,
+    "A3": 130,
+    "other": 1
    }
   }
  ]

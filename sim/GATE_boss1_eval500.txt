@@ -1,0 +1,29 @@
+A = eval500_rl5b_K64
+B = eval500_rl5b_boss_K64
+shared seeds: 500
+wins   A 152 (30.4%, 95% CI 26.5-34.6%)   B 163 (32.6%, 95% CI 28.6-36.8%)
+win flips: A-only 75, B-only 86  -> exact McNemar p = 0.431
+avg floor A 41.02  B 40.72   paired diff B-A = -0.30  (bootstrap 95% CI -1.41 .. +0.79)
+
+outcome          A     B    B-A
+WIN            152   163    +11
+A1_boss         10    15     +5
+A1_elite         3     4     +1
+A1_other         4     3     -1
+A2_monster      37    37     +0
+A2_elite        20    23     +3
+A2_boss        117   122     +5
+A2_other         3     2     -1
+A3             154   130    -24
+other            0     1     +1
+fight                                  eval500_rl5b_K64 won/met (HP) eval500_rl5b_boss_K64 won/met (HP)
+A1 BOSS HEXAGHOST                      186/193  96.4% (39.9)    187/192  97.4% (38.0)   
+A1 BOSS SLIME_BOSS                     135/138  97.8% (20.5)    134/139  96.4% (19.9)   
+A1 BOSS THE_GUARDIAN                   162/162 100.0% (34.6)    157/162  96.9% (35.6)   
+A2 BOSS AUTOMATON                       95/141  67.4% (52.8)     93/137  67.9% (52.1)   
+A2 BOSS CHAMP                          117/143  81.8% (43.8)    104/139  74.8% (46.6)   
+A2 BOSS COLLECTOR                       94/139  67.6% (51.1)     97/140  69.3% (50.6)   
+A3 BOSS AWAKENED_ONE                    53/81   65.4% (54.4)     62/88   70.5% (53.2)   
+A3 BOSS DONU_AND_DECA                   49/87   56.3% (55.3)     50/85   58.8% (56.3)   
+A3 BOSS TIME_EATER                      50/92   54.3% (54.7)     52/81   64.2% (51.5)   
+A4 BOSS THE_HEART                      --                         0/1     0.0% (58.0)   
