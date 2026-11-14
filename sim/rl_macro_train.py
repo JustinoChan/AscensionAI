@@ -50,9 +50,12 @@ _MAP = os.environ.get("MACRO_MAPFEAT", "0") == "1"; _BOSS = os.environ.get("MACR
 SIDX = list(range(1200)) + list(range(2400, 2416)) + (list(range(2416, 2430)) if _MAP else []) +        (list(range(2416 + (28 if _MAP else 0), 2416 + (28 if _MAP else 0) + 12)) if _BOSS else [])
 
 
+CRITIC_W = int(os.environ.get("RL_CRITIC_W", "256"))   # critic width (default 256 = earlier runs)
+
+
 def critic_net():
-    return nn.Sequential(nn.Linear(len(SIDX), 256), nn.GELU(approximate="tanh"), nn.Linear(256, 256),
-                         nn.GELU(approximate="tanh"), nn.Linear(256, 1))
+    return nn.Sequential(nn.Linear(len(SIDX), CRITIC_W), nn.GELU(approximate="tanh"), nn.Linear(CRITIC_W, CRITIC_W),
+                         nn.GELU(approximate="tanh"), nn.Linear(CRITIC_W, 1))
 
 
 def scorer():
