@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-11-13 11:59",
+ "generated_at": "2026-11-14 04:57",
  "eval_seeds": "10007 + i*7919",
  "note": "Headless sts_lightspeed sim, Ironclad A0. clairvoyant = search replayed the true seed (saw future draws/rolls); honest = search samples hidden information.",
  "bucket_order": [
@@ -1345,6 +1345,54 @@
     "A2_boss": 117,
     "A2_other": 3,
     "A3": 154
+   }
+  },
+  {
+   "name": "holdout_rl5b_K64",
+   "description": "holdout-150: round 5b (critic PPO, it149) + honest K=64",
+   "group": "honest",
+   "env": "HONEST=1 HONEST_CPP=1 HONEST_K=64 MACRO_MAPFEAT=1 MACRO_POLICY=nets/rl5b/pol_gate.npz TRACE=1",
+   "seeds": 150,
+   "wins": 48,
+   "win_rate_pct": 32.0,
+   "avg_floor": 41.75,
+   "reached_act2": 146,
+   "reached_act3": 96,
+   "secs_per_seed_mean": 224.3,
+   "wall_secs": 8484,
+   "clairvoyant": false,
+   "deaths": {
+    "A1_boss": 3,
+    "A1_elite": 1,
+    "A2_monster": 15,
+    "A2_elite": 4,
+    "A2_boss": 31,
+    "A3": 48
+   }
+  },
+  {
+   "name": "eval500_rl5c_K64",
+   "description": "GATE: RL out-of-combat policy (it149) + honest K=64 combat, eval500",
+   "group": "honest",
+   "env": "HONEST=1 HONEST_CPP=1 HONEST_K=64 MACRO_POLICY=nets/rl5c/pol_gate.npz TRACE=1 MACRO_MAPFEAT=1",
+   "seeds": 500,
+   "wins": 172,
+   "win_rate_pct": 34.4,
+   "avg_floor": 41.58,
+   "reached_act2": 483,
+   "reached_act3": 320,
+   "secs_per_seed_mean": 275.4,
+   "wall_secs": 10037,
+   "clairvoyant": false,
+   "deaths": {
+    "A1_boss": 13,
+    "A1_elite": 1,
+    "A1_other": 3,
+    "A2_monster": 34,
+    "A2_elite": 24,
+    "A2_boss": 100,
+    "A2_other": 5,
+    "A3": 148
    }
   }
  ]
