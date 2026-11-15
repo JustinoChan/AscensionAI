@@ -114,6 +114,10 @@ LLM_MACRO = os.environ.get("LLM_MACRO", "0") == "1"
 # Phase 3 step 3.5 (default off): HONEST_ROLLOUT_NET=<npz> replaces varN as the C++ rollout (default) policy
 # inside honest 1-ply search; same layout as policy_varN.npz (pbody.0/2/4 + pi). Root pruning still uses varN.
 HONEST_ROLLOUT_NET = os.environ.get("HONEST_ROLLOUT_NET", "")
+# HONEST_ENGINE_BOSS=mcts (default off): use the honest ensemble MCTS (mcts_root on determinized roots) only in BOSS
+# fights; trees = MCTS_TREES_BOSS (default MCTS_TREES or K), sims/tree = MCTS_SIMS_BOSS (default MCTS_SIMS).
+HONEST_ENGINE_BOSS = os.environ.get("HONEST_ENGINE_BOSS", "")
+MCTS_TREES_BOSS = int(os.environ.get("MCTS_TREES_BOSS", "0"))
 HONEST_PRIOR = os.environ.get("HONEST_PRIOR", "")
 HONEST_TOPK = int(os.environ.get("HONEST_TOPK", "0"))
 HONEST_VNET = os.environ.get("HONEST_VNET", "")
@@ -524,6 +528,8 @@ def make_honest(base, GAMMA, TOPK, ROLL_CAP):
             if HONEST_ENGINE_BY_ACT:
                 act = int(self.env.gc.act)
                 engine = HONEST_ENGINE_BY_ACT[min(act, len(HONEST_ENGINE_BY_ACT)) - 1]
+            if HONEST_ENGINE_BOSS == "mcts" and room == "BOSS" and not getattr(self, "_in_rollout", False):
+                return self._mcts_action(MCTS_TREES_BOSS or MCTS_TREES or K, MCTS_SIMS_BY_ROOM.get(room, MCTS_SIMS))
             if engine == "mcts" and not getattr(self, "_in_rollout", False):
                 return self._mcts_action(MCTS_TREES or K, MCTS_SIMS_BY_ROOM.get(room, MCTS_SIMS))
             mask = self._mask()

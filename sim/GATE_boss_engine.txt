@@ -1,0 +1,9 @@
+held-out Act 2/3 boss fights, identical starts, honest engines: n=148
+  k64     won 118 (79.7%)  HP left 0.374  32 s/fight
+  mcts16  won  97 (65.5%)  HP left 0.348  12 s/fight   vs k64: flips 28/7 p=0.001
+  mcts32  won  96 (64.9%)  HP left 0.346  47 s/fight   vs k64: flips 27/5 p=0.000
+  mcts64  won  97 (65.5%)  HP left 0.366  188 s/fight   vs k64: flips 29/8 p=0.001
+  A2 AUTOMATON           n= 55  k64 47  mcts16 38  mcts32 36  mcts64 38
+  A2 CHAMP               n= 53  k64 43  mcts16 37  mcts32 42  mcts64 38
+  A2 COLLECTOR           n= 40  k64 28  mcts16 22  mcts32 18  mcts64 21
+BEST k64
