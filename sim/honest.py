@@ -118,6 +118,17 @@ HONEST_ROLLOUT_NET = os.environ.get("HONEST_ROLLOUT_NET", "")
 # fights; trees = MCTS_TREES_BOSS (default MCTS_TREES or K), sims/tree = MCTS_SIMS_BOSS (default MCTS_SIMS).
 HONEST_ENGINE_BOSS = os.environ.get("HONEST_ENGINE_BOSS", "")
 MCTS_TREES_BOSS = int(os.environ.get("MCTS_TREES_BOSS", "0"))
+# POTION_VALUE=<hp> (default 0 = off): potions get an exchange rate in the 1-ply score -- a candidate that drinks a
+# potion has its mean rollout value reduced by POTION_VALUE (x POTION_FULL_FRAC when all potion slots are full,
+# since a full belt wastes the next drop). Search then spends a potion only when it gains more than it is worth.
+POTION_VALUE = float(os.environ.get("POTION_VALUE", "0"))
+POTION_FULL_FRAC = float(os.environ.get("POTION_FULL_FRAC", "0.5"))
+# MACRO_ENCFEAT=1 (default off): 12 public encounter / potion-economy inputs for the out-of-combat scorer (state part):
+# hallway fights done this act, weak-pool fights left, elites done this act, last elite (one-hot of the act's 3),
+# potion-drop chance, potions held, free potion slots, belt full, act.
+MACRO_ENCFEAT = os.environ.get("MACRO_ENCFEAT", "0") == "1"
+_ELITES = {1: ("GREMLIN_NOB", "LAGAVULIN", "THREE_SENTRIES"), 2: ("GREMLIN_LEADER", "SLAVERS", "BOOK_OF_STABBING"),
+           3: ("GIANT_HEAD", "NEMESIS", "REPTOMANCER")}
 HONEST_PRIOR = os.environ.get("HONEST_PRIOR", "")
 HONEST_TOPK = int(os.environ.get("HONEST_TOPK", "0"))
 HONEST_VNET = os.environ.get("HONEST_VNET", "")
@@ -263,7 +274,22 @@ def make_honest(base, GAMMA, TOPK, ROLL_CAP):
             if MACRO_BOSSFEAT:
                 r0 = _roles()
             base_w = 2416 + (2 * mapfeat.N if MACRO_MAPFEAT else 0)
-            F = np.zeros((n, base_w + (2 * len(_ROLE_KEYS) if MACRO_BOSSFEAT else 0)), np.float32)
+            boss_w = base_w + (2 * len(_ROLE_KEYS) if MACRO_BOSSFEAT else 0)
+            if MACRO_ENCFEAT:
+                ec = self.__dict__.get("_enc", {"hall": {}, "elite": {}, "last_elite": {}})
+                act = int(self.env.gc.act)
+                weak_n = 3 if act == 1 else 2
+                hall = ec["hall"].get(act, 0)
+                last = ec["last_elite"].get(act)
+                held, cap = self._potion_slots()
+                try:
+                    pch = (40 + int(self.env.gc.potion_chance)) / 100.0
+                except Exception:
+                    pch = 0.4
+                e = [hall / 10.0, max(0, weak_n - hall) / 3.0, ec["elite"].get(act, 0) / 3.0] + \
+                    [1.0 if last == x else 0.0 for x in _ELITES.get(act, ("", "", ""))] + \
+                    [pch, held / 3.0, max(0, cap - held) / 3.0, 1.0 if cap and held >= cap else 0.0, act / 3.0, 0.0]
+            F = np.zeros((n, boss_w + (12 if MACRO_ENCFEAT else 0)), np.float32)
             for k in range(n):
                 self._hload(live, det)
                 try:
@@ -286,7 +312,9 @@ def make_honest(base, GAMMA, TOPK, ROLL_CAP):
                     F[k, 2416 + mapfeat.N:base_w] = m1
                 if MACRO_BOSSFEAT:
                     F[k, base_w:base_w + len(_ROLE_KEYS)] = r0
-                    F[k, base_w + len(_ROLE_KEYS):] = r1
+                    F[k, base_w + len(_ROLE_KEYS):boss_w] = r1
+                if MACRO_ENCFEAT:
+                    F[k, boss_w:] = e
             self._hload(live)
             return F, ss
 
@@ -494,6 +522,14 @@ def make_honest(base, GAMMA, TOPK, ROLL_CAP):
                 pass
             return True
 
+        def _potion_slots(self):
+            """(potions held, potion slots) from the raw observation: id >= 2 potion, 1 empty slot, 0 no slot."""
+            try:
+                raw = list(self.env.nn.getObservation(self.env.gc, self.env.bc if self.env.in_combat else None))[417:422]
+                return sum(1 for v in raw if v >= 2), sum(1 for v in raw if v >= 1)
+            except Exception:
+                return 0, 3
+
         def _is_potion(self, i, acts=None):
             acts = acts if acts is not None else self.env.bc.get_possible_actions()
             return i < len(acts) and ((acts[i].bits >> 29) & 0xF) == 1
@@ -517,6 +553,18 @@ def make_honest(base, GAMMA, TOPK, ROLL_CAP):
             return int(best)
 
         def _search_action(self):
+            if MACRO_ENCFEAT and not getattr(self, "_in_rollout", False):
+                gc0 = self.env.gc
+                key = (int(gc0.act), int(gc0.floor_num))
+                ec = self.__dict__.setdefault("_enc", {"seen": set(), "hall": {}, "elite": {}, "last_elite": {}})
+                if key not in ec["seen"]:
+                    ec["seen"].add(key)
+                    rm = str(gc0.cur_room).split(".")[-1]
+                    if rm == "MONSTER":
+                        ec["hall"][key[0]] = ec["hall"].get(key[0], 0) + 1
+                    elif rm == "ELITE":
+                        ec["elite"][key[0]] = ec["elite"].get(key[0], 0) + 1
+                        ec["last_elite"][key[0]] = str(gc0.encounter).split(".")[-1]
             self._hb()
             room = self._room()
             if getattr(self, "_in_rollout", False):
@@ -560,11 +608,18 @@ def make_honest(base, GAMMA, TOPK, ROLL_CAP):
                                                         GAMMA, ROLL_CAP, clair,
                                                         [] if last is None else [int(v) for v in last])
                 best, bq = legal[0], -1e18
+                use_pv = POTION_VALUE > 0 and not getattr(self, "_in_rollout", False)
+                if use_pv:
+                    pacts = self.env.bc.get_possible_actions()
+                    held, cap = self._potion_slots()
+                    pv = POTION_VALUE * (POTION_FULL_FRAC if cap and held >= cap else 1.0)
                 for a, row in zip(legal, scores):
                     tot = 0.0
                     for v in row:
                         tot += v
                     qa = tot / len(dets)
+                    if use_pv and self._is_potion(a, pacts):
+                        qa -= pv
                     if qa > bq:
                         bq, best = qa, a
                 if HARVEST and not getattr(self, "_in_rollout", False):

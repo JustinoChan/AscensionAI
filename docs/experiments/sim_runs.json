@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-11-15 00:28",
+ "generated_at": "2026-11-15 14:10",
  "eval_seeds": "10007 + i*7919",
  "note": "Headless sts_lightspeed sim, Ironclad A0. clairvoyant = search replayed the true seed (saw future draws/rolls); honest = search samples hidden information.",
  "bucket_order": [
@@ -1491,6 +1491,56 @@
     "A2_boss": 28,
     "A2_other": 1,
     "A3": 49
+   }
+  },
+  {
+   "name": "eval500_rl5d_potsave",
+   "description": "5d policy + POTION_SAVE (potions kept for elites/bosses), K=64, eval500",
+   "group": "honest",
+   "env": "HONEST=1 HONEST_CPP=1 HONEST_K=64 MACRO_MAPFEAT=1 MACRO_POLICY=nets/rl5d/pol_gate.npz POTION_SAVE=1 TRACE=1",
+   "seeds": 500,
+   "wins": 184,
+   "win_rate_pct": 36.8,
+   "avg_floor": 42.03,
+   "reached_act2": 483,
+   "reached_act3": 336,
+   "secs_per_seed_mean": 297.4,
+   "wall_secs": 12044,
+   "clairvoyant": false,
+   "deaths": {
+    "A1_boss": 11,
+    "A1_elite": 5,
+    "A1_other": 1,
+    "A2_monster": 41,
+    "A2_elite": 23,
+    "A2_boss": 81,
+    "A2_other": 2,
+    "A3": 152
+   }
+  },
+  {
+   "name": "eval500_rl5e_K64",
+   "description": "GATE: RL out-of-combat policy (it007) + honest K=64 combat, eval500",
+   "group": "honest",
+   "env": "HONEST=1 HONEST_CPP=1 HONEST_K=64 MACRO_POLICY=nets/rl5e/pol_gate.npz TRACE=1 MACRO_MAPFEAT=1",
+   "seeds": 500,
+   "wins": 171,
+   "win_rate_pct": 34.2,
+   "avg_floor": 41.79,
+   "reached_act2": 478,
+   "reached_act3": 324,
+   "secs_per_seed_mean": 278.5,
+   "wall_secs": 10267,
+   "clairvoyant": false,
+   "deaths": {
+    "A1_boss": 17,
+    "A1_elite": 3,
+    "A1_other": 2,
+    "A2_monster": 33,
+    "A2_elite": 21,
+    "A2_boss": 99,
+    "A2_other": 1,
+    "A3": 153
    }
   }
  ]

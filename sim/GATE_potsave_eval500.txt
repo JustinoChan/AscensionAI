@@ -1,0 +1,36 @@
+A = eval500_rl5d_K64
+B = eval500_rl5d_potsave
+shared seeds: 500
+wins   A 181 (36.2%, 95% CI 32.1-40.5%)   B 184 (36.8%, 95% CI 32.7-41.1%)
+win flips: A-only 82, B-only 85  -> exact McNemar p = 0.877
+avg floor A 42.26  B 42.03   paired diff B-A = -0.24  (bootstrap 95% CI -1.33 .. +0.84)
+
+outcome          A     B    B-A
+WIN            181   184     +3
+A1_boss         15    11     -4
+A1_elite         2     5     +3
+A1_other         3     1     -2
+A2_monster      30    41    +11
+A2_elite        24    23     -1
+A2_boss         92    81    -11
+A2_other         0     2     +2
+A3             153   152     -1
+fight                                  eval500_rl5d_K64 won/met (HP) eval500_rl5d_potsave won/met (HP)
+A1 BOSS HEXAGHOST                      182/191  95.3% (40.2)    187/193  96.9% (33.7)   
+A1 BOSS SLIME_BOSS                     138/141  97.9% (20.0)    136/139  97.8% (15.5)   
+A1 BOSS THE_GUARDIAN                   160/163  98.2% (34.5)    160/162  98.8% (28.0)   
+A1 ELITE GREMLIN_NOB                   127/127 100.0% (13.0)    124/125  99.2% ( 9.7)   
+A1 ELITE LAGAVULIN                     145/146  99.3% (19.5)    153/155  98.7% (13.9)   
+A1 ELITE THREE_SENTRIES                158/159  99.4% (19.4)    160/162  98.8% (13.9)   
+A2 BOSS AUTOMATON                       98/135  72.6% (53.5)    111/135  82.2% (46.2)   
+A2 BOSS CHAMP                          123/142  86.6% (44.6)    116/143  81.1% (40.6)   
+A2 BOSS COLLECTOR                      113/149  75.8% (48.9)    109/139  78.4% (42.3)   
+A2 ELITE BOOK_OF_STABBING              108/111  97.3% (17.9)    104/110  94.5% (14.1)   
+A2 ELITE GREMLIN_LEADER                 79/90   87.8% (24.8)     86/93   92.5% (18.2)   
+A2 ELITE SLAVERS                       106/115  92.2% (30.6)     98/107  91.6% (18.3)   
+A3 BOSS AWAKENED_ONE                    65/102  63.7% (56.0)     68/96   70.8% (51.3)   
+A3 BOSS DONU_AND_DECA                   57/93   61.3% (56.4)     56/90   62.2% (51.8)   
+A3 BOSS TIME_EATER                      59/97   60.8% (54.3)     60/91   65.9% (51.1)   
+A3 ELITE GIANT_HEAD                     69/76   90.8% (24.8)     68/77   88.3% (23.3)   
+A3 ELITE NEMESIS                        72/76   94.7% (26.3)     65/71   91.5% (17.3)   
+A3 ELITE REPTOMANCER                    65/73   89.0% (23.5)     67/77   87.0% (23.8)   
