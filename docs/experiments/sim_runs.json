@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-11-15 20:44",
+ "generated_at": "2026-11-16 05:09",
  "eval_seeds": "10007 + i*7919",
  "note": "Headless sts_lightspeed sim, Ironclad A0. clairvoyant = search replayed the true seed (saw future draws/rolls); honest = search samples hidden information.",
  "bucket_order": [
@@ -1613,6 +1613,31 @@
     "A2_elite": 28,
     "A2_boss": 88,
     "A2_other": 3,
+    "A3": 136
+   }
+  },
+  {
+   "name": "eval500_rl6_K64",
+   "description": "GATE: RL out-of-combat policy (it009) + honest K=64 combat, eval500",
+   "group": "honest",
+   "env": "HONEST=1 HONEST_CPP=1 HONEST_K=64 MACRO_POLICY=nets/rl6/pol_gate.npz TRACE=1 MACRO_MAPFEAT=1 MACRO_ENCFEAT=1",
+   "seeds": 500,
+   "wins": 186,
+   "win_rate_pct": 37.2,
+   "avg_floor": 41.93,
+   "reached_act2": 481,
+   "reached_act3": 322,
+   "secs_per_seed_mean": 283.3,
+   "wall_secs": 10341,
+   "clairvoyant": false,
+   "deaths": {
+    "A1_boss": 14,
+    "A1_elite": 1,
+    "A1_other": 4,
+    "A2_monster": 29,
+    "A2_elite": 29,
+    "A2_boss": 99,
+    "A2_other": 2,
     "A3": 136
    }
   }
