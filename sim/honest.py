@@ -123,6 +123,14 @@ MCTS_TREES_BOSS = int(os.environ.get("MCTS_TREES_BOSS", "0"))
 # since a full belt wastes the next drop). Search then spends a potion only when it gains more than it is worth.
 POTION_VALUE = float(os.environ.get("POTION_VALUE", "0"))
 POTION_FULL_FRAC = float(os.environ.get("POTION_FULL_FRAC", "0.5"))
+# EXPERT_BOSS_* (default off): expert A0 boss-fight rules for the honest 1-ply root (boss rooms only, never in rollouts).
+#   EXPERT_BOSS_PV="<act2>,<act3>": POTION_VALUE multiplier in Act 2 / Act 3 boss fights ("0.5,0" = potions are cheap at
+#     the Act 2 boss because only the belt carries over, and free at the final boss: "dump potions on the boss").
+#   EXPERT_BOSS_RISK=<beta>: below A5 the player heals to full after a boss, so HP left after a win is worth nothing and
+#     only survival matters: Q = mean + beta * (mean of the worst quarter of determinized worlds - mean).
+_ebp = [x for x in os.environ.get("EXPERT_BOSS_PV", "").split(",") if x != ""]
+EXPERT_BOSS_PV = {2: float(_ebp[0]), 3: float(_ebp[-1])} if _ebp else {}
+EXPERT_BOSS_RISK = float(os.environ.get("EXPERT_BOSS_RISK", "0"))
 # MACRO_ENCFEAT=1 (default off): 12 public encounter / potion-economy inputs for the out-of-combat scorer (state part):
 # hallway fights done this act, weak-pool fights left, elites done this act, last elite (one-hot of the act's 3),
 # potion-drop chance, potions held, free potion slots, belt full, act.
@@ -609,15 +617,22 @@ def make_honest(base, GAMMA, TOPK, ROLL_CAP):
                                                         [] if last is None else [int(v) for v in last])
                 best, bq = legal[0], -1e18
                 use_pv = POTION_VALUE > 0 and not getattr(self, "_in_rollout", False)
+                boss_root = room == "BOSS" and not getattr(self, "_in_rollout", False)
                 if use_pv:
                     pacts = self.env.bc.get_possible_actions()
                     held, cap = self._potion_slots()
                     pv = POTION_VALUE * (POTION_FULL_FRAC if cap and held >= cap else 1.0)
+                    if boss_root and EXPERT_BOSS_PV:
+                        pv *= EXPERT_BOSS_PV.get(int(self.env.gc.act), 1.0)
+                risk = EXPERT_BOSS_RISK if boss_root else 0.0
                 for a, row in zip(legal, scores):
                     tot = 0.0
                     for v in row:
                         tot += v
                     qa = tot / len(dets)
+                    if risk:
+                        lo = sorted(row)[:max(1, len(row) // 4)]
+                        qa += risk * (sum(lo) / len(lo) - qa)
                     if use_pv and self._is_potion(a, pacts):
                         qa -= pv
                     if qa > bq:
