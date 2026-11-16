@@ -15,11 +15,11 @@ for s in "$WSL_INTEROP" $(ls -t /run/WSL/*_interop 2>/dev/null); do
   [ -S "$s" ] || continue
   if WSL_INTEROP="$s" timeout 15 /mnt/c/Windows/System32/cmd.exe /c ver >/dev/null 2>&1; then export WSL_INTEROP="$s"; break; fi
 done
-BR=""; for try in $(seq 1 30); do BR=$("$G" -C 'C:\Code\AscensionAI' rev-parse --abbrev-ref HEAD 2>/dev/null); [ -n "$BR" ] && break; sleep 30; done   # interop can fail transiently
+BR=""; for try in $(seq 1 30); do BR=$(timeout 60 "$G" -C 'C:\Code\AscensionAI' rev-parse --abbrev-ref HEAD 2>/dev/null); [ -n "$BR" ] && break; sleep 30; done   # interop can fail transiently
 [ "$BR" = "claude/project-thread-p8o8l7" ] || { echo "website repo on $BR - not committing"; exit 1; }
-for try in 1 2 3 4 5; do "$G" -C 'C:\Code\AscensionAI' status --short >/dev/null 2>&1 && break; sleep 20; done   # WSL interop can fail transiently
+for try in 1 2 3 4 5; do timeout 120 "$G" -C 'C:\Code\AscensionAI' status --short >/dev/null 2>&1 && break; sleep 20; done   # WSL interop can fail transiently
 "$G" -C 'C:\Code\AscensionAI' add docs/experiments sim
 "$G" -C 'C:\Code\AscensionAI' commit -q -m "${MSG:-Sim results (auto-generated)}
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>" || true
-for try in 1 2 3 4 5; do "$G" -C 'C:\Code\AscensionAI' push -q origin claude/project-thread-p8o8l7 && break; sleep 30; done
+for try in 1 2 3 4 5; do timeout 300 "$G" -C 'C:\Code\AscensionAI' push -q origin claude/project-thread-p8o8l7 && break; sleep 30; done

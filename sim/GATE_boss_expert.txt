@@ -1,0 +1,14 @@
+held-out boss fights (sim_logs/boss_expert_a2 + sim_logs/boss_expert_a3), identical starts, honest K=64 root: n=225
+  base    won 165 (73.3%)  HP left 0.307  potions left 0.72  60 s/fight
+  pvdump  won 162 (72.0%)  HP left 0.332  potions left 0.22  55 s/fight   vs base: flips 13/10 p=0.678
+  pvzero  won 166 (73.8%)  HP left 0.352  potions left 0.05  52 s/fight   vs base: flips 13/14 p=1.000
+  risk    won 162 (72.0%)  HP left 0.319  potions left 0.58  61 s/fight   vs base: flips 14/11 p=0.690
+  both    won 168 (74.7%)  HP left 0.344  potions left 0.21  55 s/fight   vs base: flips 12/15 p=0.701
+  k128    won 169 (75.1%)  HP left 0.327  potions left 0.69  175 s/fight   vs base: flips 9/13 p=0.523
+  A2 AUTOMATON           n= 41  base 29  pvdump 31  pvzero 31  risk 29  both 31  k128 32
+  A2 CHAMP               n= 36  base 31  pvdump 30  pvzero 31  risk 32  both 32  k128 33
+  A2 COLLECTOR           n= 35  base 27  pvdump 23  pvzero 26  risk 25  both 25  k128 24
+  A3 AWAKENED_ONE        n= 37  base 26  pvdump 26  pvzero 26  risk 27  both 25  k128 29
+  A3 DONU_AND_DECA       n= 30  base 19  pvdump 17  pvzero 17  risk 18  both 20  k128 18
+  A3 TIME_EATER          n= 46  base 33  pvdump 35  pvzero 35  risk 31  both 35  k128 33
+BEST base
