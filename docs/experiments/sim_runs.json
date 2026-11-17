@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-11-16 15:58",
+ "generated_at": "2026-11-17 01:34",
  "eval_seeds": "10007 + i*7919",
  "note": "Headless sts_lightspeed sim, Ironclad A0. clairvoyant = search replayed the true seed (saw future draws/rolls); honest = search samples hidden information.",
  "bucket_order": [
@@ -1689,6 +1689,81 @@
     "A2_boss": 31,
     "A2_other": 1,
     "A3": 49
+   }
+  },
+  {
+   "name": "holdout_rl5d_pv10",
+   "description": "holdout-150: nets/rl5d/pol_gate.npz + honest K=64",
+   "group": "honest",
+   "env": "HONEST=1 HONEST_CPP=1 HONEST_K=64 MACRO_POLICY=nets/rl5d/pol_gate.npz TRACE=1 MACRO_MAPFEAT=1 POTION_VALUE=10",
+   "seeds": 150,
+   "wins": 63,
+   "win_rate_pct": 42.0,
+   "avg_floor": 43.13,
+   "reached_act2": 145,
+   "reached_act3": 104,
+   "secs_per_seed_mean": 420.9,
+   "wall_secs": 4743,
+   "clairvoyant": false,
+   "deaths": {
+    "A1_boss": 2,
+    "A1_elite": 1,
+    "A1_other": 2,
+    "A2_monster": 8,
+    "A2_elite": 3,
+    "A2_boss": 28,
+    "A2_other": 2,
+    "A3": 41
+   }
+  },
+  {
+   "name": "eval500b_rl5d_pv10",
+   "description": "5d + POTION_VALUE=10, eval500b (fresh seeds)",
+   "group": "honest",
+   "env": "HONEST=1 HONEST_CPP=1 HONEST_K=64 MACRO_MAPFEAT=1 MACRO_POLICY=nets/rl5d/pol_gate.npz TRACE=1 POTION_VALUE=10",
+   "seeds": 500,
+   "wins": 191,
+   "win_rate_pct": 38.2,
+   "avg_floor": 42.81,
+   "reached_act2": 489,
+   "reached_act3": 339,
+   "secs_per_seed_mean": 425.5,
+   "wall_secs": 18207,
+   "clairvoyant": false,
+   "deaths": {
+    "A1_boss": 7,
+    "A1_elite": 3,
+    "A1_other": 1,
+    "A2_monster": 28,
+    "A2_elite": 20,
+    "A2_boss": 101,
+    "A2_other": 1,
+    "A3": 148
+   }
+  },
+  {
+   "name": "eval500b_rl5d_K64",
+   "description": "5d, eval500b (fresh seeds)",
+   "group": "honest",
+   "env": "HONEST=1 HONEST_CPP=1 HONEST_K=64 MACRO_MAPFEAT=1 MACRO_POLICY=nets/rl5d/pol_gate.npz TRACE=1",
+   "seeds": 500,
+   "wins": 165,
+   "win_rate_pct": 33.0,
+   "avg_floor": 42.27,
+   "reached_act2": 489,
+   "reached_act3": 324,
+   "secs_per_seed_mean": 310.6,
+   "wall_secs": 11543,
+   "clairvoyant": false,
+   "deaths": {
+    "A1_boss": 9,
+    "A1_elite": 1,
+    "A1_other": 1,
+    "A2_monster": 33,
+    "A2_elite": 21,
+    "A2_boss": 110,
+    "A2_other": 1,
+    "A3": 159
    }
   }
  ]

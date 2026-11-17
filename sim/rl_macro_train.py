@@ -47,6 +47,13 @@ torch.manual_seed(0)
 # obs now, screen one-hot, map summary now, deck roles now) instead of one batch-normalised R per game.
 CRITIC = os.environ.get("RL_CRITIC", "0") == "1"
 CRITIC_WARMUP = int(os.environ.get("RL_CRITIC_WARMUP", "5"))   # iterations the critic is fitted but not yet used
+# RL_READY=<npz> (default off, identical): boss-readiness potential Phi(s) = RL_READY_W * P(beat this act's boss | obs, act)
+# (ready_train.py). Potential-based shaping (Ng et al.: optimal policy unchanged) only adds signal with bootstrapped
+# advantages, so with it the critic fits the shaped return R - Phi(s_t) and the advantage is GAE(RL_LAMBDA) over the
+# game's decisions: delta_t = Phi_{t+1} - Phi_t + V_{t+1} - V_t, last delta = R - Phi_T - V_T. Needs RL_CRITIC=1.
+READY = os.environ.get("RL_READY", "")
+READY_W = float(os.environ.get("RL_READY_W", "0.5"))
+LAMBDA = float(os.environ.get("RL_LAMBDA", "0.9"))
 _MAP = os.environ.get("MACRO_MAPFEAT", "0") == "1"; _BOSS = os.environ.get("MACRO_BOSSFEAT", "0") == "1"
 SIDX = list(range(1200)) + list(range(2400, 2416)) + (list(range(2416, 2430)) if _MAP else []) +        (list(range(2416 + (28 if _MAP else 0), 2416 + (28 if _MAP else 0) + 12)) if _BOSS else []) + \
        (list(range(D_IN - 12, D_IN)) if os.environ.get("MACRO_ENCFEAT", "0") == "1" else [])
@@ -82,6 +89,25 @@ def load_npz(m, path):
     return m
 
 
+_ready_m = None
+
+
+def ready_phi(obs, acts):
+    """RL_READY_W * P(beat the current act's boss) for each state (obs1200 rows, act per row)."""
+    global _ready_m
+    if _ready_m is None:
+        z = np.load(READY)
+        g = lambda: nn.GELU(approximate="tanh")
+        m = nn.Sequential(nn.Linear(1203, 256), g(), nn.Dropout(0.1), nn.Linear(256, 64), g(), nn.Linear(64, 1))
+        m.load_state_dict({k.replace("_", "."): torch.tensor(z[k]) for k in z.files if k not in ("mu", "sd")})
+        _ready_m = (m.to(dev).eval(), torch.tensor(z["mu"], device=dev), torch.tensor(z["sd"], device=dev))
+    m, mu, sd = _ready_m
+    with torch.no_grad():
+        x = (torch.tensor(np.asarray(obs, np.float32), device=dev) - mu) / sd
+        a = F.one_hot(torch.tensor(np.clip(acts, 1, 3) - 1, device=dev), 3).float()
+        return (READY_W * torch.sigmoid(m(torch.cat([x, a], 1))[:, 0])).cpu().numpy()
+
+
 def load_logs(paths, need_logp=False):
     """-> list of games: (feats [Nc,2416] f16, ncand [D], action [D], logp [D], run [4], ss [D])"""
     G = []
@@ -90,7 +116,8 @@ def load_logs(paths, need_logp=False):
             z = np.load(p)
             if len(z["action"]) == 0:
                 continue
-            G.append((z["feats"], z["ncand"].astype(np.int64), z["action"].astype(np.int64), z["logp"], z["run"], z["ss"]))
+            G.append((z["feats"], z["ncand"].astype(np.int64), z["action"].astype(np.int64), z["logp"], z["run"], z["ss"],
+                      z["act"].astype(np.int64) if "act" in z.files else np.ones(len(z["action"]), np.int64)))
         except Exception:
             pass
     return G
@@ -235,10 +262,21 @@ def rl(iters):
             S = [g[0][np.concatenate([[0], np.cumsum(g[1])[:-1]])][:, SIDX].astype(np.float32) for g in G]
             with torch.no_grad():
                 V = [crit(torch.tensor(x, device=dev))[:, 0].cpu().numpy() for x in S]
-            ADVC = [R[gi] - V[gi] for gi in range(len(G))]
+            if READY:
+                PHI = [ready_phi(x[:, :1200], G[gi][6]) for gi, x in enumerate(S)]
+                ADVC = []
+                for gi in range(len(G)):
+                    ph, v = PHI[gi], V[gi]; T = len(v); a = np.zeros(T, np.float32); run = 0.0
+                    for t in range(T - 1, -1, -1):
+                        dl = (R[gi] - ph[t] - v[t]) if t == T - 1 else (ph[t + 1] - ph[t] + v[t + 1] - v[t])
+                        run = dl + LAMBDA * run; a[t] = run
+                    ADVC.append(a)
+                cinfo["phi_mean"] = float(np.mean(np.concatenate(PHI)))
+            else:
+                ADVC = [R[gi] - V[gi] for gi in range(len(G))]
             flat = np.concatenate(ADVC); am, asd = float(flat.mean()), float(flat.std() + 1e-6)
             ADVC = [(a - am) / asd for a in ADVC]
-            yv = np.concatenate([np.full(len(x), R[gi], np.float32) for gi, x in enumerate(S)])
+            yv = np.concatenate([np.full(len(x), R[gi], np.float32) - (PHI[gi] if READY else 0) for gi, x in enumerate(S)]).astype(np.float32)
             pv = np.concatenate(V)
             cinfo["critic_expl_var"] = float(1 - np.var(yv - pv) / (np.var(yv) + 1e-9))
             getadv = (lambda gi, di: (ADVC[gi][di], G[gi][3][di])) if warm_done(it) else (lambda gi, di: (adv[gi], G[gi][3][di]))

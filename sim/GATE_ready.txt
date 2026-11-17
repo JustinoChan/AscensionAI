@@ -1,0 +1,19 @@
+rows 239753 test 48270
+epoch 0  held-out AUC all 0.836  last-before-boss 0.852
+epoch 1  held-out AUC all 0.854  last-before-boss 0.870
+epoch 2  held-out AUC all 0.858  last-before-boss 0.874
+epoch 3  held-out AUC all 0.860  last-before-boss 0.876
+epoch 4  held-out AUC all 0.859  last-before-boss 0.874
+epoch 5  held-out AUC all 0.853  last-before-boss 0.868
+epoch 6  held-out AUC all 0.851  last-before-boss 0.864
+epoch 7  held-out AUC all 0.846  last-before-boss 0.859
+epoch 8  held-out AUC all 0.838  last-before-boss 0.851
+epoch 9  held-out AUC all 0.833  last-before-boss 0.848
+epoch 10  held-out AUC all 0.832  last-before-boss 0.845
+epoch 11  held-out AUC all 0.827  last-before-boss 0.841
+/home/justinochan/sts/.venv_train/lib/python3.10/site-packages/numpy/lib/_function_base_impl.py:3045: RuntimeWarning: invalid value encountered in divide
+  c /= stddev[:, None]
+/home/justinochan/sts/.venv_train/lib/python3.10/site-packages/numpy/lib/_function_base_impl.py:3046: RuntimeWarning: invalid value encountered in divide
+  c /= stddev[None, :]
+{"auc_last": 0.876487755648347, "best_single_feature_auc_last": 0.7496714917651923, "n_train": 191483, "n_test": 48270, "auc_last_act1": 0.8305132795327245, "auc_last_act2": 0.7967281655869698, "auc_last_act3": 0.8031865947474062}
+GATE PASS
