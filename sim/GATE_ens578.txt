@@ -1,0 +1,18 @@
+ensemble ens578: nets/rl5d/pol_gate.npz + nets/rl7/pol_gate.npz,nets/rl8/pol_gate.npz (round 8 eval500 wins: 201)
+A = eval500_rl5d_pv10
+B = eval500_ens578_pv10
+shared seeds: 500
+wins   A 192 (38.4%, 95% CI 34.2-42.7%)   B 200 (40.0%, 95% CI 35.8-44.4%)
+win flips: A-only 64, B-only 72  -> exact McNemar p = 0.549
+avg floor A 42.02  B 42.46   paired diff B-A = +0.44  (bootstrap 95% CI -0.53 .. +1.40)
+
+outcome          A     B    B-A
+wins   A 197 (39.4%, 95% CI 35.2-43.7%)   B 200 (40.0%, 95% CI 35.8-44.4%)
+win flips: A-only 79, B-only 82  -> exact McNemar p = 0.875
+avg floor A 42.19  B 42.46   paired diff B-A = +0.26  (bootstrap 95% CI -0.83 .. +1.32)
+wins   A  63 (42.0%, 95% CI 34.4-50.0%)   B  72 (48.0%, 95% CI 40.2-55.9%)
+win flips: A-only 21, B-only 30  -> exact McNemar p = 0.262
+avg floor A 43.13  B 42.73   paired diff B-A = -0.39  (bootstrap 95% CI -2.51 .. +1.68)
+wins   A  63 (42.0%, 95% CI 34.4-50.0%)   B  66 (44.0%, 95% CI 36.3-52.0%)
+win flips: A-only 20, B-only 23  -> exact McNemar p = 0.761
+avg floor A 43.13  B 44.05   paired diff B-A = +0.93  (bootstrap 95% CI -0.37 .. +2.19)
