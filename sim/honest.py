@@ -96,6 +96,9 @@ MACRO_KIND = {kind: {"K": int(os.environ.get("MACRO_K_" + kind.upper(), MACRO_K)
 #   MACRO_POLICY_SAMPLE=1   sample from softmax (training); default argmax (evaluation)
 #   MACRO_POLICY_LOG=<dir>  write <dir>/seed_<s>.npz with (obs, mask, action, logp) + run outcome
 MACRO_POLICY = os.environ.get("MACRO_POLICY", "")
+# MACRO_POLICY_ENS=<npz>[,<npz>...] (default off): ensemble -- the out-of-combat choice uses the mean of the candidate
+# logits of MACRO_POLICY and these scorers (same feature layout).
+MACRO_POLICY_ENS = [x for x in os.environ.get("MACRO_POLICY_ENS", "").split(",") if x]
 MACRO_POLICY_SAMPLE = os.environ.get("MACRO_POLICY_SAMPLE", "0") == "1"
 MACRO_POLICY_LOG = os.environ.get("MACRO_POLICY_LOG", "")
 MACRO_FEAT_LOG = os.environ.get("MACRO_FEAT_LOG", "")
@@ -335,14 +338,23 @@ def make_honest(base, GAMMA, TOPK, ROLL_CAP):
             if P is None:
                 z = np.load(MACRO_POLICY)
                 P = self._pol = [(z["l%d.weight" % i], z["l%d.bias" % i]) for i in range(3)]
+                self._pol_ens = [[(zz["l%d.weight" % i], zz["l%d.bias" % i]) for i in range(3)]
+                                 for zz in (np.load(q) for q in MACRO_POLICY_ENS)]
                 self._pol_rng = np.random.default_rng((int(self.seed) * 2654435761 + 97) % (1 << 32))
                 self._pol_log = []
             F, ss = self._cand_feats(mask)
-            h = F
-            for li, (W, b) in enumerate(P):
-                x = h @ W.T + b
-                h = x if li == len(P) - 1 else 0.5 * x * (1.0 + np.tanh(0.7978845608 * (x + 0.044715 * x ** 3)))
-            lg = h[:, 0].astype(np.float64)
+
+            def _fwd(P):
+                h = F
+                for li, (W, b) in enumerate(P):
+                    x = h @ W.T + b
+                    h = x if li == len(P) - 1 else 0.5 * x * (1.0 + np.tanh(0.7978845608 * (x + 0.044715 * x ** 3)))
+                return h[:, 0].astype(np.float64)
+            lg = _fwd(P)
+            if MACRO_POLICY_ENS:
+                for Q in self._pol_ens:
+                    lg = lg + _fwd(Q)
+                lg = lg / (1 + len(self._pol_ens))
             pr = np.exp(lg - lg.max()); pr /= pr.sum()
             a = int(self._pol_rng.choice(len(pr), p=pr)) if MACRO_POLICY_SAMPLE else int(np.argmax(lg))
             if MACRO_POLICY_LOG:
