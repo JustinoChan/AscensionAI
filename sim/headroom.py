@@ -19,7 +19,7 @@ from honest import make_honest
 from eval_fullrun_search import GAMMA, TOPK, ROLL_CAP
 import slaythespire as S
 
-OUT = "sim_logs/headroom"
+OUT = os.environ.get("HEADROOM_OUT", "sim_logs/headroom")
 os.makedirs(OUT, exist_ok=True)
 _LOSS = S.GameOutcome.PLAYER_LOSS
 

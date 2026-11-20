@@ -1,6 +1,6 @@
-import json, glob, collections
-rows = [f for p in glob.glob("sim_logs/headroom/seed_*.json") for f in json.load(open(p))["fights"]]
-print("fights %d from %d seeds" % (len(rows), len(glob.glob("sim_logs/headroom/seed_*.json"))))
+import json, glob, collections, os
+rows = [f for p in glob.glob(os.environ.get("HEADROOM_OUT", "sim_logs/headroom") + "/seed_*.json") for f in json.load(open(p))["fights"]]
+print("fights %d from %d seeds" % (len(rows), len(glob.glob(os.environ.get("HEADROOM_OUT", "sim_logs/headroom") + "/seed_*.json"))))
 g = collections.defaultdict(list)
 for r in rows:
     g[("A%d %s" % (r["act"], r["room"]))].append(r)
