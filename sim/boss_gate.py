@@ -34,7 +34,7 @@ def cnet(path, maxima):
 def run(seed, new_path):
     ev = make_honest(E.V2, GAMMA, TOPK, ROLL_CAP)("policy_varN.npz", "policy_varE.npz", "macro")
     base = ev._search_action
-    nets = {"base": cnet("policy_varN.npz", ev.maxima), "new": cnet(new_path, ev.maxima)}
+    nets = {"base": cnet(os.environ.get("GATE_BASE_NET", "policy_varN.npz"), ev.maxima), "new": cnet(new_path, ev.maxima)}
     res = {}
 
     def hooked():

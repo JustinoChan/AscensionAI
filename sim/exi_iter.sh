@@ -15,7 +15,7 @@ done; wait
 .venv_train/bin/python exi_train.py $PREV $N/rollout.npz $(ls -d sim_logs/exi*/data) 2>&1 | tee $N/train.log
 G=sim_logs/exi${IT}_gate
 for w in $(seq 0 13); do
-  env $MAIN GATE_SEEDSTEP=434 nice -n 5 .venv/bin/python boss_gate.py $N/rollout.npz $((979000003 + IT*1000000 + w*31)) 9 $G >> $G.log 2>/dev/null &
+  env $MAIN GATE_BASE_NET=$PREV GATE_SEEDSTEP=434 nice -n 5 .venv/bin/python boss_gate.py $N/rollout.npz $((979000003 + IT*1000000 + w*31)) 9 $G >> $G.log 2>/dev/null &
 done; wait
 python3 boss_gate_report.py $G | tee sim_logs/GATE_exi$IT.txt
 grep -q "^PASS" sim_logs/GATE_exi$IT.txt || { echo "exi$IT: failed the boss-fight gate; no eval500" | tee -a sim_logs/GATE_exi$IT.txt; exit 0; }

@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-11-20 00:00",
+ "generated_at": "2026-11-20 07:57",
  "eval_seeds": "10007 + i*7919",
  "note": "Headless sts_lightspeed sim, Ironclad A0. clairvoyant = search replayed the true seed (saw future draws/rolls); honest = search samples hidden information.",
  "bucket_order": [
