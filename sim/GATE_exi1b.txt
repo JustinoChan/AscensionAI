@@ -1,0 +1,8 @@
+held-out boss fights inside honest K=64 search: n=115
+  base (varN rollouts): won 92 (80.0%), mean HP left 0.355
+  new (candidate rollouts): won 91 (79.1%), mean HP left 0.331
+  flips base-only 8 new-only 7, exact McNemar p = 1.000
+  A2 AUTOMATON           n= 38 base  25 new  27
+  A2 CHAMP               n= 37 base  33 new  32
+  A2 COLLECTOR           n= 40 base  34 new  32
+FAIL
