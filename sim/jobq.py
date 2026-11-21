@@ -101,7 +101,7 @@ def runner():
             log.write("[%s] start job %d %s: %s\n" % (time.strftime("%F %T"), j["id"], j["name"], j["cmd"])); log.flush()
             rc = subprocess.call(["nice", "-n", "5", "bash", "-c", j["cmd"]], stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
             log.write("[%s] end job %d rc=%d\n" % (time.strftime("%F %T"), j["id"], rc))
-        st = "done" if rc == 0 else "failed"
+        st = "done" if rc == 0 else ("stopped" if rc in (-15, 143) else "failed")   # SIGTERM = stopped on purpose
 
         def fin(q):
             for x in q["jobs"]:

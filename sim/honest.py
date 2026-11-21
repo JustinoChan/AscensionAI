@@ -117,6 +117,11 @@ LLM_MACRO = os.environ.get("LLM_MACRO", "0") == "1"
 # Phase 3 step 3.5 (default off): HONEST_ROLLOUT_NET=<npz> replaces varN as the C++ rollout (default) policy
 # inside honest 1-ply search; same layout as policy_varN.npz (pbody.0/2/4 + pi). Root pruning still uses varN.
 HONEST_ROLLOUT_NET = os.environ.get("HONEST_ROLLOUT_NET", "")
+# HONEST_ROOT_NET=<npz> + HONEST_ROOT_C=<c> (default off): AlphaZero-style policy prior at the 1-ply root (live decisions
+# only, never in rollouts): Q(a) += c * log pi(a | visible obs) with pi = softmax of the net's logits over the legal actions
+# (varN layout, e.g. an expert-iteration net). Q is in score points (HP + 0.5 x damage, +-50 terminal).
+HONEST_ROOT_NET = os.environ.get("HONEST_ROOT_NET", "")
+HONEST_ROOT_C = float(os.environ.get("HONEST_ROOT_C", "0"))
 # HONEST_ENGINE_BOSS=mcts (default off): use the honest ensemble MCTS (mcts_root on determinized roots) only in BOSS
 # fights; trees = MCTS_TREES_BOSS (default MCTS_TREES or K), sims/tree = MCTS_SIMS_BOSS (default MCTS_SIMS).
 HONEST_ENGINE_BOSS = os.environ.get("HONEST_ENGINE_BOSS", "")
@@ -542,6 +547,22 @@ def make_honest(base, GAMMA, TOPK, ROLL_CAP):
                 pass
             return True
 
+        def _root_logpi(self):
+            """log softmax of HONEST_ROOT_NET's logits over the legal actions (visible obs only)."""
+            import numpy as np
+            L = self.__dict__.get("_root_L")
+            if L is None or self.__dict__.get("_root_path") != HONEST_ROOT_NET:
+                z = np.load(HONEST_ROOT_NET)
+                L = self._root_L = [(z["pbody.%d.weight" % i], z["pbody.%d.bias" % i]) for i in (0, 2, 4)] + [(z["pi.weight"], z["pi.bias"])]
+                self._root_path = HONEST_ROOT_NET
+            n = min(len(self.env.bc.get_possible_actions()), 128)
+            h = self._obs1235().astype(np.float32)
+            for li, (W, b) in enumerate(L):
+                x = h @ W.T + b
+                h = x if li == len(L) - 1 else 0.5 * x * (1.0 + np.tanh(0.7978845608 * (x + 0.044715 * x ** 3)))
+            lg = h[:n].astype(np.float64)
+            return lg - (lg.max() + np.log(np.exp(lg - lg.max()).sum()))
+
         def _potion_slots(self):
             """(potions held, potion slots) from the raw observation: id >= 2 potion, 1 empty slot, 0 no slot."""
             try:
@@ -637,6 +658,9 @@ def make_honest(base, GAMMA, TOPK, ROLL_CAP):
                     if boss_root and EXPERT_BOSS_PV:
                         pv *= EXPERT_BOSS_PV.get(int(self.env.gc.act), 1.0)
                 risk = EXPERT_BOSS_RISK if boss_root else 0.0
+                lpi = None
+                if HONEST_ROOT_C and HONEST_ROOT_NET and not getattr(self, "_in_rollout", False):
+                    lpi = self._root_logpi()
                 for a, row in zip(legal, scores):
                     tot = 0.0
                     for v in row:
@@ -645,6 +669,8 @@ def make_honest(base, GAMMA, TOPK, ROLL_CAP):
                     if risk:
                         lo = sorted(row)[:max(1, len(row) // 4)]
                         qa += risk * (sum(lo) / len(lo) - qa)
+                    if lpi is not None and a < len(lpi):
+                        qa += HONEST_ROOT_C * lpi[a]
                     if use_pv and self._is_potion(a, pacts):
                         qa -= pv
                     if qa > bq:

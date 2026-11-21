@@ -306,6 +306,28 @@ def _cpu():
     return 100.0 * (1 - (i1 - i0) / max(1, t1 - t0))
 
 
+def _last_activity_age():
+    """Seconds since anything was written under sim_logs/ or nets/ (directory mtimes up to 3 levels: cheap). Jobs like
+    expert-iteration collection, PPO and boss gates write .npz / .json files, not finished eval seeds."""
+    newest = 0.0
+    for root in ("sim_logs", "nets"):
+        stack = [(root, 0)]
+        while stack:
+            d, depth = stack.pop()
+            try:
+                with os.scandir(d) as it:
+                    for e in it:
+                        if e.is_dir(follow_symlinks=False):
+                            newest = max(newest, e.stat().st_mtime)
+                            if depth < 2:
+                                stack.append((e.path, depth + 1))
+                        elif depth == 0 or e.name.endswith(".log"):
+                            newest = max(newest, e.stat().st_mtime)
+            except OSError:
+                pass
+    return time.time() - newest
+
+
 def health():
     h = {"t": time.time(), "cpu_pct": round(_cpu(), 1)}
     mi = dict((l.split(":")[0], int(l.split()[1])) for l in open("/proc/meminfo"))
@@ -355,8 +377,8 @@ def health():
         alerts.append("keepalive.sh is not running")
     if h["disk_free_gb"] < 20:
         alerts.append("WSL disk low: %.1f GB free" % h["disk_free_gb"])
-    if q.get("running") and h["seeds_per_hour"] == 0:
-        alerts.append("a job is running but no seed finished in 30 min")
+    if q.get("running") and h["seeds_per_hour"] == 0 and _last_activity_age() > 1800:
+        alerts.append("a job is running but no output written in 30 min")
     h["alerts"] = alerts
     return h
 

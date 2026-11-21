@@ -1,0 +1,4 @@
+standalone greedy play, held-out Act 2/3 boss starts: 83 starts x 8 determinized episodes
+  exi1_rollout                 win 0.390   mean reward 0.691
+  exi1b_rollout                win 0.386   mean reward 0.688
+  varN                         win 0.265   mean reward 0.527

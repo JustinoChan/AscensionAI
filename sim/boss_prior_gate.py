@@ -1,0 +1,95 @@
+"""Held-out boss-fight gate for the root policy prior HONEST_ROOT_NET / HONEST_ROOT_C (honest; from boss_expert_gate.py). Usage:
+  boss_expert_gate.py SEED0 N OUTDIR    (env: MACRO_* policy flags, POTION_VALUE, GATE_ACT=2|3, GATE_SEEDSTEP)
+For each seed: play the run with the given policy + honest 1-ply K=64 until the first decision of the Act GATE_ACT boss
+fight; then play that fight to the end once per variant from the identical state and sample counter.
+  base     : mainline (POTION_VALUE as set)
+  pvdump   : EXPERT_BOSS_PV 0.5,0   (cheap potions at the Act 2 boss, free at the final boss)
+  pvzero   : EXPERT_BOSS_PV 0,0
+  risk     : EXPERT_BOSS_RISK 0.5   (survival over HP left)
+  both     : pvdump + risk
+  k128     : base with K=128 in the boss fight (compute control)
+Writes OUTDIR/seed_<s>.json with win / HP left / potions left / seconds per variant.
+"""
+import json, os, sys, time
+
+os.environ.setdefault("HONEST", "1"); os.environ.setdefault("HONEST_CPP", "1"); os.environ.setdefault("HONEST_K", "64")
+import eval_fullrun_analytics_v2 as E
+import honest as H
+from eval_fullrun_search import GAMMA, TOPK, ROLL_CAP
+import slaythespire as S
+
+_LOSS = S.GameOutcome.PLAYER_LOSS
+_UND = S.GameOutcome.UNDECIDED
+GATE_ACT = int(os.environ.get("GATE_ACT", "2"))
+NET = os.environ.get("PRIOR_NET", "nets/exi1/rollout.npz")
+VARIANTS = [("base", {})] + [("c%g" % c, {"HONEST_ROOT_NET": NET, "HONEST_ROOT_C": c}) for c in (2.0, 5.0, 10.0, 20.0)] +            [("c5roll", {"HONEST_ROOT_NET": NET, "HONEST_ROOT_C": 5.0, "_ROLL": NET})]
+
+
+def _cnet(p, ev):
+    import numpy as np
+    z = np.load(p)
+    return S.CombatNet([z["pbody.%d.weight" % i] for i in (0, 2, 4)] + [z["pi.weight"]],
+                       [z["pbody.%d.bias" % i] for i in (0, 2, 4)] + [z["pi.bias"]], ev.maxima.astype("float32"))
+
+
+class _Done(Exception):
+    pass
+
+
+def run(seed):
+    ev = H.make_honest(E.V2, GAMMA, TOPK, ROLL_CAP)("policy_varN.npz", "policy_varE.npz", "macro")
+    base = ev._search_action
+    res = {}
+
+    def hooked():
+        gc = ev.env.gc
+        if (not getattr(ev, "_in_rollout", False) and str(gc.cur_room).split(".")[-1] == "BOSS" and int(gc.act) == GATE_ACT
+                and ev.env.in_combat):
+            snap = ev._hsnap(); ctr = ev.__dict__.get("_hctr", 0)
+            res.update(seed=seed, act=int(gc.act), boss=str(gc.encounter).split(".")[-1], hp_in=int(ev.env.bc.player.cur_hp),
+                       max_hp=int(gc.max_hp), pots_in=ev._potion_slots()[0])
+            for name, over in VARIANTS:
+                ev._hload(snap); ev._hctr = ctr
+                ov = {k: v for k, v in over.items() if not k.startswith("_")}
+                saved = {k: getattr(H, k) for k in ov}
+                for k, v in ov.items():
+                    setattr(H, k, v)
+                ev._cnet_obj = _cnet(over["_ROLL"], ev) if "_ROLL" in over else None
+                t0 = time.time(); steps = 0
+                try:
+                    while ev.env.in_combat and ev.env.gc.outcome == _UND and steps < 2000:
+                        a = base()
+                        if a is None:
+                            break
+                        ev.env.step(int(a)); steps += 1
+                finally:
+                    for k, v in saved.items():
+                        setattr(H, k, v)
+                g = ev.env.gc
+                won = g.outcome != _LOSS and not ev.env.in_combat
+                res[name] = {"won": int(won), "hp_end": int(g.cur_hp) if won else 0, "pots_end": ev._potion_slots()[0] if won else 0,
+                             "steps": steps, "secs": round(time.time() - t0, 1)}
+            raise _Done()
+        return base()
+
+    ev._search_action = hooked
+    try:
+        ev.play_v2(seed)
+    except _Done:
+        pass
+    return res
+
+
+if __name__ == "__main__":
+    seed0, n, outdir = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3]
+    step = int(os.environ.get("GATE_SEEDSTEP", "31"))
+    os.makedirs(outdir, exist_ok=True)
+    for i in range(n):
+        s = seed0 + i * step
+        p = os.path.join(outdir, "seed_%d.json" % s)
+        if os.path.exists(p):
+            continue
+        r = run(s)
+        r = r or {"seed": s, "none": 1, "reached_act": None}
+        json.dump(r, open(p + ".tmp", "w")); os.replace(p + ".tmp", p)
+        print(json.dumps(r), flush=True)
