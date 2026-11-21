@@ -1,5 +1,7 @@
 import json, glob, math, collections, sys
 names = ["base", "c2", "c5", "c10", "c20", "c5roll"]
+import sys as _s
+names = [m for m in names if all(m in x for x in [json.load(open(f)) for d in _s.argv[1:] for f in glob.glob(d + "/seed_*.json")] if "base" in x)]
 R = [r for f in sys.argv[1:] for r in (json.load(open(x)) for x in glob.glob(f + "/seed_*.json")) if "base" in r]
 def mc(a, b):
     x = sum(1 for r in R if r[a]["won"] and not r[b]["won"]); y = sum(1 for r in R if r[b]["won"] and not r[a]["won"]); k = x + y

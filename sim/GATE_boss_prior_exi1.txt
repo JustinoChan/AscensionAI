@@ -1,0 +1,14 @@
+held-out boss fights (sim_logs/boss_prior_exi1_a2 + sim_logs/boss_prior_exi1_a3), identical starts, honest K=64 root: n=226
+  base    won 163 (72.1%)  HP left 0.311  potions left 0.62  62 s/fight
+  c2      won 165 (73.0%)  HP left 0.325  potions left 0.61  62 s/fight   vs base: flips 14/16 p=0.856
+  c5      won 171 (75.7%)  HP left 0.341  potions left 0.56  60 s/fight   vs base: flips 14/22 p=0.243
+  c10     won 176 (77.9%)  HP left 0.365  potions left 0.43  60 s/fight   vs base: flips 13/26 p=0.053
+  c20     won 173 (76.5%)  HP left 0.344  potions left 0.19  55 s/fight   vs base: flips 16/26 p=0.164
+  c5roll  won 179 (79.2%)  HP left 0.344  potions left 0.70  66 s/fight   vs base: flips 11/27 p=0.014
+  A2 AUTOMATON           n= 29  base 21  c2 23  c5 22  c10 23  c20 24  c5roll 24
+  A2 CHAMP               n= 47  base 34  c2 39  c5 40  c10 40  c20 39  c5roll 42
+  A2 COLLECTOR           n= 35  base 26  c2 23  c5 23  c10 25  c20 25  c5roll 22
+  A3 AWAKENED_ONE        n= 37  base 28  c2 29  c5 28  c10 30  c20 26  c5roll 28
+  A3 DONU_AND_DECA       n= 44  base 31  c2 26  c5 31  c10 29  c20 32  c5roll 36
+  A3 TIME_EATER          n= 34  base 23  c2 25  c5 27  c10 29  c20 27  c5roll 27
+BEST c5roll
