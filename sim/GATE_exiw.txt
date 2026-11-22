@@ -1,0 +1,18 @@
+held-out boss fights (sim_logs/boss_exiw_a2 + sim_logs/boss_exiw_a3), identical starts, honest K=64 root: n=190
+  base    won 136 (71.6%)  HP left 0.315  potions left 0.69  56 s/fight
+  c5roll  won 142 (74.7%)  HP left 0.303  potions left 0.74  56 s/fight   vs base: flips 3/9 p=0.146
+  A2 AUTOMATON           n= 40  base 31  c5roll 32
+  A2 CHAMP               n= 38  base 32  c5roll 34
+  A2 COLLECTOR           n= 40  base 27  c5roll 27
+  A3 AWAKENED_ONE        n= 17  base 11  c5roll 12
+  A3 DONU_AND_DECA       n= 30  base 20  c5roll 21
+  A3 TIME_EATER          n= 25  base 15  c5roll 16
+BEST c5roll
+A = eval500_prior_c5roll
+B = eval500_exiw_c5
+shared seeds: 500
+wins   A 216 (43.2%, 95% CI 38.9-47.6%)   B 217 (43.4%, 95% CI 39.1-47.8%)
+win flips: A-only 70, B-only 71  -> exact McNemar p = 1.000
+avg floor A 41.61  B 42.13   paired diff B-A = +0.53  (bootstrap 95% CI -0.49 .. +1.54)
+
+outcome          A     B    B-A
