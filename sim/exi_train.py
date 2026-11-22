@@ -28,9 +28,12 @@ legal = np.arange(128)[None, :] < NL[:, None]
 Qf = np.where(legal, np.nan_to_num(Q, nan=-1e9), -1e9).astype(np.float32)
 
 
+WID = [int(x) for x in os.environ.get("EXI_WIDTH", "512,256,256").split(",")]   # hidden widths (3 layers)
+
+
 def net():
     g = lambda: nn.GELU(approximate="tanh")
-    return nn.Sequential(nn.Linear(1235, 512), g(), nn.Linear(512, 256), g(), nn.Linear(256, 256), g(), nn.Linear(256, 128))
+    return nn.Sequential(nn.Linear(1235, WID[0]), g(), nn.Linear(WID[0], WID[1]), g(), nn.Linear(WID[1], WID[2]), g(), nn.Linear(WID[2], 128))
 
 
 def load(m, p):
@@ -51,7 +54,7 @@ def save(m, p):
     np.savez(p + ".tmp.npz", **d); os.replace(p + ".tmp.npz", p)
 
 
-m = load(net(), init).to(dev)
+m = (load(net(), init) if WID == [512, 256, 256] else net()).to(dev)   # wider net: fresh init (INIT only for the baseline row)
 Xt = torch.tensor(O, device=dev); Qt = torch.tensor(Qf, device=dev); Lt = torch.tensor(legal, device=dev)
 tr = torch.tensor(np.where(~VAL)[0], device=dev); va = torch.tensor(np.where(VAL)[0], device=dev)
 target = torch.softmax(Qt / TAU, 1)
@@ -72,12 +75,14 @@ def evaluate():
 a0, r0 = evaluate()
 print(json.dumps({"epoch": "init", "agree": a0, "regret": r0}), flush=True)
 opt = torch.optim.Adam(m.parameters(), lr=LR)
+sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, EPOCHS)
 best = (r0, None)
 for ep in range(EPOCHS):
     for b in tr[torch.randperm(len(tr), device=dev)].split(1024):
         lg = m(Xt[b]).masked_fill(~Lt[b], -1e9)
         loss = -(target[b] * F.log_softmax(lg, 1)).sum(1).mean()
         opt.zero_grad(); loss.backward(); nn.utils.clip_grad_norm_(m.parameters(), 1.0); opt.step()
+    sched.step()
     a, r = evaluate()
     print(json.dumps({"epoch": ep, "loss": float(loss), "agree": a, "regret": r}), flush=True)
     if r < best[0]:

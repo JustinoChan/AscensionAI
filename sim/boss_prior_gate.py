@@ -23,10 +23,12 @@ _UND = S.GameOutcome.UNDECIDED
 GATE_ACT = int(os.environ.get("GATE_ACT", "2"))
 NET = os.environ.get("PRIOR_NET", "nets/exi1/rollout.npz")
 VARIANTS = [("base", {})] + [("c%g" % c, {"HONEST_ROOT_NET": NET, "HONEST_ROOT_C": c}) for c in (2.0, 5.0, 10.0, 20.0)] +            [("c5roll", {"HONEST_ROOT_NET": NET, "HONEST_ROOT_C": 5.0, "_ROLL": NET})]
+if os.environ.get("PRIOR_CSWEEP"):   # c sweep around c=5, all with NET as root prior + play-out policy
+    VARIANTS = [("base", {"HONEST_ROOT_NET": NET, "HONEST_ROOT_C": 5.0, "_ROLL": NET})] +                [("c%groll" % c, {"HONEST_ROOT_NET": NET, "HONEST_ROOT_C": c, "_ROLL": NET}) for c in (3.0, 10.0)]
 if os.environ.get("PRIOR_BASE_NET"):   # pair mode: previous net vs new net, both as c=5 root prior + play-out policy
     _B = os.environ["PRIOR_BASE_NET"]
     VARIANTS = [("base", {"HONEST_ROOT_NET": _B, "HONEST_ROOT_C": 5.0, "_ROLL": _B}),
-                ("c5roll", {"HONEST_ROOT_NET": NET, "HONEST_ROOT_C": 5.0, "_ROLL": NET})]
+                ("c5roll", {"HONEST_ROOT_NET": NET, "HONEST_ROOT_C": 5.0, "_ROLL": os.environ.get("PRIOR_ROLL_NET", NET)})]
 
 
 def _cnet(p, ev):
