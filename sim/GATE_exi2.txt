@@ -1,0 +1,11 @@
+held-out boss fights (sim_logs/boss_exi2_a2 + sim_logs/boss_exi2_a3), identical starts, honest K=64 root: n=230
+  base    won 172 (74.8%)  HP left 0.354  potions left 0.83  71 s/fight
+  c5roll  won 173 (75.2%)  HP left 0.363  potions left 0.74  70 s/fight   vs base: flips 14/15 p=1.000
+  A2 AUTOMATON           n= 42  base 31  c5roll 32
+  A2 CHAMP               n= 35  base 29  c5roll 29
+  A2 COLLECTOR           n= 42  base 32  c5roll 34
+  A3 AWAKENED_ONE        n= 41  base 30  c5roll 30
+  A3 DONU_AND_DECA       n= 32  base 23  c5roll 22
+  A3 TIME_EATER          n= 38  base 27  c5roll 26
+BEST base
+exi2 did not beat exi1
