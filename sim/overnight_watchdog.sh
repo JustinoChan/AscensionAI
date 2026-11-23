@@ -8,7 +8,7 @@ if [ ! -f sim_logs/overnight/HANDED_TO_JOBQ ] && { grep -q '"state": "todo"\|"st
     setsid nohup ./overnight.sh >> sim_logs/overnight/runner.nohup 2>&1 < /dev/null &
   fi
 fi
-if grep -q '"state": "pending"\|"state": "running"' sim_logs/jobs/queue.json 2>/dev/null && ! pgrep -f "jobq.py run" > /dev/null; then
+if { grep -q '"state": "pending"\|"state": "running"' sim_logs/jobs/queue.json 2>/dev/null || [ -s sim_logs/jobs/backfill.cmd ]; } && ! pgrep -f "jobq.py run" > /dev/null; then
   echo "[$(date '+%F %T')] job-queue runner -> starting" >> sim_logs/overnight/watchdog.log
   setsid nohup python3 jobq.py run >> sim_logs/jobs/runner.nohup 2>&1 < /dev/null &
 fi

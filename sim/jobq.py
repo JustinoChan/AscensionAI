@@ -65,6 +65,40 @@ def add(name, cmd, arm=None):
     print("added job %d: %s" % (j["id"], name))
 
 
+BF = D + "/backfill.cmd"     # standing backfill (default off: no file / empty file). One shell command, resumable.
+
+
+def _pending():
+    return any(x["state"] in ("pending", "running") for x in load()["jobs"])
+
+
+def backfill():
+    """Queue empty: run the backfill command (low priority, own process group) until a real job is queued, then stop it
+    cleanly (SIGTERM to its group) and return True so the runner picks the job up. Returns False (runner exits as
+    before) when backfill is off or the command finishes on its own with nothing queued."""
+    import signal
+    cmd = open(BF).read().strip() if os.path.exists(BF) else ""
+    if not cmd:
+        return False
+    with open(LOG, "a") as log:
+        print("[%s] backfill start: %s" % (time.strftime("%F %T"), cmd), file=log, flush=True)
+        p = subprocess.Popen(["nice", "-n", "15", "bash", "-c", cmd], stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+        event({"id": 0, "name": "backfill running: " + cmd[:80]}, "running")
+        while p.poll() is None:
+            time.sleep(30)
+            if _pending():
+                os.killpg(p.pid, signal.SIGTERM)
+                try:
+                    p.wait(120)
+                except subprocess.TimeoutExpired:
+                    os.killpg(p.pid, signal.SIGKILL); p.wait()
+                print("[%s] backfill stopped (real job queued)" % time.strftime("%F %T"), file=log, flush=True)
+                event({"id": 0, "name": "backfill yielded to a queued job"}, "stopped")
+                return True
+        print("[%s] backfill finished rc=%s" % (time.strftime("%F %T"), p.returncode), file=log, flush=True)
+    return _pending()
+
+
 def runner():
     lk = open(D + "/.runner", "w")
     try:
@@ -91,11 +125,13 @@ def runner():
                     return j
             return None
         j = locked(pick)
-        if j is None:                    # queue drained: daily digest
+        if j is None:                    # queue drained: daily digest, then the standing backfill (if enabled)
             subprocess.call(["nice", "-n", "10", ".venv/bin/python", "dash_data.py", "digest", "--write"],
                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             event({"id": 0, "name": "queue drained - digest written"}, "done")
-            return
+            if not backfill():
+                return
+            continue
         event(j, "running")
         with open(LOG, "a") as log:
             log.write("[%s] start job %d %s: %s\n" % (time.strftime("%F %T"), j["id"], j["name"], j["cmd"])); log.flush()

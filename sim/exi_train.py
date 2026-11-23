@@ -12,7 +12,7 @@ import torch, torch.nn as nn, torch.nn.functional as F
 init, out, dirs = sys.argv[1], sys.argv[2], sys.argv[3:]
 TAU = float(os.environ.get("EXI_TAU", "2.0")); EPOCHS = int(os.environ.get("EXI_EPOCHS", "12")); LR = float(os.environ.get("EXI_LR", "1e-4"))
 dev = "cuda"
-files = sorted(p for d in dirs for p in glob.glob(d + "/seed_*.npz"))
+files = sorted(p for d in dirs for p in glob.glob(d + "/seed_*.npz") if ".tmp." not in p)
 O, Q, NL, VAL = [], [], [], []
 for f in files:
     z = np.load(f)
