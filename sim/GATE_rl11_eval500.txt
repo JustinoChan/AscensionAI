@@ -1,0 +1,68 @@
+gate policy: checkpoint it049 (val floor 42.11, wins 47/100; best=it049, last=it049)
+
+A = eval500_K64
+B = eval500_rl11_main
+shared seeds: 500
+wins   A   6 (1.2%, 95% CI 0.6-2.6%)   B 232 (46.4%, 95% CI 42.1-50.8%)
+win flips: A-only 3, B-only 229  -> exact McNemar p = 0.000
+avg floor A 24.21  B 42.42   paired diff B-A = +18.21  (bootstrap 95% CI +16.90 .. +19.43)  *
+
+outcome          A     B    B-A
+WIN              6   232   +226
+A1_boss         74    10    -64
+A1_elite        21     8    -13
+A1_other        21     3    -18
+A2_monster     187    42   -145
+A2_elite        95    17    -78
+A2_boss         53    76    +23
+A2_other         0     1     +1
+A3              43   110    +67
+timeout          0     1     +1
+
+eval500_K64
+  Act 1: reached 500, died 116 (23.2% of reaching)  {'BOSS': 74, 'ELITE': 21, 'MONSTER': 18, 'EVENT': 3}
+  Act 2: reached 384, died 335 (87.2% of reaching)  {'MONSTER': 187, 'ELITE': 95, 'BOSS': 53}
+  Act 3: reached  49, died  43 (87.8% of reaching)  {'MONSTER': 19, 'ELITE': 11, 'BOSS': 9, 'EVENT': 4}
+eval500_rl11_main
+  Act 1: reached 500, died  21 (4.2% of reaching)  {'BOSS': 10, 'ELITE': 8, 'EVENT': 2, 'MONSTER': 1}
+  Act 2: reached 478, died 136 (28.5% of reaching)  {'BOSS': 76, 'MONSTER': 42, 'ELITE': 17, 'EVENT': 1}
+  Act 3: reached 342, died 110 (32.2% of reaching)  {'BOSS': 62, 'ELITE': 25, 'MONSTER': 20, 'EVENT': 3}
+
+LOSS TAXONOMY  (eval500_rl11_main)
+runs 500  wins 232  losses 268
+
+  76  A2_boss_scaling
+  62  A3_boss
+  27  A2_monster_thrown_winnable
+  25  A3_elite
+  20  A3_monster
+  17  A2_elite
+  15  A2_monster_attrition_outpaced
+  10  A1_boss_underprepared
+   8  A1_elite_overrisk
+   3  A3_event
+   2  A1_other_EVENT
+   1  other_actNone_
+   1  A2_other_EVENT
+   1  A1_other_MONSTER
+
+sum check: 268 == 268 : True
+
+A = eval500_prior_c5roll
+B = eval500_rl11_main
+shared seeds: 500
+wins   A 216 (43.2%, 95% CI 38.9-47.6%)   B 232 (46.4%, 95% CI 42.1-50.8%)
+win flips: A-only 72, B-only 88  -> exact McNemar p = 0.236
+avg floor A 41.61  B 42.42   paired diff B-A = +0.82  (bootstrap 95% CI -0.18 .. +1.85)
+
+outcome          A     B    B-A
+WIN            216   232    +16
+A1_boss         12    10     -2
+A1_elite         5     8     +3
+A1_other         4     3     -1
+A2_monster      48    42     -6
+A2_elite        25    17     -8
+A2_boss         81    76     -5
+A2_other         2     1     -1
+A3             107   110     +3
+timeout          0     1     +1

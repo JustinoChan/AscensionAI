@@ -1,0 +1,11 @@
+held-out boss fights (sim_logs/boss_csweep_a2 + sim_logs/boss_csweep_a3), identical starts, honest K=64 root: n=224
+  base    won 155 (69.2%)  HP left 0.303  potions left 0.68  63 s/fight
+  c3roll  won 156 (69.6%)  HP left 0.302  potions left 0.71  64 s/fight   vs base: flips 5/6 p=1.000
+  c10roll won 153 (68.3%)  HP left 0.318  potions left 0.54  59 s/fight   vs base: flips 12/10 p=0.832
+  A2 AUTOMATON           n= 48  base 34  c3roll 35  c10roll 34
+  A2 CHAMP               n= 42  base 34  c3roll 34  c10roll 35
+  A2 COLLECTOR           n= 31  base 21  c3roll 20  c10roll 21
+  A3 AWAKENED_ONE        n= 29  base 19  c3roll 18  c10roll 19
+  A3 DONU_AND_DECA       n= 34  base 19  c3roll 20  c10roll 19
+  A3 TIME_EATER          n= 40  base 28  c3roll 29  c10roll 25
+BEST base
