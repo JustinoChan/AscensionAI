@@ -20,6 +20,7 @@ import honest as H
 from eval_fullrun_search import GAMMA, TOPK, ROLL_CAP
 import slaythespire as S
 
+EXI_ACT = os.environ.get("EXI_ACT", "net")   # "net": greedy play-out net (default) | "search": the root search's choice
 K = int(os.environ.get("EXI_K", "64")); EPS = int(os.environ.get("EXI_EPS", "2")); EPSILON = 0.1
 _UND = S.GameOutcome.UNDECIDED
 
@@ -73,7 +74,13 @@ def run(seed, rollout_npz):
                     q, _ = label()
                     D["obs"].append(obs.astype(np.float16)); D["q"].append(q); D["nl"].append(n)
                     D["act"].append(int(gc.act)); D["room"].append(room); D["enc"].append(enc)
-                    a = int(rng.integers(n)) if rng.random() < EPSILON else int(np.argmax(logits(obs)[:n]))
+                    if EXI_ACT == "search":       # follow the live search's own choice (root-state distribution of the mainline)
+                        sc = np.nan_to_num(q[:n], nan=-1e9)
+                        if H.HONEST_ROOT_NET and H.HONEST_ROOT_C:
+                            sc = sc + H.HONEST_ROOT_C * ev._root_logpi()[:n]
+                        a = int(rng.integers(n)) if rng.random() < 0.05 else int(np.argmax(sc))
+                    else:
+                        a = int(rng.integers(n)) if rng.random() < EPSILON else int(np.argmax(logits(obs)[:n]))
                     ev.env.step(a); steps += 1
             ev._hload(snap); ev._hctr = ctr
         return base()
