@@ -1,0 +1,62 @@
+gate policy: checkpoint it009 (val floor 42.74, wins 46/100; best=it009, last=it049)
+
+A = eval500_K64
+B = eval500_rl13_main
+shared seeds: 500
+wins   A   6 (1.2%, 95% CI 0.6-2.6%)   B 231 (46.2%, 95% CI 41.9-50.6%)
+win flips: A-only 4, B-only 229  -> exact McNemar p = 0.000
+avg floor A 24.21  B 42.20   paired diff B-A = +17.99  (bootstrap 95% CI +16.71 .. +19.22)  *
+
+outcome          A     B    B-A
+WIN              6   231   +225
+A1_boss         74    13    -61
+A1_elite        21     5    -16
+A1_other        21     2    -19
+A2_monster     187    43   -144
+A2_elite        95    19    -76
+A2_boss         53    85    +32
+A2_other         0     2     +2
+A3              43    99    +56
+timeout          0     1     +1
+
+eval500_K64
+  Act 1: reached 500, died 116 (23.2% of reaching)  {'BOSS': 74, 'ELITE': 21, 'MONSTER': 18, 'EVENT': 3}
+  Act 2: reached 384, died 335 (87.2% of reaching)  {'MONSTER': 187, 'ELITE': 95, 'BOSS': 53}
+  Act 3: reached  49, died  43 (87.8% of reaching)  {'MONSTER': 19, 'ELITE': 11, 'BOSS': 9, 'EVENT': 4}
+eval500_rl13_main
+  Act 1: reached 500, died  20 (4.0% of reaching)  {'BOSS': 13, 'ELITE': 5, 'EVENT': 1, 'MONSTER': 1}
+  Act 2: reached 479, died 149 (31.1% of reaching)  {'BOSS': 85, 'MONSTER': 43, 'ELITE': 19, 'EVENT': 2}
+  Act 3: reached 330, died  99 (30.0% of reaching)  {'BOSS': 67, 'MONSTER': 15, 'ELITE': 15, 'EVENT': 2}
+
+LOSS TAXONOMY  (eval500_rl13_main)
+runs 500  wins 231  losses 269
+
+  85  A2_boss_scaling
+  67  A3_boss
+  27  A2_monster_thrown_winnable
+  19  A2_elite
+  16  A2_monster_attrition_outpaced
+  15  A3_elite
+  15  A3_monster
+  13  A1_boss_underprepared
+   5  A1_elite_overrisk
+   2  A2_other_EVENT
+   2  A3_event
+   1  A1_other_EVENT
+   1  other_actNone_
+   1  A1_other_MONSTER
+
+sum check: 269 == 269 : True
+
+A = eval500_rl11_main
+B = eval500_rl13_main
+shared seeds: 500
+wins   A 232 (46.4%, 95% CI 42.1-50.8%)   B 231 (46.2%, 95% CI 41.9-50.6%)
+win flips: A-only 79, B-only 78  -> exact McNemar p = 1.000
+avg floor A 42.42  B 42.20   paired diff B-A = -0.22  (bootstrap 95% CI -1.20 .. +0.75)
+
+outcome          A     B    B-A
+shared seeds: 500
+wins   A 237 (47.4%, 95% CI 43.1-51.8%)   B 231 (46.2%, 95% CI 41.9-50.6%)
+win flips: A-only 55, B-only 49  -> exact McNemar p = 0.624
+avg floor A 42.23  B 42.20   paired diff B-A = -0.03  (bootstrap 95% CI -0.84 .. +0.80)

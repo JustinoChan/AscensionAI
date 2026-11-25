@@ -10,6 +10,7 @@ import numpy as np
 import torch, torch.nn as nn, torch.nn.functional as F
 
 init, out, dirs = sys.argv[1], sys.argv[2], sys.argv[3:]
+RW = float(os.environ.get("EXI_REGRET_W", "0"))   # weight of the expected-regret term (0 = off, plain soft-target CE)
 TAU = float(os.environ.get("EXI_TAU", "2.0")); EPOCHS = int(os.environ.get("EXI_EPOCHS", "12")); LR = float(os.environ.get("EXI_LR", "1e-4"))
 dev = "cuda"
 files = sorted(p for d in dirs for p in glob.glob(d + "/seed_*.npz") if ".tmp." not in p)
@@ -54,7 +55,7 @@ def save(m, p):
     np.savez(p + ".tmp.npz", **d); os.replace(p + ".tmp.npz", p)
 
 
-m = (load(net(), init) if WID == [512, 256, 256] else net()).to(dev)   # wider net: fresh init (INIT only for the baseline row)
+m = (load(net(), init) if WID == [512, 256, 256] and os.environ.get("EXI_FRESH", "0") != "1" else net()).to(dev)   # wider net: fresh init (INIT only for the baseline row)
 Xt = torch.tensor(O, device=dev); Qt = torch.tensor(Qf, device=dev); Lt = torch.tensor(legal, device=dev)
 tr = torch.tensor(np.where(~VAL)[0], device=dev); va = torch.tensor(np.where(VAL)[0], device=dev)
 target = torch.softmax(Qt / TAU, 1)
@@ -81,6 +82,9 @@ for ep in range(EPOCHS):
     for b in tr[torch.randperm(len(tr), device=dev)].split(1024):
         lg = m(Xt[b]).masked_fill(~Lt[b], -1e9)
         loss = -(target[b] * F.log_softmax(lg, 1)).sum(1).mean()
+        if RW:                                   # value-aware: + RW * expected regret of the net's policy (score points)
+            reg = (Qt[b].max(1, keepdim=True).values - Qt[b]).clamp(max=100.0) * Lt[b]
+            loss = loss + RW * (torch.softmax(lg, 1) * reg).sum(1).mean()
         opt.zero_grad(); loss.backward(); nn.utils.clip_grad_norm_(m.parameters(), 1.0); opt.step()
     sched.step()
     a, r = evaluate()
