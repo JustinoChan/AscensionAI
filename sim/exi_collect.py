@@ -21,6 +21,7 @@ from eval_fullrun_search import GAMMA, TOPK, ROLL_CAP
 import slaythespire as S
 
 EXI_DOUBLE = os.environ.get("EXI_DOUBLE", "0") == "1"
+EXI_AFTER = os.environ.get("EXI_AFTER", "0") == "1"
 EXI_ACT = os.environ.get("EXI_ACT", "net")   # "net": greedy play-out net (default) | "search": the root search's choice
 K = int(os.environ.get("EXI_K", "64")); EPS = int(os.environ.get("EXI_EPS", "2")); EPSILON = 0.1
 _UND = S.GameOutcome.UNDECIDED
@@ -76,6 +77,9 @@ def run(seed, rollout_npz):
                     if EXI_DOUBLE:                 # label-noise diagnostic: a second, independent set of sampled worlds
                         q2, _ = label(); D.setdefault("q2", []).append(q2)
                     D["obs"].append(obs.astype(np.float16)); D["q"].append(q); D["nl"].append(n)
+                    if EXI_AFTER:                  # afterstates of every legal action in one sampled world (honest)
+                        import exi_as
+                        D.setdefault("aobs", []).append(exi_as.afterstates(ev, n, int(rng.integers(1, 2 ** 62))).astype(np.float16))
                     D["act"].append(int(gc.act)); D["room"].append(room); D["enc"].append(enc)
                     if EXI_ACT == "search":       # follow the live search's own choice (root-state distribution of the mainline)
                         sc = np.nan_to_num(q[:n], nan=-1e9)
@@ -110,7 +114,8 @@ if __name__ == "__main__":
         if D["obs"]:
             np.savez_compressed(p + ".tmp.npz", obs=np.array(D["obs"]), q=np.array(D["q"]), n_legal=np.array(D["nl"], np.int16),
                                 act=np.array(D["act"], np.int8), room=np.array(D["room"], "U5"), enc=np.array(D["enc"], "U24"),
-                                **({"q2": np.array(D["q2"])} if D.get("q2") else {}))
+                                **({"q2": np.array(D["q2"])} if D.get("q2") else {}),
+                                **({"aobs": np.concatenate(D["aobs"])} if D.get("aobs") else {}))
             os.replace(p + ".tmp.npz", p)
         else:
             open(p + ".none", "w").write(json.dumps(out)[:300])

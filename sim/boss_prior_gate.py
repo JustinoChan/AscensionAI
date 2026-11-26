@@ -25,7 +25,16 @@ NET = os.environ.get("PRIOR_NET", "nets/exi1/rollout.npz")
 VARIANTS = [("base", {})] + [("c%g" % c, {"HONEST_ROOT_NET": NET, "HONEST_ROOT_C": c}) for c in (2.0, 5.0, 10.0, 20.0)] +            [("c5roll", {"HONEST_ROOT_NET": NET, "HONEST_ROOT_C": 5.0, "_ROLL": NET})]
 if os.environ.get("PRIOR_CSWEEP"):   # c sweep around c=5, all with NET as root prior + play-out policy
     VARIANTS = [("base", {"HONEST_ROOT_NET": NET, "HONEST_ROOT_C": 5.0, "_ROLL": NET})] +                [("c%groll" % c, {"HONEST_ROOT_NET": NET, "HONEST_ROOT_C": c, "_ROLL": NET}) for c in (3.0, 10.0)]
-if os.environ.get("PRIOR_BASE_NET"):   # pair mode: previous net vs new net, both as c=5 root prior + play-out policy
+if os.environ.get("PRIOR_AS"):   # afterstate prior (HONEST_ROOT_AS) vs exi1 obs-only prior; both c=5 with exi1 play-outs
+    _B = os.environ.get("PRIOR_BASE_NET", NET)
+    VARIANTS = [("base", {"HONEST_ROOT_NET": _B, "HONEST_ROOT_AS": "", "HONEST_ROOT_C": 5.0, "_ROLL": _B}),
+                ("c5roll", {"HONEST_ROOT_NET": _B, "HONEST_ROOT_AS": os.environ["PRIOR_AS"], "HONEST_ROOT_C": 5.0, "_ROLL": _B})] +                ([("asK", {"HONEST_ROOT_NET": _B, "HONEST_ROOT_AS": os.environ["PRIOR_AS"], "HONEST_ROOT_C": 5.0, "_ROLL": _B,
+                              "HONEST_ROOT_AS_K": int(os.environ["PRIOR_AS_K"])})] if os.environ.get("PRIOR_AS_K") else [])
+elif os.environ.get("PRIOR_MIX_AS"):   # mixed prior: 0.5 * afterstate + 0.5 * exi1 log-probs vs exi1 alone (c=5, exi1 play-outs)
+    _B = os.environ.get("PRIOR_BASE_NET", NET)
+    VARIANTS = [("base", {"HONEST_ROOT_NET": _B, "HONEST_ROOT_AS": "", "HONEST_ROOT_C": 5.0, "_ROLL": _B}),
+                ("c5roll", {"HONEST_ROOT_NET": _B, "HONEST_ROOT_AS": os.environ["PRIOR_MIX_AS"], "HONEST_ROOT_MIX": 0.5, "HONEST_ROOT_C": 5.0, "_ROLL": _B})]
+elif os.environ.get("PRIOR_BASE_NET"):   # pair mode: previous net vs new net, both as c=5 root prior + play-out policy
     _B = os.environ["PRIOR_BASE_NET"]
     VARIANTS = [("base", {"HONEST_ROOT_NET": _B, "HONEST_ROOT_C": 5.0, "_ROLL": _B}),
                 ("c5roll", {"HONEST_ROOT_NET": NET, "HONEST_ROOT_C": 5.0, "_ROLL": os.environ.get("PRIOR_ROLL_NET", NET)})]

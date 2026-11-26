@@ -122,6 +122,11 @@ HONEST_ROLLOUT_NET = os.environ.get("HONEST_ROLLOUT_NET", "")
 # (varN layout, e.g. an expert-iteration net). Q is in score points (HP + 0.5 x damage, +-50 terminal).
 HONEST_ROOT_NET = os.environ.get("HONEST_ROOT_NET", "")
 HONEST_ROOT_C = float(os.environ.get("HONEST_ROOT_C", "0"))
+# HONEST_ROOT_AS=<npz> (default off): the root prior pi comes from an afterstate scorer (exi_as.ASNet) instead of
+# HONEST_ROOT_NET: every legal action is played once in one sampled (determinized) copy and scored from the visible obs.
+HONEST_ROOT_AS = os.environ.get("HONEST_ROOT_AS", "")
+HONEST_ROOT_AS_K = max(1, int(os.environ.get("HONEST_ROOT_AS_K", "1")))
+HONEST_ROOT_MIX = float(os.environ.get("HONEST_ROOT_MIX", "1"))   # with both nets: prior = MIX*AS + (1-MIX)*net log-probs   # average the afterstate score over K sampled copies
 # HONEST_ENGINE_BOSS=mcts (default off): use the honest ensemble MCTS (mcts_root on determinized roots) only in BOSS
 # fights; trees = MCTS_TREES_BOSS (default MCTS_TREES or K), sims/tree = MCTS_SIMS_BOSS (default MCTS_SIMS).
 HONEST_ENGINE_BOSS = os.environ.get("HONEST_ENGINE_BOSS", "")
@@ -550,6 +555,24 @@ def make_honest(base, GAMMA, TOPK, ROLL_CAP):
         def _root_logpi(self):
             """log softmax of HONEST_ROOT_NET's logits over the legal actions (visible obs only)."""
             import numpy as np
+            if HONEST_ROOT_AS:
+                import exi_as
+                if self.__dict__.get("_as_path") != HONEST_ROOT_AS:
+                    self._as_net = exi_as.ASNet(HONEST_ROOT_AS); self._as_path = HONEST_ROOT_AS
+                n = min(len(self.env.bc.get_possible_actions()), 128)
+                det = (int(self.seed) * 0x9E3779B1 + getattr(self, "_hctr", 0) * 0x85EBCA77 + 0xA5A5) & _M64   # sampled world, no counter use
+                s0 = self._obs1235().astype(np.float32)
+                lg = sum(self._as_net.scores(s0, exi_as.afterstates(self, n, (det + j * 0x9E3779B97F4A7C15) & _M64))
+                         for j in range(HONEST_ROOT_AS_K)) / HONEST_ROOT_AS_K
+                la = lg - (lg.max() + np.log(np.exp(lg - lg.max()).sum()))
+                if HONEST_ROOT_MIX >= 1.0 or not HONEST_ROOT_NET:
+                    return la
+                ln = self._root_logpi_net()
+                return HONEST_ROOT_MIX * la + (1.0 - HONEST_ROOT_MIX) * ln[:n]
+            return self._root_logpi_net()
+
+        def _root_logpi_net(self):
+            import numpy as np
             L = self.__dict__.get("_root_L")
             if L is None or self.__dict__.get("_root_path") != HONEST_ROOT_NET:
                 z = np.load(HONEST_ROOT_NET)
@@ -659,7 +682,7 @@ def make_honest(base, GAMMA, TOPK, ROLL_CAP):
                         pv *= EXPERT_BOSS_PV.get(int(self.env.gc.act), 1.0)
                 risk = EXPERT_BOSS_RISK if boss_root else 0.0
                 lpi = None
-                if HONEST_ROOT_C and HONEST_ROOT_NET and not getattr(self, "_in_rollout", False):
+                if HONEST_ROOT_C and (HONEST_ROOT_NET or HONEST_ROOT_AS) and not getattr(self, "_in_rollout", False):
                     lpi = self._root_logpi()
                 for a, row in zip(legal, scores):
                     tot = 0.0
