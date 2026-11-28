@@ -122,6 +122,13 @@ HONEST_ROLLOUT_NET = os.environ.get("HONEST_ROLLOUT_NET", "")
 # (varN layout, e.g. an expert-iteration net). Q is in score points (HP + 0.5 x damage, +-50 terminal).
 HONEST_ROOT_NET = os.environ.get("HONEST_ROOT_NET", "")
 HONEST_ROOT_C = float(os.environ.get("HONEST_ROOT_C", "0"))
+# HONEST_GAMMA_BOSS / HONEST_ROLL_CAP_BOSS (default 0 = off, unchanged): per-action discount and play-out step cap for the
+# root 1-ply search in BOSS fights only. With gamma 0.97 per action a result 100 actions away counts ~5%; a longer horizon
+# lets the search credit multi-turn boss plans.
+HONEST_GAMMA_BOSS = float(os.environ.get("HONEST_GAMMA_BOSS", "0"))
+HONEST_ROLL_CAP_BOSS = int(os.environ.get("HONEST_ROLL_CAP_BOSS", "0"))
+HONEST_GAMMA_ELITE = float(os.environ.get("HONEST_GAMMA_ELITE", "0"))      # same, ELITE fights only (default 0 = off)
+HONEST_ROLL_CAP_ELITE = int(os.environ.get("HONEST_ROLL_CAP_ELITE", "0"))
 # HONEST_ROOT_AS=<npz> (default off): the root prior pi comes from an afterstate scorer (exi_as.ASNet) instead of
 # HONEST_ROOT_NET: every legal action is played once in one sampled (determinized) copy and scored from the visible obs.
 HONEST_ROOT_AS = os.environ.get("HONEST_ROOT_AS", "")
@@ -668,8 +675,13 @@ def make_honest(base, GAMMA, TOPK, ROLL_CAP):
                                                         [] if last is None else [int(v) for v in last],
                                                         self._vnet(), HONEST_DEPTH, HONEST_VSCALE)
                 else:
+                    g_, cap_ = GAMMA, ROLL_CAP
+                    if room == "BOSS" and not getattr(self, "_in_rollout", False):
+                        g_ = HONEST_GAMMA_BOSS or GAMMA; cap_ = HONEST_ROLL_CAP_BOSS or ROLL_CAP
+                    elif room == "ELITE" and not getattr(self, "_in_rollout", False):
+                        g_ = HONEST_GAMMA_ELITE or GAMMA; cap_ = HONEST_ROLL_CAP_ELITE or ROLL_CAP
                     scores, _ = slaythespire.rollout_qb(e.gc, e.bc, legal, dets, self._cnet(), 0,
-                                                        GAMMA, ROLL_CAP, clair,
+                                                        g_, cap_, clair,
                                                         [] if last is None else [int(v) for v in last])
                 best, bq = legal[0], -1e18
                 use_pv = POTION_VALUE > 0 and not getattr(self, "_in_rollout", False)

@@ -1,0 +1,20 @@
+held-out boss fights (sim_logs/boss_horizon_a2 + sim_logs/boss_horizon_a3), identical starts, honest K=64 root: n=224
+  base    won 167 (74.6%)  HP left 0.327  potions left 0.78  79 s/fight
+  g99     won 179 (79.9%)  HP left 0.384  potions left 0.68  80 s/fight   vs base: flips 4/16 p=0.012
+  g995    won 177 (79.0%)  HP left 0.395  potions left 0.62  79 s/fight   vs base: flips 4/14 p=0.031
+  A2 AUTOMATON           n= 42  base 32  g99 36  g995 34
+  A2 CHAMP               n= 41  base 33  g99 35  g995 35
+  A2 COLLECTOR           n= 37  base 26  g99 28  g995 28
+  A3 AWAKENED_ONE        n= 33  base 24  g99 27  g995 27
+  A3 DONU_AND_DECA       n= 39  base 29  g99 28  g995 28
+  A3 TIME_EATER          n= 32  base 23  g99 25  g995 25
+BEST g99
+A = eval500_rl11_main
+B = eval500_rl11_g99
+shared seeds: 500
+wins   A 232 (46.4%, 95% CI 42.1-50.8%)   B 237 (47.4%, 95% CI 43.1-51.8%)
+win flips: A-only 54, B-only 59  -> exact McNemar p = 0.707
+avg floor A 42.42  B 42.80   paired diff B-A = +0.38  (bootstrap 95% CI -0.40 .. +1.16)
+
+outcome          A     B    B-A
+1000-seed paired rl11_main vs rl11_g99: n=1000 wins 466 vs 490, flips 108/132, McNemar p=0.1375

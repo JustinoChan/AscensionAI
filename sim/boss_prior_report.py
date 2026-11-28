@@ -1,5 +1,5 @@
 import json, glob, math, collections, sys
-names = ["base", "c2", "c5", "c10", "c20", "c5roll", "c3roll", "c10roll", "asK"]
+names = ["base", "c2", "c5", "c10", "c20", "c5roll", "c3roll", "c10roll", "asK", "k128", "k256", "g99", "g995"]
 import sys as _s
 names = [m for m in names if all(m in x for x in [json.load(open(f)) for d in _s.argv[1:] for f in glob.glob(d + "/seed_*.json")] if "base" in x)]
 R = [r for f in sys.argv[1:] for r in (json.load(open(x)) for x in glob.glob(f + "/seed_*.json")) if "base" in r]

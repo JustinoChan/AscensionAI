@@ -21,11 +21,25 @@ import slaythespire as S
 _LOSS = S.GameOutcome.PLAYER_LOSS
 _UND = S.GameOutcome.UNDECIDED
 GATE_ACT = int(os.environ.get("GATE_ACT", "2"))
+GATE_ROOM = os.environ.get("GATE_ROOM", "BOSS")   # BOSS (default) or ELITE: first fight of that room type in the act
 NET = os.environ.get("PRIOR_NET", "nets/exi1/rollout.npz")
 VARIANTS = [("base", {})] + [("c%g" % c, {"HONEST_ROOT_NET": NET, "HONEST_ROOT_C": c}) for c in (2.0, 5.0, 10.0, 20.0)] +            [("c5roll", {"HONEST_ROOT_NET": NET, "HONEST_ROOT_C": 5.0, "_ROLL": NET})]
 if os.environ.get("PRIOR_CSWEEP"):   # c sweep around c=5, all with NET as root prior + play-out policy
     VARIANTS = [("base", {"HONEST_ROOT_NET": NET, "HONEST_ROOT_C": 5.0, "_ROLL": NET})] +                [("c%groll" % c, {"HONEST_ROOT_NET": NET, "HONEST_ROOT_C": c, "_ROLL": NET}) for c in (3.0, 10.0)]
-if os.environ.get("PRIOR_AS"):   # afterstate prior (HONEST_ROOT_AS) vs exi1 obs-only prior; both c=5 with exi1 play-outs
+if os.environ.get("PRIOR_HORIZON_ELITE"):   # elite-only horizon with the mainline prior: gamma 0.97 vs 0.99 vs 0.995 + cap 400
+    VARIANTS = [("base", {"HONEST_ROOT_NET": NET, "HONEST_ROOT_C": 5.0, "_ROLL": NET}),
+                ("g99", {"HONEST_ROOT_NET": NET, "HONEST_ROOT_C": 5.0, "_ROLL": NET, "HONEST_GAMMA_ELITE": 0.99}),
+                ("g995", {"HONEST_ROOT_NET": NET, "HONEST_ROOT_C": 5.0, "_ROLL": NET, "HONEST_GAMMA_ELITE": 0.995, "HONEST_ROLL_CAP_ELITE": 400})]
+elif os.environ.get("PRIOR_HORIZON"):   # boss-only horizon with the mainline prior: gamma 0.97 (base) vs 0.99 vs 0.995 + cap 400
+    VARIANTS = [("base", {"HONEST_ROOT_NET": NET, "HONEST_ROOT_C": 5.0, "_ROLL": NET}),
+                ("g99", {"HONEST_ROOT_NET": NET, "HONEST_ROOT_C": 5.0, "_ROLL": NET, "HONEST_GAMMA_BOSS": 0.99}),
+                ("g995", {"HONEST_ROOT_NET": NET, "HONEST_ROOT_C": 5.0, "_ROLL": NET, "HONEST_GAMMA_BOSS": 0.995, "HONEST_ROLL_CAP_BOSS": 400})]
+elif os.environ.get("PRIOR_KBOSS"):   # boss-fight search budget with the mainline prior: K=64 vs 128 vs 256 (c=5, NET prior + play-outs)
+    _kb = lambda k: dict(H.HONEST_K_BY_ROOM, BOSS=k)
+    VARIANTS = [("base", {"HONEST_ROOT_NET": NET, "HONEST_ROOT_C": 5.0, "_ROLL": NET}),
+                ("k128", {"HONEST_ROOT_NET": NET, "HONEST_ROOT_C": 5.0, "_ROLL": NET, "HONEST_K_BY_ROOM": _kb(128)}),
+                ("k256", {"HONEST_ROOT_NET": NET, "HONEST_ROOT_C": 5.0, "_ROLL": NET, "HONEST_K_BY_ROOM": _kb(256)})]
+elif os.environ.get("PRIOR_AS"):   # afterstate prior (HONEST_ROOT_AS) vs exi1 obs-only prior; both c=5 with exi1 play-outs
     _B = os.environ.get("PRIOR_BASE_NET", NET)
     VARIANTS = [("base", {"HONEST_ROOT_NET": _B, "HONEST_ROOT_AS": "", "HONEST_ROOT_C": 5.0, "_ROLL": _B}),
                 ("c5roll", {"HONEST_ROOT_NET": _B, "HONEST_ROOT_AS": os.environ["PRIOR_AS"], "HONEST_ROOT_C": 5.0, "_ROLL": _B})] +                ([("asK", {"HONEST_ROOT_NET": _B, "HONEST_ROOT_AS": os.environ["PRIOR_AS"], "HONEST_ROOT_C": 5.0, "_ROLL": _B,
@@ -58,7 +72,7 @@ def run(seed):
 
     def hooked():
         gc = ev.env.gc
-        if (not getattr(ev, "_in_rollout", False) and str(gc.cur_room).split(".")[-1] == "BOSS" and int(gc.act) == GATE_ACT
+        if (not getattr(ev, "_in_rollout", False) and str(gc.cur_room).split(".")[-1] == GATE_ROOM and int(gc.act) == GATE_ACT
                 and ev.env.in_combat):
             snap = ev._hsnap(); ctr = ev.__dict__.get("_hctr", 0)
             res.update(seed=seed, act=int(gc.act), boss=str(gc.encounter).split(".")[-1], hp_in=int(ev.env.bc.player.cur_hp),

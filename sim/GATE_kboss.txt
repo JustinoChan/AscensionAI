@@ -1,0 +1,19 @@
+held-out boss fights (sim_logs/boss_kboss_a2 + sim_logs/boss_kboss_a3), identical starts, honest K=64 root: n=231
+  base    won 177 (76.6%)  HP left 0.350  potions left 0.94  111 s/fight
+  k128    won 186 (80.5%)  HP left 0.357  potions left 1.02  401 s/fight   vs base: flips 10/19 p=0.136
+  k256    won 180 (77.9%)  HP left 0.353  potions left 0.90  1061 s/fight   vs base: flips 11/14 p=0.690
+  A2 AUTOMATON           n= 45  base 33  k128 39  k256 37
+  A2 CHAMP               n= 40  base 33  k128 32  k256 35
+  A2 COLLECTOR           n= 36  base 32  k128 31  k256 29
+  A3 AWAKENED_ONE        n= 33  base 24  k128 30  k256 27
+  A3 DONU_AND_DECA       n= 38  base 26  k128 28  k256 26
+  A3 TIME_EATER          n= 39  base 29  k128 26  k256 26
+BEST k128
+A = eval500_rl11_main
+B = eval500_rl11_kb128
+shared seeds: 500
+wins   A 232 (46.4%, 95% CI 42.1-50.8%)   B 230 (46.0%, 95% CI 41.7-50.4%)
+win flips: A-only 64, B-only 62  -> exact McNemar p = 0.929
+avg floor A 42.42  B 42.12   paired diff B-A = -0.30  (bootstrap 95% CI -1.08 .. +0.48)
+
+outcome          A     B    B-A
